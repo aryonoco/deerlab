@@ -85,7 +85,7 @@
     "--security-opt=no-new-privileges:true"
   ],
 
-  "initializeCommand": "docker volume rm deerlab-vscode-server deerlab-vscode-extensions 2>/dev/null || true",
+  "initializeCommand": "mkdir -p \"${HOME}/.config/sops/age\" \"${HOME}/.ssh\" && docker volume rm deerlab-vscode-server deerlab-vscode-extensions 2>/dev/null || true",
   "onCreateCommand": "bash .devcontainer/scripts/on-create.sh",
   "postCreateCommand": "bash .devcontainer/scripts/post-create.sh",
   "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
