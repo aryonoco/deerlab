@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# p10k instant prompt must precede any console output
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# antidote plugin manager — https://antidote.sh/
+source "${ZDOTDIR:-$HOME}/.antidote/antidote.zsh"
+antidote load
+
+# zsh-autosuggestions
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#666666"
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+
+ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets)
+ZSH_HIGHLIGHT_MAXLENGTH=512
+
+# fzf keybindings: Ctrl+R history, Ctrl+T files, Alt+C directories
+eval "$(fzf --zsh)"
+export FZF_DEFAULT_OPTS="--height 40% --layout=reverse --border --info=inline"
+export FZF_DEFAULT_COMMAND="fd --type f --hidden --follow --exclude .git"
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+export FZF_ALT_C_COMMAND="fd --type d --hidden --follow --exclude .git"
+
+export ZSHZ_DATA="${HOME}/.z"
+
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' menu select
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*:descriptions' format '%F{yellow}-- %d --%f'
+
+export EDITOR='nano'
+export VISUAL='nano'
+export GIT_EDITOR='nano'
+
+if command -v code &>/dev/null; then
+  export EDITOR='code --wait'
+  export VISUAL='code --wait'
+fi
+
+HISTSIZE=50000
+SAVEHIST=50000
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_SAVE_NO_DUPS
+setopt SHARE_HISTORY
+setopt AUTO_CD
+setopt AUTO_PUSHD
+
+# --- OpenTofu aliases ---
+alias tofui='tofu init'
+alias tofup='tofu plan'
+alias tofua='tofu apply'
+alias tofud='tofu destroy'
+alias tofuv='tofu validate'
+alias tofuf='tofu fmt -recursive'
+alias tofuo='tofu output'
+alias tofus='tofu state list'
+alias tofuss='tofu state show'
+alias tofuw='tofu workspace'
+alias tofuwl='tofu workspace list'
+alias tofuws='tofu workspace select'
+
+# --- Trivy / terraform-docs aliases ---
+alias tfscan='trivy config .'
+alias tfscanmed='trivy config . --severity MEDIUM,HIGH,CRITICAL'
+alias tfscanhigh='trivy config . --severity HIGH,CRITICAL'
+alias tofudocs='terraform-docs markdown table .'
+alias tofudocsmd='terraform-docs markdown .'
+
+# --- Ansible aliases ---
+alias ap='ansible-playbook'
+alias av='ansible-vault'
+alias ave='ansible-vault edit'
+alias avv='ansible-vault view'
+alias avc='ansible-vault create'
+alias al='ansible-lint'
+alias ag='ansible-galaxy'
+alias agi='ansible-galaxy install -r requirements.yml'
+
+# --- GitHub CLI aliases ---
+alias ghpr='gh pr list'
+alias ghprc='gh pr create'
+alias ghprv='gh pr view'
+alias ghprs='gh pr status'
+alias ghis='gh issue list'
+alias ghic='gh issue create'
+alias ghiv='gh issue view'
+alias ghra='gh repo view --web'
+
+# --- uv aliases ---
+alias uvs='uv sync --all-extras'
+alias uvl='uv lock'
+alias uvr='uv run'
+alias uvt='uv tool list'
+alias uva='uv add'
+alias uvad='uv add --dev'
+
+# --- Just aliases ---
+alias j='just'
+alias jl='just --list'
+
+# --- SOPS shortcuts ---
+alias se='sops --encrypt --in-place'
+alias sd='sops --decrypt'
+alias sde='sops'
+
+# --- Functions ---
+
+# Extract TF_VAR_state_passphrase from SOPS-encrypted secrets
+tofuenv() {
+    export TF_VAR_state_passphrase
+    TF_VAR_state_passphrase=$(sops -d --extract '["tofu_state_passphrase"]' \
+        /workspaces/deerlab/inventory/group_vars/proxmox/secrets.sops.yaml)
+    echo "TF_VAR_state_passphrase set from SOPS"
+}
+
+# mirrors the CI validation pipeline for local pre-push checks
+tofucheck() {
+    echo "=== Formatting ===" && tofu fmt -check -recursive
+    echo "=== Validating ===" && cd /workspaces/deerlab/tofu && tofu validate
+    echo "=== Linting ===" && tflint --config=/workspaces/deerlab/.tflint.hcl --chdir=/workspaces/deerlab/tofu
+    echo "=== Security Scan ===" && trivy config . --severity HIGH,CRITICAL
+}
+
+tofupo() {
+    tofu plan -out="${1:-tofuplan}" "${@:2}"
+}
+
+tofuao() {
+    tofu apply "${1:-tofuplan}"
+}
+
+tofuready() {
+    tofuenv
+    cd /workspaces/deerlab/tofu && tofu init -upgrade && tofu validate && tofu plan
+}
+
+tofuworkspace() {
+    tofu workspace show
+}
+
+tofufmtall() {
+    tofu fmt -recursive
+}
+
+tofuouts() {
+    tofu output -json | jq -r 'keys[]'
+}
+
+infoctx() {
+    echo "=== Infrastructure Context ==="
+    echo "Tofu WS:   $(cd /workspaces/deerlab/tofu && tofu workspace show 2>/dev/null || echo 'N/A')"
+    echo "SOPS key:  $([ -f "${SOPS_AGE_KEY_FILE:-}" ] && echo 'Present' || echo 'Missing')"
+    echo "Git:       $(git branch --show-current 2>/dev/null || echo 'N/A')"
+}
+
+infrahelp() {
+    cat << 'EOF'
+=== Quick Reference ===
+Tofu:     tofup (plan) | tofua (apply) | tofucheck (validate) | tofuready (init+plan)
+          tofuenv (load passphrase) | tofupo (plan -out) | tofuao (apply saved)
+Ansible:  ap (playbook) | ave (vault edit) | al (lint) | agi (galaxy install)
+SOPS:     se (encrypt) | sd (decrypt) | sde (edit)
+GitHub:   ghpr (pr list) | ghprc (pr create) | ghprv (pr view) | ghprs (pr status) | ghra (repo web)
+uv:       uvs (sync) | uvl (lock) | uvr (run) | uvt (tool list) | uva (add) | uvad (add --dev)
+Just:     j (just) | jl (just --list)
+Trivy:    tfscan (scan) | tfscanmed (med+) | tfscanhigh (high+)
+Docs:     tofudocs (table) | tofudocsmd (full markdown)
+Helpers:  infoctx (context) | infrahelp (this) | tofucheck (validate all) | tofuready (init+plan)
+EOF
+}
+
+[ -f /workspaces/deerlab/.env ] && source /workspaces/deerlab/.env
+
+# p10k theme config (generated by `p10k configure`)
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

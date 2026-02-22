@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Base setup for Debian Trixie LXC containers
+    description: >
+      Bootstraps a Debian 13 Trixie unprivileged LXC container with
+      a service user (with subuid/subgid for rootless Podman), base
+      packages, sysctl hardening, /tmp as tmpfs, unattended security
+      upgrades, and loginctl linger for the service user. Reusable
+      for all future containers.
+    options:
+      lxc_base_service_user:
+        type: str
+        required: true
+        description: >
+          Name of the service user to create inside the container.
+          Used for rootless Podman and application workloads.
+      lxc_base_service_user_uid:
+        type: int
+        description: >
+          UID for the service user inside the container.
+      lxc_base_subuid_start:
+        type: int
+        description: >
+          Start of the subuid/subgid range allocated to the service
+          user inside the container for rootless Podman.
+      lxc_base_subuid_count:
+        type: int
+        description: >
+          Size of the subuid/subgid range for the service user.
+      lxc_base_packages:
+        type: list
+        elements: str
+        description: >
+          Base packages to install via apt.

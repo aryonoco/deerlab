@@ -1,0 +1,252 @@
+{
+  "name": "deerlab",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/deerlab",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/deerlab,type=bind,consistency=cached",
+
+  "containerUser": "vscode",
+  "remoteUser": "vscode",
+
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": false,
+      "configureZshAsDefaultShell": true,
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000",
+      "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/mise:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "nodeGypDependencies": false
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.13"
+    }
+  },
+
+  "mounts": [
+    {
+      "source": "deerlab-gh-config-${devcontainerId}",
+      "target": "/home/vscode/.config/gh",
+      "type": "volume"
+    },
+    {
+      "source": "deerlab-tofu-cache-${devcontainerId}",
+      "target": "/home/vscode/.opentofu.d/plugin-cache",
+      "type": "volume"
+    },
+    {
+      "source": "deerlab-mise-data-${devcontainerId}",
+      "target": "/home/vscode/.local/share/mise",
+      "type": "volume"
+    },
+    {
+      "source": "${localEnv:HOME}${localEnv:USERPROFILE}/.ssh",
+      "target": "/home/vscode/.ssh",
+      "type": "bind"
+    },
+    {
+      "source": "${localEnv:HOME}${localEnv:USERPROFILE}/.config/sops/age",
+      "target": "/home/vscode/.config/sops/age",
+      "type": "bind"
+    }
+  ],
+
+  "containerEnv": {
+    "TF_PLUGIN_CACHE_DIR": "/home/vscode/.opentofu.d/plugin-cache",
+    "TOFU_PLUGIN_CACHE_DIR": "/home/vscode/.opentofu.d/plugin-cache",
+    "MISE_DATA_DIR": "/home/vscode/.local/share/mise",
+    "MISE_STATE_DIR": "/home/vscode/.local/share/mise/state",
+    "MISE_TRUSTED_CONFIG_PATHS": "/workspaces",
+    "MISE_YES": "1",
+    "SOPS_AGE_KEY_FILE": "/home/vscode/.config/sops/age/keys.txt",
+    "CHECKPOINT_DISABLE": "true",
+    "DO_NOT_TRACK": "1",
+    "TZ": "UTC",
+    "EDITOR": "nano",
+    "VISUAL": "nano",
+    "ANSIBLE_CONFIG": "/workspaces/deerlab/ansible.cfg"
+  },
+
+  "runArgs": [
+    "--init",
+    "--hostname", "deerlab",
+    "--cap-drop=ALL",
+    "--cap-add=NET_BIND_SERVICE",
+    "--cap-add=DAC_OVERRIDE",
+    "--security-opt=no-new-privileges:true"
+  ],
+
+  "initializeCommand": "docker volume rm deerlab-vscode-server deerlab-vscode-extensions 2>/dev/null || true",
+  "onCreateCommand": "bash .devcontainer/scripts/on-create.sh",
+  "postCreateCommand": "bash .devcontainer/scripts/post-create.sh",
+  "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
+  "updateContentCommand": "echo 'Content updated -- rebuild container for system upgrades'",
+  "waitFor": "onCreateCommand",
+  "shutdownAction": "stopContainer",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "opentofu.vscode-opentofu",
+        "hashicorp.hcl",
+        "terraform-linters.tflint",
+        "redhat.ansible",
+        "samuelcolvin.jinjahtml",
+        "github.vscode-pull-request-github",
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "redhat.vscode-yaml",
+        "esbenp.prettier-vscode",
+        "EditorConfig.EditorConfig",
+        "usernamehw.errorlens",
+        "Gruntfuggly.todo-tree",
+        "timonwong.shellcheck",
+        "streetsidesoftware.code-spell-checker",
+        "DavidAnson.vscode-markdownlint",
+        "foxundermoon.shell-format",
+        "hverlin.mise-vscode",
+        "tombi-toml.tombi",
+        "nefrob.vscode-just-syntax"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "zsh": { "path": "/bin/zsh", "args": ["-l"] },
+          "bash": { "path": "/bin/bash" }
+        },
+
+        "editor.formatOnSave": true,
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.rulers": [80, 120],
+        "editor.bracketPairColorization.enabled": true,
+        "editor.guides.bracketPairs": "active",
+
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "files.trimFinalNewlines": true,
+        "files.exclude": {
+          "**/.opentofu": true,
+          "**/.terraform": true
+        },
+        "files.associations": {
+          "*.toml": "toml",
+          "*.hcl": "terraform",
+          "*.tftest.hcl": "terraform",
+          ".tflint.hcl": "terraform",
+          ".terraform.lock.hcl": "json",
+          "*.json.j2": "jinja-json",
+          "*.xml.j2": "jinja-xml",
+          "*.yml.j2": "jinja-yaml",
+          "*.yaml.j2": "jinja-yaml",
+          "*.sh.j2": "jinja-shell",
+          "*.py.j2": "jinja-py",
+          "*.j2": "jinja",
+          "justfile": "makefile",
+          "*.just": "makefile"
+        },
+        "search.exclude": {
+          "**/.opentofu": true,
+          "**/.terraform": true
+        },
+        "files.watcherExclude": {
+          "**/.opentofu/**": true,
+          "**/.terraform/**": true
+        },
+
+        "[opentofu]": {
+          "editor.defaultFormatter": "opentofu.vscode-opentofu",
+          "editor.formatOnSave": true,
+          "editor.tabSize": 2
+        },
+        "[opentofu-vars]": {
+          "editor.defaultFormatter": "opentofu.vscode-opentofu"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[yaml]": {
+          "editor.defaultFormatter": "redhat.vscode-yaml"
+        },
+        "[terraform]": {
+          "editor.defaultFormatter": "opentofu.vscode-opentofu",
+          "editor.formatOnSave": true,
+          "editor.tabSize": 2
+        },
+        "[ansible]": {
+          "editor.tabSize": 2,
+          "editor.insertSpaces": true,
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "redhat.ansible"
+        },
+        "[shellscript]": {
+          "editor.defaultFormatter": "foxundermoon.shell-format",
+          "editor.tabSize": 2
+        },
+        "[markdown]": {
+          "editor.wordWrap": "on"
+        },
+        "[toml]": {
+          "editor.defaultFormatter": "tombi-toml.tombi",
+          "editor.formatOnSave": true
+        },
+
+        "opentofu.languageServer.enable": true,
+        "opentofu.codelens.referenceCount": true,
+        "opentofu.experimentalFeatures.validateOnSave": true,
+        "opentofu.experimentalFeatures.prefillRequiredFields": true,
+
+        "ansible.python.interpreterPath": "/home/vscode/.local/share/uv/tools/ansible/bin/python3",
+        "ansible.validation.enabled": true,
+        "ansible.validation.lint.enabled": true,
+        "ansible.validation.lint.path": "/home/vscode/.local/bin/ansible-lint",
+        "ansible.ansible.path": "/home/vscode/.local/bin/ansible",
+
+        "gitlens.currentLine.enabled": true,
+        "gitlens.codeLens.enabled": true,
+
+        "errorLens.enabledDiagnosticLevels": ["error", "warning"],
+
+        "todo-tree.general.tags": ["TODO", "FIXME", "HACK", "SECURITY"],
+
+        "cSpell.language": "en-GB",
+        "cSpell.enabledFileTypes": {
+          "terraform": true,
+          "hcl": true,
+          "markdown": true,
+          "yaml": true,
+          "json": true,
+          "shellscript": true,
+          "toml": true
+        },
+        "cSpell.words": [
+          "opentofu",
+          "tofu",
+          "tflint",
+          "trivy",
+          "tfvars",
+          "tfstate",
+          "devcontainer",
+          "proxmox",
+          "carlpett",
+          "sops"
+        ]
+      }
+    }
+  },
+
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb",
+    "storage": "32gb"
+  }
+}

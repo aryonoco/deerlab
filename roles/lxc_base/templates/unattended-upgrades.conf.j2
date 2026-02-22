@@ -1,0 +1,11 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+// {{ ansible_managed }}
+
+// Debian security origins only
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+
+// No automatic reboot
+Unattended-Upgrade::Automatic-Reboot "false";

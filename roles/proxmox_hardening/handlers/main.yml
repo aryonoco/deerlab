@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate sshd config
+  ansible.builtin.command:
+    cmd: sshd -t
+  changed_when: false
+
+- name: Restart sshd
+  ansible.builtin.service:
+    name: sshd
+    state: restarted
+
+- name: Reload nftables
+  ansible.builtin.service:
+    name: nftables
+    state: reloaded
+
+- name: Restart proxmox-firewall
+  ansible.builtin.service:
+    name: proxmox-firewall
+    state: restarted
+
+- name: Restart fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+
+- name: Restart auditd  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: service auditd restart
+  changed_when: true
+
+- name: Reboot for auditd
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+  when: _proxmox_hardening_audit_rules is defined and _proxmox_hardening_audit_rules.changed | default(false)
+
+- name: Restart pveproxy
+  ansible.builtin.service:
+    name: pveproxy
+    state: restarted

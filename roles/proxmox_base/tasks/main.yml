@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Add no-subscription repo (deb822 format)
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+    dest: /etc/apt/sources.list.d/pve-no-subscription.sources
+    mode: "0644"
+    backup: true
+  when: proxmox_base_no_subscription_repo
+  notify: Update apt cache
+
+- name: Remove enterprise repo (legacy .list)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.list
+    state: absent
+  when: proxmox_base_no_subscription_repo
+  notify: Update apt cache
+
+- name: Disable enterprise repo (deb822 .sources)
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: https://enterprise.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-enterprise
+      Enabled: no
+    dest: /etc/apt/sources.list.d/pve-enterprise.sources
+    mode: "0644"
+    backup: true
+  when: proxmox_base_no_subscription_repo
+  notify: Update apt cache
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    LC_ALL: C
+  register: _proxmox_base_apt_upgrade
+  changed_when: >-
+    _proxmox_base_apt_upgrade.stdout is defined
+    and '0 upgraded' not in (_proxmox_base_apt_upgrade.stdout | default(''))
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ proxmox_base_timezone }}"
+
+- name: Apply sysctl settings
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    reload: true
+  loop: "{{ proxmox_base_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Generate state encryption passphrase
+  ansible.builtin.include_tasks: state_passphrase.yml
+
+- name: Manage API token
+  ansible.builtin.include_tasks: api_token.yml
+
+- name: Set root password
+  ansible.builtin.include_tasks: root_password.yml

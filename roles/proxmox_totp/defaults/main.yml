@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+proxmox_totp_enabled: true
+proxmox_totp_user: "root@pam"
+proxmox_totp_description: "ansible-managed"
+proxmox_totp_issuer: "PVE"
+proxmox_totp_digits: 6
+proxmox_totp_period: 30
+proxmox_totp_recovery_enabled: true
+proxmox_totp_recovery_description: "ansible-managed-recovery"

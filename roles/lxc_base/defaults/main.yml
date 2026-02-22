@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+lxc_base_service_user: ""
+lxc_base_service_user_uid: 1000
+lxc_base_subuid_start: 100000
+lxc_base_subuid_count: 65536
+
+lxc_base_packages:
+  - curl
+  - ca-certificates
+  - dbus
+  - systemd-container

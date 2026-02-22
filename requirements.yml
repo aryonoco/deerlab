@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+collections:
+  - name: community.general
+    version: ">=12.0.0,<13.0.0"
+  - name: ansible.posix
+    version: ">=2.1.0,<3.0.0"
+  - name: community.sops
+    version: ">=2.2.0,<3.0.0"
+  - name: containers.podman
+    version: ">=1.16.0,<2.0.0"
+  - name: community.proxmox
+    version: ">=1.5.0,<2.0.0"

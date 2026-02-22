@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+proxmox_lxc_config_sdn_bridges:
+  - vnetpub
+  - vnetsvc

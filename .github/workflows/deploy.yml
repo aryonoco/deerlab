@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'playbooks/**'
+      - 'roles/**'
+      - 'inventory/**'
+      - 'tofu/**'
+      - 'ansible.cfg'
+      - 'requirements.yml'
+      - 'mise.toml'
+      - '.sops.yaml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      deploy_ansible:
+        description: 'Run Ansible playbooks'
+        type: boolean
+        default: true
+      deploy_tofu:
+        description: 'Run OpenTofu apply'
+        type: boolean
+        default: true
+      ansible_tags:
+        description: 'Ansible tags (comma-separated, empty = all)'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Dry run (Ansible check mode, OpenTofu plan only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      TF_IN_AUTOMATION: true
+      ANSIBLE_FORCE_COLOR: "true"
+    steps:
+      # ─── Setup ────────────────────────────────────────────────────────
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Setup tools via mise
+        uses: jdx/mise-action@v3
+
+      - name: Install SOPS and age
+        run: |
+          curl -LsSo /tmp/sops "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64"
+          sudo install -m 755 /tmp/sops /usr/local/bin/sops
+          curl -LsS "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" | tar xz -C /tmp
+          sudo install -m 755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+
+      - name: Install Python tools
+        run: mise run install-python-tools
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ed25519
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+      - name: Setup SOPS
+        run: |
+          mkdir -p ~/.config/sops/age
+          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          chmod 600 ~/.config/sops/age/keys.txt
+
+      - name: Extract state passphrase
+        run: |
+          PASSPHRASE=$(sops -d --extract '["tofu_state_passphrase"]' inventory/group_vars/proxmox/secrets.sops.yaml)
+          echo "::add-mask::$PASSPHRASE"
+          echo "TF_VAR_state_passphrase=$PASSPHRASE" >> "$GITHUB_ENV"
+
+      # ─── Ansible ───────────────────────────────────────────────────────
+
+      - name: Ansible — Run site.yml
+        if: inputs.deploy_ansible != 'false'
+        run: >-
+          ansible-playbook playbooks/site.yml
+          ${{ inputs.ansible_tags != '' && format('--tags {0}', inputs.ansible_tags) || '' }}
+          ${{ inputs.dry_run == 'true' && '--check --diff' || '' }}
+
+      # ─── OpenTofu ────────────────────────────────────────────────────
+
+      - name: Pull latest changes
+        if: inputs.deploy_tofu != 'false'
+        run: git pull --ff-only
+
+      - name: OpenTofu init
+        if: inputs.deploy_tofu != 'false'
+        run: |
+          mkdir -p ~/.terraform.d/plugin-cache
+          cd tofu && tofu init
+
+      - name: OpenTofu plan
+        if: inputs.deploy_tofu != 'false'
+        run: |
+          cd tofu
+          tofu plan -no-color | tee plan.txt
+          {
+            echo '### OpenTofu Plan'
+            echo '<details><summary>Click to expand</summary>'
+            echo ''
+            echo '```'
+            head -200 plan.txt
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: OpenTofu apply
+        if: inputs.deploy_tofu != 'false' && inputs.dry_run != 'true'
+        run: cd tofu && tofu apply -auto-approve
+
+      # ─── Commit State ────────────────────────────────────────────────
+
+      - name: Commit state changes
+        if: inputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tofu/terraform.tfstate tofu/terraform.tfstate.backup 2>/dev/null || true
+          git add inventory/group_vars/proxmox/secrets.sops.yaml 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update state and secrets"
+            git push
+          fi

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+proxmox_acme_enabled: true
+proxmox_acme_account_name: "default"
+proxmox_acme_directory: "https://acme-v02.api.letsencrypt.org/directory"
+proxmox_acme_dns_provider: "porkbun"
+proxmox_acme_dns_plugin_name: "porkbun-dns"
+proxmox_acme_validation_delay: 30

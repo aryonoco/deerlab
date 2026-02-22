@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Deploy Caddy reverse proxy as rootless Podman Quadlet
+    description: >
+      Installs Podman and deploys Caddy as a rootless container using
+      Quadlet systemd units. Creates a named volume for persistent
+      ACME certificate data, bind-mounts the Caddyfile from inventory
+      data, and enables podman-auto-update for automatic image pulls.
+      Runs inside an unprivileged LXC with nesting enabled.
+    options:
+      lxc_caddy_user:
+        type: str
+        description: >
+          Name of the service user that runs rootless Podman. Must
+          match lxc_base_service_user from the lxc_base role.
+      lxc_caddy_uid:
+        type: int
+        description: >
+          UID of the service user. Must match lxc_base_service_user_uid
+          from the lxc_base role.
+      lxc_caddy_image:
+        type: str
+        description: >
+          OCI image reference for Caddy. Uses major version tag for
+          automatic minor/patch updates via podman-auto-update.
+      lxc_caddy_caddyfile_content:
+        type: str
+        required: true
+        description: >
+          Full Caddyfile content as a string. Passed from inventory
+          data so the role stays generic.

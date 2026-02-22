@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Check existing DNS plugin
+  ansible.builtin.command:
+    cmd: "pvenode acme plugin config {{ proxmox_acme_dns_plugin_name }} --output-format json"
+  register: _proxmox_acme_plugin_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Configure DNS plugin
+  no_log: true
+  when: >-
+    _proxmox_acme_plugin_check.rc != 0
+    or (_proxmox_acme_plugin_check.stdout | from_json).data.strip().split('\n') | sort | list
+       != proxmox_acme_dns_credentials.items() | map('join', '=') | sort | list
+  block:
+    - name: Write DNS credentials to temp file
+      ansible.builtin.copy:
+        content: |
+          {% for key, value in proxmox_acme_dns_credentials.items() %}
+          {{ key }}={{ value }}
+          {% endfor %}
+        dest: /tmp/.acme_dns_credentials
+        mode: "0600"
+      changed_when: false
+
+    - name: Add DNS plugin
+      ansible.builtin.command:
+        cmd: >-
+          pvenode acme plugin add dns {{ proxmox_acme_dns_plugin_name }}
+          --api {{ proxmox_acme_dns_provider }}
+          --data /tmp/.acme_dns_credentials
+          --validation-delay {{ proxmox_acme_validation_delay }}
+      register: _proxmox_acme_plugin_create
+      changed_when: _proxmox_acme_plugin_create.rc == 0
+      when: _proxmox_acme_plugin_check.rc != 0
+
+    - name: Update DNS plugin credentials
+      ansible.builtin.command:
+        cmd: >-
+          pvenode acme plugin set {{ proxmox_acme_dns_plugin_name }}
+          --data /tmp/.acme_dns_credentials
+      register: _proxmox_acme_plugin_update
+      changed_when: _proxmox_acme_plugin_update.rc == 0
+      when: _proxmox_acme_plugin_check.rc == 0
+
+  always:
+    - name: Remove temporary credentials file
+      ansible.builtin.file:
+        path: /tmp/.acme_dns_credentials
+        state: absent
+      changed_when: false

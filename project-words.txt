@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# OpenTofu / Terraform
+carlpett
+hashicorp
+hcl
+opentofu
+terraform-docs
+tflint
+tfstate
+tftest
+tfvars
+tofu
+
+# Proxmox / Homelab
+proxmox
+lxc
+nftables
+sysctl
+auditd
+postfix
+vmbr
+pvesh
+porkbun
+acme
+letsencrypt
+
+# SOPS / Encryption
+sops
+aes
+gcm
+pbkdf
+age
+
+# Infrastructure Tools
+devcontainer
+devcontainers
+healthcheck
+healthchecks
+justfile
+pre-commit
+trivy
+
+# Ansible
+ansible
+playbook
+playbooks
+yamllint
+
+# Common IaC Terms
+backend
+backends
+firewalls
+localhost
+nameservers
+cidr
+fqdn
+
+# Security
+oidc
+rbac
+
+# British English Variants
+denormalised
+deserialisation
+deserialise
+materialisation
+materialise
+normalised
+orchestration
+orchestrator
+serialisation
+serialise
+
+# DevOps & CI/CD
+cspell
+dependabot
+ghcr
+
+# VS Code Extensions (author names)
+eamodio
+errorlens
+esbenp
+foxundermoon
+Gruntfuggly
+hverlin
+mhutchie
+timonwong
+tombi
+usernamehw
+
+# GitHub Actions / CI terms
+chdir
+exitcode
+linters
+vars
+
+# Project-specific terms
+deerlab
+trixie
+bookworm
+venv
+pipelining
+idempotently
+antidote
+tmpfs
+noatime
+nodev
+nosuid
+nofail
+nofile
+oneshot
+timezone
+
+# REUSE / SPDX
+cpal
+CPAL
+reuse
+REUSE
+spdx
+SPDX
+FileCopyrightText

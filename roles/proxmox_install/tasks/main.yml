@@ -1,0 +1,321 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Phase 0 — Fact gathering & validation
+
+- name: Check if Proxmox VE is already installed
+  ansible.builtin.command:
+    cmd: dpkg-query -W proxmox-ve
+  register: _proxmox_install_dpkg_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Set PVE installed fact
+  ansible.builtin.set_fact:
+    _proxmox_install_pve_installed: "{{ _proxmox_install_dpkg_check.rc == 0 }}"
+
+- name: Fail if proxmox_install_domain is not defined
+  ansible.builtin.fail:
+    msg: >-
+      proxmox_install_domain is not defined.
+      Set it in inventory/group_vars/proxmox/secrets.sops.yaml.
+  when: proxmox_install_domain is not defined
+
+- name: Fail if bridge variables are not defined
+  ansible.builtin.fail:
+    msg: >-
+      {{ item }} is not defined.
+      Set it in inventory/group_vars/proxmox/secrets.sops.yaml.
+  when: lookup('ansible.builtin.vars', item, default='') | length == 0
+  loop:
+    - proxmox_install_bridge_address
+    - proxmox_install_bridge_netmask
+    - proxmox_install_bridge_subnet
+
+- name: Fail if postfix relay is set but credentials are missing
+  ansible.builtin.fail:
+    msg: >-
+      proxmox_install_postfix_relayhost is set but
+      {{ item }} is not defined. Provide relay credentials
+      in inventory/group_vars/proxmox/secrets.sops.yaml.
+  when:
+    - proxmox_install_postfix_relayhost | length > 0
+    - lookup('ansible.builtin.vars', item, default='') | length == 0
+  loop:
+    - proxmox_install_postfix_relay_user
+    - proxmox_install_postfix_relay_password
+
+- name: Detect primary network interface from default route
+  ansible.builtin.command:
+    cmd: ip -4 route show default
+  register: _proxmox_install_detected_iface
+  changed_when: false
+  check_mode: false
+  when: proxmox_install_primary_interface | length == 0
+
+- name: Set primary interface fact
+  ansible.builtin.set_fact:
+    _proxmox_install_iface: >-
+      {{ proxmox_install_primary_interface
+         if proxmox_install_primary_interface | length > 0
+         else _proxmox_install_detected_iface.stdout.split()[4] }}
+
+- name: Build FQDN fact
+  ansible.builtin.set_fact:
+    _proxmox_install_fqdn: "{{ inventory_hostname }}.{{ proxmox_install_domain }}"
+
+# Phase 0b — Remove APT configs managed by other roles to avoid syntax
+#            errors during apt operations. The hardening role will recreate
+#            this file with correct syntax in its own run.
+
+- name: Remove nag-removal APT hook (managed by proxmox_hardening)
+  ansible.builtin.file:
+    path: /etc/apt/apt.conf.d/99-pve-nosub-nag
+    state: absent
+  when: _proxmox_install_pve_installed | bool
+
+# Phase 1 — /etc/hosts
+
+- name: Set FQDN in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^\s*{{ ansible_facts["default_ipv4"]["address"] | regex_escape }}\s'
+    line: "{{ ansible_facts['default_ipv4']['address'] }} {{ _proxmox_install_fqdn }} {{ inventory_hostname }}"
+    state: present
+
+# Phase 2 — GPG key & temporary repo (skipped if PVE installed)
+
+- name: Disable enterprise repo (no subscription)
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: https://enterprise.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-enterprise
+      Enabled: no
+    dest: /etc/apt/sources.list.d/pve-enterprise.sources
+    mode: "0644"
+  when: not (_proxmox_install_pve_installed | bool)
+  notify: Update apt cache
+
+- name: Remove enterprise repo legacy list file
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.list
+    state: absent
+  when: not (_proxmox_install_pve_installed | bool)
+  notify: Update apt cache
+
+- name: Download Proxmox archive GPG keyring
+  ansible.builtin.get_url:
+    url: "{{ proxmox_install_gpg_key_url }}"
+    dest: /etc/apt/trusted.gpg.d/proxmox-archive-keyring.gpg
+    checksum: "{{ proxmox_install_gpg_key_checksum }}"
+    mode: "0644"
+  when: not (_proxmox_install_pve_installed | bool)
+  notify: Update apt cache
+
+- name: Add temporary PVE install repo (deb822 format)
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /etc/apt/trusted.gpg.d/proxmox-archive-keyring.gpg
+    dest: /etc/apt/sources.list.d/pve-install-repo.sources
+    mode: "0644"
+  when: not (_proxmox_install_pve_installed | bool)
+  notify: Update apt cache
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+# Phase 3 — System upgrade (skipped if PVE installed)
+
+- name: Full system upgrade
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: not (_proxmox_install_pve_installed | bool)
+
+# Phase 4 — Kernel install & reboot
+
+- name: Install Proxmox default kernel
+  ansible.builtin.apt:
+    name: proxmox-default-kernel
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: not (_proxmox_install_pve_installed | bool)
+
+- name: Check if running PVE kernel
+  ansible.builtin.set_fact:
+    _proxmox_install_on_pve_kernel: "{{ 'pve' in ansible_facts['kernel'] }}"
+
+- name: Reboot into PVE kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+  when: not (_proxmox_install_on_pve_kernel | bool)
+
+- name: Wait for connection after reboot
+  ansible.builtin.wait_for_connection:
+    timeout: 300
+  when: not (_proxmox_install_on_pve_kernel | bool)
+
+- name: Regather facts after reboot
+  ansible.builtin.setup:
+  when: not (_proxmox_install_on_pve_kernel | bool)
+
+# Phase 5 — Postfix preseed & PVE install
+
+- name: Preseed postfix configuration
+  ansible.builtin.debconf:
+    name: postfix
+    question: "{{ item.question }}"
+    vtype: "{{ item.vtype }}"
+    value: "{{ item.value }}"
+  loop:
+    - question: postfix/main_mailer_type
+      vtype: select
+      value: Satellite system
+    - question: postfix/relayhost
+      vtype: string
+      value: "{{ proxmox_install_postfix_relayhost }}"
+    - question: postfix/mailname
+      vtype: string
+      value: "{{ _proxmox_install_fqdn }}"
+    - question: postfix/destinations
+      vtype: string
+      value: "{{ _proxmox_install_fqdn }}, localhost"
+  loop_control:
+    label: "{{ item.question }}"
+  when:
+    - not (_proxmox_install_pve_installed | bool)
+    - proxmox_install_postfix_relayhost | length > 0
+
+- name: Install Proxmox VE and supporting packages
+  ansible.builtin.apt:
+    name:
+      - proxmox-ve
+      - postfix
+      - open-iscsi
+      - chrony
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: not (_proxmox_install_pve_installed | bool)
+
+# Phase 6 — Postfix relay auth (skipped if relayhost empty or postfix not yet installed)
+
+- name: Check if postfix is installed
+  ansible.builtin.stat:
+    path: /etc/postfix/main.cf
+  register: _proxmox_install_postfix_stat
+  check_mode: false
+
+- name: Set postfix installed fact
+  ansible.builtin.set_fact:
+    _proxmox_install_postfix_installed: "{{ _proxmox_install_postfix_stat.stat.exists }}"
+
+- name: Write postfix SASL credentials
+  ansible.builtin.copy:
+    content: "{{ proxmox_install_postfix_relayhost }} {{ proxmox_install_postfix_relay_user }}:{{ proxmox_install_postfix_relay_password }}"
+    dest: /etc/postfix/sasl_passwd
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - proxmox_install_postfix_relayhost | length > 0
+    - _proxmox_install_postfix_installed
+  no_log: true
+  notify: Postmap sasl_passwd
+
+- name: Configure postfix SASL relay authentication
+  ansible.builtin.blockinfile:
+    path: /etc/postfix/main.cf
+    marker: "# {mark} ANSIBLE MANAGED - SASL relay auth"
+    block: |
+      smtp_sasl_auth_enable = yes
+      smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+      smtp_sasl_security_options = noanonymous
+      smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+      smtp_tls_security_level = encrypt
+      smtp_tls_wrappermode = {{ 'yes' if ':465' in proxmox_install_postfix_relayhost else 'no' }}
+  when:
+    - proxmox_install_postfix_relayhost | length > 0
+    - _proxmox_install_postfix_installed
+  notify: Restart postfix
+
+# Phase 7 — Cleanup
+
+- name: Remove Debian stock kernel metapackage
+  ansible.builtin.apt:
+    name: linux-image-amd64
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: _proxmox_install_remove_kernel
+
+- name: Remove os-prober
+  ansible.builtin.apt:
+    name: os-prober
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: _proxmox_install_remove_osprober
+
+- name: Update GRUB configuration
+  ansible.builtin.command:
+    cmd: update-grub
+  changed_when: true
+  when: _proxmox_install_remove_kernel is changed or _proxmox_install_remove_osprober is changed
+
+- name: Remove temporary PVE install repo
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-install-repo.sources
+    state: absent
+  notify: Update apt cache
+
+# Phase 8 — NAT bridge (via PVE API)
+
+- name: Check if vmbr0 exists
+  ansible.builtin.command:
+    cmd: pvesh get /nodes/{{ inventory_hostname }}/network/vmbr0 --output-format json
+  register: _proxmox_install_vmbr0_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Create vmbr0 bridge via PVE API
+  ansible.builtin.command:
+    cmd: >-
+      pvesh create /nodes/{{ inventory_hostname }}/network
+      --iface vmbr0
+      --type bridge
+      --cidr {{ proxmox_install_bridge_address }}/{{ proxmox_install_bridge_netmask }}
+      --bridge_ports ''
+      --autostart 1
+  when: _proxmox_install_vmbr0_check.rc != 0
+  changed_when: true
+  notify: Apply pending network changes
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Remove stale interfaces.d bridge config
+  ansible.builtin.file:
+    path: /etc/network/interfaces.d/vmbr0.cfg
+    state: absent
+
+- name: Enable IPv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+    reload: true

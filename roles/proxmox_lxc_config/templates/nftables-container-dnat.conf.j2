@@ -1,0 +1,16 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+
+destroy table ip container_dnat
+table ip container_dnat {
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+{% for container in proxmox_lxc_config_containers %}
+{% for rule in container.dnat | default([]) %}
+    iifname "{{ ansible_default_ipv4.interface }}" tcp dport {{ rule.port }} dnat to {{ rule.dest }}
+{% endfor %}
+{% endfor %}
+  }
+}

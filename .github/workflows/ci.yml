@@ -1,0 +1,340 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Licensing
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  reuse:
+    name: REUSE Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@v6
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OpenTofu
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  opentofu-lint:
+    name: OpenTofu Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TF_IN_AUTOMATION: true
+      TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup tools via mise
+        uses: jdx/mise-action@v3
+
+      - name: Cache OpenTofu providers
+        uses: actions/cache@v5
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tofu-providers-${{ hashFiles('tofu/.terraform.lock.hcl') }}
+          restore-keys: tofu-providers-
+
+      - name: Create provider cache directory
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Check formatting
+        run: tofu fmt -check -recursive -diff tofu/
+
+      - name: Validate configuration
+        run: |
+          cd tofu
+          TF_VAR_state_passphrase="ci-placeholder-passphrase" tofu init -backend=false
+          TF_VAR_state_passphrase="ci-placeholder-passphrase" tofu validate
+
+      - name: Init TFLint plugins
+        run: tflint --init --config=.tflint.hcl
+
+      - name: TFLint
+        run: tflint --config="$(pwd)/.tflint.hcl" --chdir=tofu
+
+  opentofu-plan:
+    name: OpenTofu Plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TF_IN_AUTOMATION: true
+      TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup tools via mise
+        uses: jdx/mise-action@v3
+
+      - name: Cache OpenTofu providers
+        uses: actions/cache@v5
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tofu-providers-${{ hashFiles('tofu/.terraform.lock.hcl') }}
+          restore-keys: tofu-providers-
+
+      - name: Create provider cache directory
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Install SOPS and age
+        run: |
+          curl -LsSo /tmp/sops "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64"
+          sudo install -m 755 /tmp/sops /usr/local/bin/sops
+          curl -LsS "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" | tar xz -C /tmp
+          sudo install -m 755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ed25519
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+      - name: Setup SOPS
+        run: |
+          mkdir -p ~/.config/sops/age
+          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          chmod 600 ~/.config/sops/age/keys.txt
+
+      - name: Extract state passphrase
+        run: |
+          PASSPHRASE=$(sops -d --extract '["tofu_state_passphrase"]' inventory/group_vars/proxmox/secrets.sops.yaml)
+          echo "::add-mask::$PASSPHRASE"
+          echo "TF_VAR_state_passphrase=$PASSPHRASE" >> "$GITHUB_ENV"
+
+      - name: Plan
+        id: plan
+        run: |
+          cd tofu
+          tofu init
+          tofu plan -no-color 2>&1 | tee plan.txt
+        continue-on-error: true
+
+      - name: Post plan to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('tofu/plan.txt', 'utf8');
+            if (plan.length > 60000) {
+              plan = plan.substring(0, 60000) + '\n... (truncated)';
+            }
+            const body = [
+              '### OpenTofu Plan',
+              '',
+              '<details><summary>Click to expand</summary>',
+              '',
+              '```',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('OpenTofu Plan')
+            );
+            const params = { owner: context.repo.owner, repo: context.repo.repo, body };
+            if (botComment) {
+              await github.rest.issues.updateComment({ ...params, comment_id: botComment.id });
+            } else {
+              await github.rest.issues.createComment({ ...params, issue_number: context.issue.number });
+            }
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Ansible
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run ansible-lint
+        uses: ansible/ansible-lint@v26
+        with:
+          requirements_file: requirements.yml
+          args: --profile=production
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Linting
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: ShellCheck
+        run: |
+          find . -name '*.sh' \
+            -not -path './collections/*' \
+            -not -path './.terraform/*' \
+            -not -path '*/.terraform/*' \
+            -not -path './.devcontainer/config/*' \
+            -print0 | xargs -0 shellcheck
+
+  markdownlint:
+    name: Markdownlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@v22
+        with:
+          globs: "**/*.md !collections/**"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Security
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@0.34.0
+        with:
+          scan-type: config
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          skip-dirs: collections
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Spell Check (advisory)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  spell-check:
+    name: Spell Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run cspell
+        uses: streetsidesoftware/cspell-action@v8
+        with:
+          config: cspell.json
+          incremental_files_only: true
+          inline: warning
+          strict: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Hygiene
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  hygiene:
+    name: Hygiene Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check version file sync
+        run: |
+          MISE_VERSION=$(grep '^opentofu' mise.toml | sed 's/.*= *"//;s/".*//')
+          FILE_VERSION=$(cat .opentofu-version)
+          if [ "$MISE_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::.opentofu-version ($FILE_VERSION) does not match mise.toml ($MISE_VERSION)"
+            exit 1
+          fi
+
+      - name: Check trailing whitespace
+        run: |
+          if git --no-pager grep -n '[[:blank:]]$' -- ':!*.md' ':!*.lock' ':!collections/*'; then
+            echo "::error::Trailing whitespace found"
+            exit 1
+          fi
+
+      - name: Check end-of-file newlines
+        run: |
+          failed=0
+          while IFS= read -r f; do
+            if [ ! -s "$f" ] || ! LC_ALL=C grep -Iq . "$f"; then continue; fi
+            if [ "$(tail -c 1 "$f" | wc -l)" -eq 0 ]; then
+              echo "::error file=$f::Missing final newline"
+              failed=1
+            fi
+          done < <(git ls-files -- ':!collections/*' ':!*.tfstate')
+          exit "$failed"
+
+      - name: Install yamllint
+        run: pip install --break-system-packages --quiet yamllint
+
+      - name: Validate YAML syntax
+        run: yamllint -d "{rules:{}}" $(git ls-files '*.yml' '*.yaml' -- ':!collections/*')
+
+      - name: Validate JSON syntax
+        run: |
+          failed=0
+          while IFS= read -r f; do
+            if ! python3 -c "import sys,json;json.load(open(sys.argv[1]))" "$f" 2>&1; then
+              echo "::error file=$f::Invalid JSON"
+              failed=1
+            fi
+          done < <(git ls-files '*.json' -- ':!collections/*')
+          exit "$failed"
+
+      - name: Check merge conflict markers
+        run: |
+          if git --no-pager grep -n -E '^(<{7}|={7}|>{7})' -- ':!collections/*' ':!LICENSE*' ':!LICENSES/*'; then
+            echo "::error::Merge conflict markers found"
+            exit 1
+          fi

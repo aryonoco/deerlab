@@ -1,0 +1,68 @@
+---
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+repos:
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: mise exec -- shellcheck
+        language: system
+        types: [shell]
+        files: \.sh$
+        exclude: ^(\.devcontainer/config/|collections/)
+
+  - repo: local
+    hooks:
+      - id: tofu-fmt
+        name: tofu fmt
+        entry: mise exec -- tofu fmt -write=true
+        language: system
+        files: \.tf$
+        exclude: (\.terraform/|^collections/)
+
+  - repo: local
+    hooks:
+      - id: tflint
+        name: tflint
+        entry: >-
+          mise exec -- bash -c
+          'ROOT=$(git rev-parse --show-toplevel);
+          tflint --init --config="$ROOT/.tflint.hcl" >/dev/null 2>&1;
+          tflint --config="$ROOT/.tflint.hcl" --chdir="$ROOT/tofu"'
+        language: system
+        files: ^tofu/.*\.tf$
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: markdownlint-fix
+        name: markdownlint --fix
+        entry: mise exec -- markdownlint-cli2 --fix
+        language: system
+        types: [markdown]
+        exclude: ^collections/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: (\.md$|^collections/)
+      - id: end-of-file-fixer
+        exclude: (^collections/|\.tfstate$|^LICENSE)
+      - id: check-yaml
+        exclude: ^collections/
+      - id: check-json
+        exclude: ^collections/
+      - id: check-merge-conflict
+        exclude: (^collections/|^LICENSE)
+
+  - repo: local
+    hooks:
+      - id: reuse-lint
+        name: REUSE compliance
+        entry: reuse lint
+        language: system
+        pass_filenames: false
+        always_run: true

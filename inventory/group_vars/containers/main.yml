@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+ansible_connection: community.proxmox.proxmox_pct_remote
+ansible_python_interpreter: /usr/bin/python3
+ansible_become: false
+ansible_become_method: su

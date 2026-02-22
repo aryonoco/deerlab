@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Host-level LXC container preparation on Proxmox VE
+    description: >
+      Configures the Proxmox host for LXC containers: sets a wide
+      subuid/subgid range for root (covering all current and future
+      containers), deploys DNAT nftables rules for inbound port
+      forwarding, and starts containers created by OpenTofu. Runs
+      on the proxmox host group before any container-level roles.
+    options:
+      proxmox_lxc_config_subuid_start:
+        type: int
+        description: >
+          Start of the wide subuid/subgid range for root on the
+          host. Covers all container idmaps.
+      proxmox_lxc_config_subuid_count:
+        type: int
+        description: >
+          Size of the wide subuid/subgid range for root. Must be
+          large enough to cover all container idmaps (current and
+          future).
+      proxmox_lxc_config_sdn_bridges:
+        type: list
+        elements: str
+        description: >
+          List of SDN bridge names (e.g., vnetpub, vnetsvc) that must
+          be active before operating on containers. If any bridge is
+          missing, ifreload -a runs once to activate all SDN bridges.
+      proxmox_lxc_config_containers:
+        type: list
+        elements: dict
+        description: >
+          List of container definitions. Each dict has vmid (int),
+          optional features (string of comma-separated feature flags
+          for pct set --features, e.g. "fuse=1,keyctl=1,nesting=1"),
+          optional idmaps (list of lxc.idmap strings for custom
+          UID/GID mapping), optional dnat (list of port/dest
+          mappings for DNAT rules), and optional tun (bool, enables
+          /dev/net/tun passthrough for rootless Podman networking). Features are managed here because
+          Proxmox requires root@pam auth for keyctl/fuse flags, which
+          API tokens cannot provide. Idmap management is handled here
+          because the bpg provider v0.96.0 does not yet support native
+          idmap blocks.

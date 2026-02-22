@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Harden a Proxmox VE 9 host (Debian 13 Trixie)
+    description: >
+      Applies security hardening across 7 phases: SSH (OpenSSH 10.0
+      drop-in with post-quantum key exchange), kernel/sysctl (CIS
+      baselines + PVE-aware tuning), host firewall (PVE nftables
+      backend + custom DNAT), fail2ban (sshd + pvedaemon jails),
+      automatic security updates (unattended-upgrades with Proxmox
+      origins), audit logging (auditd with PVE-specific watches),
+      and Proxmox-specific tweaks (subscription nag removal).
+      Each phase is independently toggled. PVE cluster firewall
+      rules (API-managed) are handled by OpenTofu — see tofu/.
+    options:
+      proxmox_hardening_ssh_enabled:
+        type: bool
+        description: >
+          Enable Phase 1 SSH hardening. Deploys a drop-in at
+          /etc/ssh/sshd_config.d/50-hardening.conf with modern
+          crypto, key-only auth, and PerSourcePenalties.
+      proxmox_hardening_sysctl_enabled:
+        type: bool
+        description: >
+          Enable Phase 2 kernel/sysctl hardening. Writes tuned
+          parameters to /etc/sysctl.d/90-hardening.conf.
+      proxmox_hardening_firewall_enabled:
+        type: bool
+        description: >
+          Enable Phase 3 nftables service for container DNAT rules.
+          Writes /etc/nftables.conf with flush ruleset and an
+          include for the container DNAT config.
+      proxmox_hardening_nftables_pve_firewall:
+        type: bool
+        description: >
+          Install the proxmox-firewall package and enable the
+          nftables backend for PVE firewall. Host input filtering
+          is managed by PVE cluster firewall rules (tofu/firewall.tf)
+          instead of a custom nftables inet filter table.
+      proxmox_hardening_fail2ban_enabled:
+        type: bool
+        description: >
+          Enable Phase 4 fail2ban. Installs fail2ban with sshd
+          and proxmox pvedaemon jails.
+      proxmox_hardening_auto_updates_enabled:
+        type: bool
+        description: >
+          Enable Phase 5 automatic security updates via
+          unattended-upgrades with Proxmox origins.
+      proxmox_hardening_auditd_enabled:
+        type: bool
+        description: >
+          Enable Phase 6 audit logging. Installs auditd with
+          PVE-specific file watches and immutable rules.
+      proxmox_hardening_pve_nosub_nag_enabled:
+        type: bool
+        description: >
+          Enable Phase 7 subscription nag removal from the PVE web UI.
+          Deploys an APT hook to re-apply the patch after package updates.
+      proxmox_hardening_ssh_permit_root_login:
+        type: str
+        description: >
+          Value for PermitRootLogin in sshd_config. Use
+          prohibit-password to allow key-based root login
+          (required for Ansible and PVE clustering).
+      proxmox_hardening_ssh_max_auth_tries:
+        type: int
+        description: >
+          Maximum SSH authentication attempts per connection.
+      proxmox_hardening_ssh_login_grace_time:
+        type: int
+        description: >
+          Seconds before unauthenticated SSH connections are
+          dropped.
+      proxmox_hardening_ssh_client_alive_interval:
+        type: int
+        description: >
+          Seconds between SSH keepalive messages to the client.
+      proxmox_hardening_ssh_client_alive_count_max:
+        type: int
+        description: >
+          Number of missed client keepalives before disconnect.
+      proxmox_hardening_ssh_max_sessions:
+        type: int
+        description: >
+          Maximum number of open SSH sessions per connection.
+      proxmox_hardening_ssh_kex_algorithms:
+        type: list
+        elements: str
+        description: >
+          Ordered list of key exchange algorithms for sshd.
+          Joined with commas in the drop-in config. Defaults
+          include post-quantum (ML-KEM, SNTRUP) and classical
+          (Curve25519, DH) algorithms.
+      proxmox_hardening_ssh_ciphers:
+        type: list
+        elements: str
+        description: >
+          Ordered list of ciphers for sshd. 256-bit variants
+          listed before 128-bit for quantum resistance.
+      proxmox_hardening_ssh_macs:
+        type: list
+        elements: str
+        description: >
+          Ordered list of MAC algorithms for sshd. Only
+          ETM (encrypt-then-MAC) variants are included.
+      proxmox_hardening_ssh_host_key_algorithms:
+        type: list
+        elements: str
+        description: >
+          Ordered list of host key algorithms for sshd.
+          Ed25519 preferred over RSA. Cert variants included
+          for environments using SSH certificates.
+      proxmox_hardening_sysctl:
+        type: dict
+        description: >
+          Dictionary of sysctl key-value pairs written to
+          /etc/sysctl.d/90-hardening.conf. Override individual
+          keys or add new ones. Deliberately omits
+          net.ipv4.ip_forward (managed by proxmox_install).
+      proxmox_hardening_ipv6_disable:
+        type: bool
+        description: >
+          Disable IPv6 entirely via sysctl. Written to a
+          separate file /etc/sysctl.d/91-disable-ipv6.conf.
+      proxmox_hardening_fail2ban_sshd_maxretry:
+        type: int
+        description: >
+          Maximum SSH auth failures before fail2ban bans the IP.
+          Set to 5 because PerSourcePenalties is the primary
+          brute-force defense.
+      proxmox_hardening_fail2ban_sshd_bantime:
+        type: int
+        description: >
+          Seconds an IP stays banned by fail2ban for SSH failures.
+      proxmox_hardening_fail2ban_proxmox_maxretry:
+        type: int
+        description: >
+          Maximum PVE web UI auth failures before fail2ban bans
+          the IP.
+      proxmox_hardening_fail2ban_proxmox_bantime:
+        type: int
+        description: >
+          Seconds an IP stays banned by fail2ban for PVE web UI
+          auth failures.
+      proxmox_hardening_auto_updates_mail:
+        type: str
+        description: >
+          Email address for unattended-upgrades notifications.
+          Leave empty to disable email reporting.
+      proxmox_hardening_auto_updates_mail_report:
+        type: str
+        description: >
+          When to send email reports. Valid values are
+          on-change, only-on-error, always.
+      proxmox_hardening_auto_updates_auto_reboot:
+        type: bool
+        description: >
+          Allow unattended-upgrades to automatically reboot
+          when a package requires it. Off by default — dangerous
+          on hypervisors with running VMs.
+      proxmox_hardening_auto_updates_reboot_time:
+        type: str
+        description: >
+          Time of day (HH:MM) for automatic reboot if
+          auto_reboot is enabled.
+      proxmox_hardening_auditd_max_log_file:
+        type: int
+        description: >
+          Maximum size in MB per auditd log file before rotation.
+      proxmox_hardening_auditd_num_logs:
+        type: int
+        description: >
+          Number of rotated auditd log files to keep.
+          Total budget = max_log_file * num_logs.

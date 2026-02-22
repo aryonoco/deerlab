@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Phase toggles — set to false to skip individual phases
+proxmox_hardening_ssh_enabled: true
+proxmox_hardening_sysctl_enabled: true
+proxmox_hardening_firewall_enabled: true
+proxmox_hardening_fail2ban_enabled: true
+proxmox_hardening_auto_updates_enabled: true
+proxmox_hardening_auditd_enabled: true
+proxmox_hardening_pve_nosub_nag_enabled: true
+
+# Phase 1 — SSH hardening
+proxmox_hardening_ssh_permit_root_login: "prohibit-password"
+proxmox_hardening_ssh_max_auth_tries: 3
+proxmox_hardening_ssh_login_grace_time: 60
+proxmox_hardening_ssh_client_alive_interval: 300
+proxmox_hardening_ssh_client_alive_count_max: 3
+proxmox_hardening_ssh_max_sessions: 4
+
+proxmox_hardening_ssh_kex_algorithms:
+  - mlkem768x25519-sha256
+  - sntrup761x25519-sha512@openssh.com
+  - sntrup761x25519-sha512
+  - curve25519-sha256
+  - curve25519-sha256@libssh.org
+  - diffie-hellman-group18-sha512
+  - diffie-hellman-group16-sha512
+  - diffie-hellman-group-exchange-sha256
+
+proxmox_hardening_ssh_ciphers:
+  - chacha20-poly1305@openssh.com
+  - aes256-gcm@openssh.com
+  - aes256-ctr
+  - aes192-ctr
+  - aes128-gcm@openssh.com
+  - aes128-ctr
+
+proxmox_hardening_ssh_macs:
+  - hmac-sha2-512-etm@openssh.com
+  - hmac-sha2-256-etm@openssh.com
+  - umac-128-etm@openssh.com
+
+proxmox_hardening_ssh_host_key_algorithms:
+  - ssh-ed25519-cert-v01@openssh.com
+  - ssh-ed25519
+  - rsa-sha2-512-cert-v01@openssh.com
+  - rsa-sha2-256-cert-v01@openssh.com
+  - rsa-sha2-512
+  - rsa-sha2-256
+
+# Phase 2 — Kernel/sysctl hardening
+proxmox_hardening_sysctl:
+  # Network hardening
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.default.rp_filter: 2
+  net.ipv4.conf.all.rp_filter: 2
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.secure_redirects: 0
+  net.ipv4.conf.default.secure_redirects: 0
+  net.ipv4.conf.all.log_martians: 0
+  net.ipv4.conf.default.log_martians: 0
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv4.tcp_fin_timeout: 10
+  net.ipv4.tcp_rfc1337: 1
+  net.ipv4.tcp_syn_retries: 2
+  net.ipv4.tcp_synack_retries: 2
+  net.ipv4.tcp_orphan_retries: 2
+  # Kernel hardening
+  kernel.randomize_va_space: 2
+  kernel.dmesg_restrict: 1
+  kernel.kptr_restrict: 2
+  kernel.sysrq: 176
+  kernel.yama.ptrace_scope: 2
+  # CIS benchmark additions
+  kernel.unprivileged_bpf_disabled: 1
+  net.core.bpf_jit_harden: 2
+  fs.protected_hardlinks: 1
+  fs.protected_symlinks: 1
+  fs.protected_fifos: 2
+  fs.protected_regular: 2
+  fs.suid_dumpable: 0
+  # PVE-specific tuning
+  vm.swappiness: 10
+  kernel.sched_autogroup_enabled: 0
+  # IPv6 hardening
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.default.accept_source_route: 0
+
+proxmox_hardening_ipv6_disable: false
+
+# Phase 3 — Host firewall (nftables)
+proxmox_hardening_nftables_pve_firewall: true
+
+# Phase 4 — Fail2ban
+proxmox_hardening_fail2ban_sshd_maxretry: 5
+proxmox_hardening_fail2ban_sshd_bantime: 3600
+proxmox_hardening_fail2ban_proxmox_maxretry: 5
+proxmox_hardening_fail2ban_proxmox_bantime: 3600
+
+# Phase 5 — Automatic security updates
+proxmox_hardening_auto_updates_mail: ""
+proxmox_hardening_auto_updates_mail_report: "on-change"
+proxmox_hardening_auto_updates_auto_reboot: false
+proxmox_hardening_auto_updates_reboot_time: "03:00"
+
+# Phase 6 — Audit logging
+proxmox_hardening_auditd_max_log_file: 50
+proxmox_hardening_auditd_num_logs: 10

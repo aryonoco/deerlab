@@ -1,0 +1,253 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Install oath-toolkit for TOTP code generation
+  ansible.builtin.apt:
+    name: oathtool
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_totp_enabled
+
+- name: Determine if TOTP secret is already persisted
+  ansible.builtin.set_fact:
+    _proxmox_totp_secret_persisted: >-
+      {{ proxmox_totp_secret is defined }}
+  when: proxmox_totp_enabled
+
+- name: Check SOPS config exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _proxmox_totp_sops_config_stat
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_secret_persisted | bool)
+
+- name: Fail if SOPS config is missing
+  ansible.builtin.fail:
+    msg: >-
+      SOPS config '.sops.yaml' not found at repo root.
+      Copy .sops.yaml.example to .sops.yaml and set your age public key.
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_secret_persisted | bool)
+    - not _proxmox_totp_sops_config_stat.stat.exists
+
+- name: Query existing TFA entries
+  ansible.builtin.command:
+    cmd: >-
+      pvesh get /access/tfa/{{ proxmox_totp_user }}
+      --output-format json
+  register: _proxmox_totp_existing_tfa
+  changed_when: false
+  failed_when: false
+  when: proxmox_totp_enabled
+
+- name: Parse TFA entries
+  ansible.builtin.set_fact:
+    _proxmox_totp_tfa_entries: >-
+      {{ (_proxmox_totp_existing_tfa.stdout | default('[]') | from_json)
+         if (_proxmox_totp_existing_tfa.rc | default(1)) == 0
+         else [] }}
+  when: proxmox_totp_enabled
+
+- name: Determine if TOTP is already registered
+  ansible.builtin.set_fact:
+    _proxmox_totp_registered: >-
+      {{ _proxmox_totp_tfa_entries
+         | selectattr('type', 'equalto', 'totp')
+         | selectattr('description', 'defined')
+         | selectattr('description', 'equalto', proxmox_totp_description)
+         | list | length > 0 }}
+  when: proxmox_totp_enabled
+
+- name: Determine if recovery keys are already registered
+  ansible.builtin.set_fact:
+    _proxmox_totp_recovery_registered: >-
+      {{ _proxmox_totp_tfa_entries
+         | selectattr('type', 'equalto', 'recovery')
+         | list | length > 0 }}
+  when:
+    - proxmox_totp_enabled
+    - proxmox_totp_recovery_enabled
+
+- name: Fail if TOTP exists in Proxmox but secret is not in SOPS
+  ansible.builtin.fail:
+    msg: >-
+      A TOTP entry for '{{ proxmox_totp_user }}' exists in Proxmox
+      (description: '{{ proxmox_totp_description }}') but proxmox_totp_secret
+      is not in inventory/group_vars/proxmox/secrets.sops.yaml.
+      The secret cannot be retrieved from Proxmox after registration.
+      Either: (a) manually add proxmox_totp_secret to secrets.sops.yaml
+      and encrypt with sops, or (b) delete the TFA entry via
+      'pvesh delete /access/tfa/{{ proxmox_totp_user }}/<entry-id>'
+      and re-run to generate a new secret.
+  when:
+    - proxmox_totp_enabled
+    - _proxmox_totp_registered | bool
+    - not (_proxmox_totp_secret_persisted | bool)
+
+- name: Generate TOTP secret
+  ansible.builtin.set_fact:
+    _proxmox_totp_secret: >-
+      {{ lookup('ansible.builtin.password',
+         '/dev/null chars=ascii_uppercase,234567 length=32') }}
+  no_log: true
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_registered | bool)
+    - not (_proxmox_totp_secret_persisted | bool)
+
+- name: Use persisted secret for re-registration
+  ansible.builtin.set_fact:
+    _proxmox_totp_secret: "{{ proxmox_totp_secret }}"
+  no_log: true
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_registered | bool)
+    - _proxmox_totp_secret_persisted | bool
+
+- name: Build otpauth URI
+  ansible.builtin.set_fact:
+    _proxmox_totp_uri: >-
+      otpauth://totp/{{ proxmox_totp_issuer }}:{{
+        proxmox_totp_user | urlencode
+      }}?secret={{ _proxmox_totp_secret
+      }}&issuer={{ proxmox_totp_issuer
+      }}&digits={{ proxmox_totp_digits
+      }}&period={{ proxmox_totp_period }}
+  no_log: true
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_registered | bool)
+    - _proxmox_totp_secret is defined
+
+- name: Register TOTP with Proxmox
+  when:
+    - proxmox_totp_enabled
+    - not (_proxmox_totp_registered | bool)
+    - _proxmox_totp_secret is defined
+  no_log: true
+  block:
+    - name: Generate TOTP verification code
+      ansible.builtin.command:
+        cmd: >-
+          oathtool --totp --base32
+          {{ _proxmox_totp_secret }}
+      register: _proxmox_totp_code
+      changed_when: false
+
+    - name: Create TOTP TFA entry
+      ansible.builtin.command:
+        cmd: >-
+          pvesh create /access/tfa/{{ proxmox_totp_user }}
+          --type totp
+          --description {{ proxmox_totp_description }}
+          --totp {{ _proxmox_totp_uri }}
+          --value {{ _proxmox_totp_code.stdout | trim }}
+      changed_when: true
+      failed_when: _proxmox_totp_create_result.rc != 0
+      register: _proxmox_totp_create_result
+
+- name: Register recovery keys
+  ansible.builtin.command:
+    cmd: >-
+      pvesh create /access/tfa/{{ proxmox_totp_user }}
+      --type recovery
+      --description {{ proxmox_totp_recovery_description }}
+  register: _proxmox_totp_recovery_result
+  changed_when: true
+  no_log: true
+  when:
+    - proxmox_totp_enabled
+    - proxmox_totp_recovery_enabled
+    - not (_proxmox_totp_recovery_registered | default(false) | bool)
+
+- name: Persist TOTP secret to encrypted secrets file
+  when:
+    - proxmox_totp_enabled
+    - _proxmox_totp_secret is defined
+    - not (_proxmox_totp_secret_persisted | bool)
+  no_log: true
+  block:
+    - name: Merge TOTP secret into existing secrets file
+      community.sops.sops_encrypt:
+        path: "{{ playbook_dir | dirname }}/inventory/group_vars/proxmox/secrets.sops.yaml"
+        content_yaml: >-
+          {{ lookup('community.sops.sops',
+             playbook_dir ~ '/../inventory/group_vars/proxmox/secrets.sops.yaml')
+             | from_yaml
+             | combine({'proxmox_totp_secret': _proxmox_totp_secret}) }}
+        force: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Confirm TOTP secret persisted
+      ansible.builtin.debug:
+        msg: >-
+          TOTP secret generated and encrypted in
+          inventory/group_vars/proxmox/secrets.sops.yaml.
+          Retrieve with 'just secrets-edit' to add to your authenticator app.
+
+  rescue:
+    - name: Display TOTP secret after SOPS write failure
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Failed to encrypt/write secrets file.
+          Save this TOTP secret -- it cannot be recovered from Proxmox:
+          {{ _proxmox_totp_secret }}
+
+    - name: Fail after displaying TOTP secret
+      ansible.builtin.fail:
+        msg: >-
+          SOPS persistence failed. The TOTP secret was displayed above.
+          Save it manually: add 'proxmox_totp_secret' to
+          inventory/group_vars/proxmox/secrets.sops.yaml and run:
+          sops --encrypt --in-place inventory/group_vars/proxmox/secrets.sops.yaml
+
+- name: Persist recovery keys to encrypted secrets file
+  when:
+    - proxmox_totp_enabled
+    - proxmox_totp_recovery_enabled
+    - _proxmox_totp_recovery_result is defined
+    - not (_proxmox_totp_recovery_result.skipped | default(false))
+  no_log: true
+  block:
+    - name: Merge recovery keys into existing secrets file
+      community.sops.sops_encrypt:
+        path: "{{ playbook_dir | dirname }}/inventory/group_vars/proxmox/secrets.sops.yaml"
+        content_yaml: >-
+          {{ lookup('community.sops.sops',
+             playbook_dir ~ '/../inventory/group_vars/proxmox/secrets.sops.yaml')
+             | from_yaml
+             | combine({'proxmox_totp_recovery_keys': _proxmox_totp_recovery_result.stdout}) }}
+        force: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Confirm recovery keys persisted
+      ansible.builtin.debug:
+        msg: >-
+          Recovery keys generated and encrypted in
+          inventory/group_vars/proxmox/secrets.sops.yaml.
+
+  rescue:
+    - name: Display recovery keys after SOPS write failure
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Failed to encrypt/write secrets file.
+          Save these recovery keys -- they cannot be recovered:
+          {{ _proxmox_totp_recovery_result.stdout }}
+
+    - name: Fail after displaying recovery keys
+      ansible.builtin.fail:
+        msg: >-
+          SOPS persistence failed. The recovery keys were displayed above.
+          Save them manually: add 'proxmox_totp_recovery_keys' to
+          inventory/group_vars/proxmox/secrets.sops.yaml and run:
+          sops --encrypt --in-place inventory/group_vars/proxmox/secrets.sops.yaml

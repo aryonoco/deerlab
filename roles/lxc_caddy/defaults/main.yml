@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+lxc_caddy_user: caddy
+lxc_caddy_uid: 1000
+lxc_caddy_image: "docker.io/library/caddy:2"
+lxc_caddy_caddyfile_content: ""
