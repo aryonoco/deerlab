@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Validation
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - lxc_base_service_user | length > 0
+    fail_msg: "lxc_base_service_user is required"
+
+# Phase 1 — Packages
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ lxc_base_packages }}"
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# Phase 2 — Service user
+
+- name: Create service user
+  ansible.builtin.user:
+    name: "{{ lxc_base_service_user }}"
+    uid: "{{ lxc_base_service_user_uid }}"
+    create_home: true
+    shell: /bin/bash
+
+- name: Set container subuid for service user
+  ansible.builtin.lineinfile:
+    path: /etc/subuid
+    regexp: "^{{ lxc_base_service_user }}:"
+    line: "{{ lxc_base_service_user }}:{{ lxc_base_subuid_start }}:{{ lxc_base_subuid_count }}"
+    create: true
+    mode: "0644"
+
+- name: Set container subgid for service user
+  ansible.builtin.lineinfile:
+    path: /etc/subgid
+    regexp: "^{{ lxc_base_service_user }}:"
+    line: "{{ lxc_base_service_user }}:{{ lxc_base_subuid_start }}:{{ lxc_base_subuid_count }}"
+    create: true
+    mode: "0644"
+
+# Phase 3 — Podman defaults (restrictive capabilities for all containers)
+
+- name: Create Podman config directory
+  ansible.builtin.file:
+    path: "/home/{{ lxc_base_service_user }}/.config/containers"
+    state: directory
+    owner: "{{ lxc_base_service_user }}"
+    group: "{{ lxc_base_service_user }}"
+    mode: "0755"
+
+- name: Deploy restrictive Podman defaults
+  ansible.builtin.template:
+    src: containers.conf.j2
+    dest: "/home/{{ lxc_base_service_user }}/.config/containers/containers.conf"
+    owner: "{{ lxc_base_service_user }}"
+    group: "{{ lxc_base_service_user }}"
+    mode: "0644"
+
+# Phase 4 — Sysctl hardening
+
+- name: Apply container sysctl parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-lxc-base.conf
+    sysctl_set: true
+    reload: true
+  loop: "{{ _lxc_base_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    _lxc_base_sysctl:
+      net.ipv4.ip_unprivileged_port_start: 1024
+      net.ipv4.conf.all.accept_redirects: 0
+      net.ipv4.conf.default.accept_redirects: 0
+      net.ipv4.conf.all.accept_source_route: 0
+      net.ipv4.conf.default.accept_source_route: 0
+      net.ipv4.conf.all.log_martians: 1
+      net.ipv4.conf.default.log_martians: 1
+      net.ipv4.tcp_syncookies: 1
+      net.ipv4.conf.all.rp_filter: 1
+      net.ipv4.conf.default.rp_filter: 1
+
+# Phase 4 — Filesystem hardening
+
+- name: Mount /tmp as tmpfs with hardened options
+  ansible.posix.mount:
+    path: /tmp
+    src: tmpfs
+    fstype: tmpfs
+    opts: noexec,nosuid,nodev
+    state: mounted
+
+# Phase 5 — Remove SSH (containers use pct exec, not SSH)
+
+- name: Stop and disable SSH
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  loop:
+    - ssh.socket
+    - ssh.service
+
+- name: Remove openssh-server
+  ansible.builtin.apt:
+    name: openssh-server
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Remove leftover SSH config files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/ssh/sshd_config.d/50-hardening.conf
+    - /etc/systemd/system/ssh.socket.d
+
+# Phase 6 — Unattended-upgrades
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Write unattended-upgrades local config
+  ansible.builtin.template:
+    src: unattended-upgrades.conf.j2
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    mode: "0644"
+
+# Phase 7 — D-Bus and machined (required for systemd user sessions via pct exec)
+
+- name: Enable D-Bus system bus
+  ansible.builtin.systemd_service:
+    name: dbus.service
+    enabled: true
+    state: started
+
+- name: Enable systemd-machined
+  ansible.builtin.systemd_service:
+    name: systemd-machined.service
+    enabled: true
+    state: started
+
+- name: Ensure user D-Bus socket starts with user sessions
+  ansible.builtin.file:
+    src: /usr/lib/systemd/user/dbus.socket
+    dest: /etc/systemd/user/sockets.target.wants/dbus.socket
+    state: link
+
+# Phase 8 — Linger
+
+- name: Check if linger is enabled for service user
+  ansible.builtin.stat:
+    path: "/var/lib/systemd/linger/{{ lxc_base_service_user }}"
+  register: _lxc_base_linger
+
+- name: Enable loginctl linger for service user
+  ansible.builtin.command:
+    cmd: "loginctl enable-linger {{ lxc_base_service_user }}"
+  changed_when: true
+  when: not _lxc_base_linger.stat.exists
+
+# Phase 9 — Bootstrap user D-Bus socket
+
+- name: Check if user D-Bus socket is active
+  ansible.builtin.stat:
+    path: "/run/user/{{ lxc_base_service_user_uid }}/bus"
+  register: _lxc_base_user_bus
+
+- name: Restart user manager to activate D-Bus socket
+  ansible.builtin.systemd_service:
+    name: "user@{{ lxc_base_service_user_uid }}.service"
+    state: restarted
+  when: not _lxc_base_user_bus.stat.exists

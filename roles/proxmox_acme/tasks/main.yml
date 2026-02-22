@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Derive FQDN for certificate
+  ansible.builtin.set_fact:
+    _proxmox_acme_fqdn: "{{ proxmox_acme_domain | default(inventory_hostname ~ '.' ~ proxmox_install_domain) }}"
+  when: proxmox_acme_enabled
+
+- name: Validate required ACME variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_acme_account_email is defined
+      - proxmox_acme_account_email | length > 0
+      - proxmox_acme_dns_credentials is defined
+      - proxmox_acme_dns_credentials | length > 0
+    fail_msg: >-
+      proxmox_acme_account_email and proxmox_acme_dns_credentials must be
+      defined in inventory/group_vars/proxmox/secrets.sops.yaml. See
+      secrets.sops.yaml.example for the expected keys.
+  when: proxmox_acme_enabled
+
+- name: Configure ACME account
+  ansible.builtin.include_tasks: account.yml
+  when: proxmox_acme_enabled
+
+- name: Configure DNS plugin
+  ansible.builtin.include_tasks: plugin.yml
+  when: proxmox_acme_enabled
+
+- name: Order certificate
+  ansible.builtin.include_tasks: certificate.yml
+  when: proxmox_acme_enabled

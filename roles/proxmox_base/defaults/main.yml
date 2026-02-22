@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+proxmox_base_no_subscription_repo: true
+proxmox_base_timezone: UTC
+
+proxmox_base_sysctl:
+  net.ipv4.ip_forward: 1
+
+proxmox_base_root_password_length: 32

@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Install Proxmox VE on a fresh Debian 13 Trixie host
+    description: >
+      Takes a fresh Debian 13 Trixie system and installs Proxmox VE 9.x
+      following the official wiki steps. Handles GPG key setup, kernel swap
+      with reboot, postfix satellite relay, cleanup, and NAT bridge creation.
+      Designed for cloud VPS environments.
+    options:
+      proxmox_install_domain:
+        type: str
+        required: true
+        description: >
+          Domain name for the host FQDN (inventory_hostname.domain).
+          Must be provided via SOPS secrets.
+      proxmox_install_bridge_address:
+        type: str
+        required: true
+        description: >
+          IP address for the vmbr0 bridge interface (e.g. 10.10.10.1).
+      proxmox_install_bridge_netmask:
+        type: str
+        required: true
+        description: >
+          CIDR netmask for the vmbr0 bridge subnet (e.g. 21).
+      proxmox_install_bridge_subnet:
+        type: str
+        required: true
+        description: >
+          Subnet in CIDR notation for NAT masquerade (e.g. 10.10.8.0/21).
+      proxmox_install_gpg_key_url:
+        type: str
+        description: >
+          URL to the Proxmox archive GPG keyring for Trixie.
+      proxmox_install_gpg_key_checksum:
+        type: str
+        description: >
+          Checksum for the GPG keyring file (sha256:...).
+      proxmox_install_primary_interface:
+        type: str
+        description: >
+          Primary network interface name. Auto-detected from the default
+          route if left empty.
+      proxmox_install_postfix_relayhost:
+        type: str
+        description: >
+          Postfix relay host (e.g. [smtp.example.com]:587).
+          Leave empty to skip relay configuration.
+      proxmox_install_postfix_relay_user:
+        type: str
+        description: >
+          SMTP username for postfix relay authentication.
+          Required when proxmox_install_postfix_relayhost is set.
+      proxmox_install_postfix_relay_password:
+        type: str
+        description: >
+          SMTP password for postfix relay authentication.
+          Required when proxmox_install_postfix_relayhost is set.

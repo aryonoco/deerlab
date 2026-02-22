@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Install Proxmox VE on Debian
+  ansible.builtin.import_playbook: install.yml
+
+- name: Bootstrap Proxmox host
+  ansible.builtin.import_playbook: bootstrap.yml
+
+- name: Harden Proxmox host
+  ansible.builtin.import_playbook: hardening.yml
+
+- name: Configure TOTP 2FA
+  ansible.builtin.import_playbook: totp.yml
+
+- name: Configure ACME certificates
+  ansible.builtin.import_playbook: acme.yml
+
+- name: Prepare host for LXC containers
+  ansible.builtin.import_playbook: lxc-prepare.yml
+
+- name: Configure Caddy reverse proxy container
+  ansible.builtin.import_playbook: caddy.yml

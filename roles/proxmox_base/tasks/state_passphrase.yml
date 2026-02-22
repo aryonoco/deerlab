@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Determine if passphrase is already persisted
+  ansible.builtin.set_fact:
+    _proxmox_base_passphrase_persisted: >-
+      {{ tofu_state_passphrase is defined }}
+
+- name: Check SOPS config exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _proxmox_base_sops_config_stat_pp
+  when: not (_proxmox_base_passphrase_persisted | bool)
+
+- name: Fail if SOPS config is missing
+  ansible.builtin.fail:
+    msg: >-
+      SOPS config '.sops.yaml' not found at repo root.
+      Copy .sops.yaml.example to .sops.yaml and set your age public key.
+      See README.md for setup instructions.
+  when:
+    - not (_proxmox_base_passphrase_persisted | bool)
+    - not _proxmox_base_sops_config_stat_pp.stat.exists
+
+- name: Generate random state passphrase
+  ansible.builtin.set_fact:
+    _proxmox_base_passphrase_value: >-
+      {{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=32') }}
+  when: not (_proxmox_base_passphrase_persisted | bool)
+  no_log: true
+
+- name: Persist passphrase to encrypted secrets file
+  when: _proxmox_base_passphrase_value is defined
+  no_log: true
+  block:
+    - name: Merge passphrase into existing secrets file
+      community.sops.sops_encrypt:
+        path: "{{ playbook_dir | dirname }}/inventory/group_vars/proxmox/secrets.sops.yaml"
+        content_yaml: >-
+          {{ lookup('community.sops.sops',
+             playbook_dir ~ '/../inventory/group_vars/proxmox/secrets.sops.yaml')
+             | from_yaml
+             | combine({'tofu_state_passphrase': _proxmox_base_passphrase_value}) }}
+        force: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Confirm passphrase persisted
+      ansible.builtin.debug:
+        msg: >-
+          State passphrase generated and encrypted in
+          inventory/group_vars/proxmox/secrets.sops.yaml.
+
+  rescue:
+    - name: Display passphrase after SOPS write failure
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Failed to encrypt/write secrets file.
+          Save this passphrase -- it cannot be recovered:
+          {{ _proxmox_base_passphrase_value }}
+
+    - name: Fail after displaying passphrase
+      ansible.builtin.fail:
+        msg: >-
+          SOPS persistence failed. The passphrase was displayed above.
+          Save it manually: add 'tofu_state_passphrase' to
+          inventory/group_vars/proxmox/secrets.sops.yaml and run:
+          sops --encrypt --in-place inventory/group_vars/proxmox/secrets.sops.yaml

@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Single source of truth for tool versions so CI and devcontainer stay in lockstep.
+
+[tools]
+node = "lts"
+opentofu = "1.11.4"
+tflint = "0.61.0"
+trivy = "0.69.1"
+just = "1.46.0"
+terraform-docs = "0.21.0"
+pre-commit = "4.5.1"
+uv = "0.10.0"
+markdownlint-cli2 = "latest"
+
+# These versions live in [env] rather than [tools] because mise cannot install
+# them directly; post-create.sh installs them via `uv tool install`.
+
+[env]
+# Consumed by .pre-commit-config.yaml
+PRECOMMIT_HOOKS_VERSION = "v6.0.0"
+SOPS_VERSION = "3.9.4"
+AGE_VERSION = "1.2.1"
+# Installed outside mise via uv tool install (in post-create.sh)
+ANSIBLE_VERSION = "13.3.0"
+ANSIBLE_LINT_VERSION = "26.1.1"
+YAMLLINT_VERSION = "1.38.0"
+
+[tasks.install-python-tools]
+description = "Install Python CLI tools via uv tool install"
+run = """
+uv tool install ansible==$ANSIBLE_VERSION --with-executables-from ansible-core --with paramiko
+uv tool install ansible-lint==$ANSIBLE_LINT_VERSION --with passlib
+uv tool install yamllint==$YAMLLINT_VERSION
+uv tool install reuse
+"""

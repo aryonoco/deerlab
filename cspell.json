@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en-GB",
+  "dictionaries": [
+    "en-gb",
+    "bash",
+    "softwareTerms",
+    "project-words"
+  ],
+  "dictionaryDefinitions": [
+    {
+      "name": "project-words",
+      "path": "./project-words.txt",
+      "addWords": true
+    }
+  ],
+  "ignorePaths": [
+    ".terraform/**",
+    ".opentofu/**",
+    "*.lock.hcl",
+    ".git/**",
+    ".pre-commit-config.yaml",
+    "collections/**"
+  ],
+  "ignoreRegExpList": [
+    "/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi",
+    "/[a-f0-9]{32,}/gi",
+    "/ghcr\\.io\\/[\\w\\-\\/]+/gi"
+  ]
+}

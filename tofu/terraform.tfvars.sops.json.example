@@ -1,0 +1,97 @@
+{
+  "proxmox_insecure": false,
+  "templates": {
+    "debian-13": {
+      "url": "http://download.proxmox.com/images/system/debian-13-standard_13.1-2_amd64.tar.zst",
+      "checksum": "5aec4ab2ac5c16c7c8ecb87bfeeb10213abe96db6b85e2463585cea492fc861d7c390b3f9c95629bf690b95e9dfe1037207fc69c0912429605f208d5cb2621f8",
+      "checksum_algorithm": "sha512"
+    }
+  },
+  "containers": {
+    "example": {
+      "vmid": 100,
+      "template": "debian-13",
+      "cores": 1,
+      "memory": 512,
+      "disk_size": 4,
+      "datastore_id": "local",
+      "tags": ["tofu"],
+      "started": true,
+      "unprivileged": true,
+      "features": {
+        "nesting": true
+      },
+      "networks": [
+        {
+          "bridge": "vnetpub",
+          "ip": "10.10.2.10/24",
+          "gw": "10.10.2.1"
+        }
+      ],
+      "firewall": {
+        "enabled": true,
+        "input_policy": "DROP",
+        "output_policy": "ACCEPT",
+        "rules": [
+          {
+            "action": "ACCEPT",
+            "type": "in",
+            "proto": "tcp",
+            "dport": "80",
+            "sport": null,
+            "source": null,
+            "dest": null,
+            "iface": null,
+            "comment": "HTTP",
+            "log": null,
+            "enabled": true
+          }
+        ]
+      }
+    }
+  },
+  "cluster_firewall_enabled": true,
+  "cluster_firewall_input_policy": "DROP",
+  "cluster_firewall_output_policy": "ACCEPT",
+  "cluster_firewall_log_ratelimit_enabled": true,
+  "cluster_firewall_log_ratelimit_rate": "1/second",
+  "cluster_firewall_log_ratelimit_burst": 5,
+  "cluster_firewall_rules": [
+    {
+      "action": "ACCEPT",
+      "type": "in",
+      "proto": "tcp",
+      "dport": "22",
+      "sport": null,
+      "source": null,
+      "dest": null,
+      "comment": "SSH",
+      "log": null,
+      "enabled": true
+    },
+    {
+      "action": "ACCEPT",
+      "type": "in",
+      "proto": "tcp",
+      "dport": "8006",
+      "sport": null,
+      "source": null,
+      "dest": null,
+      "comment": "PVE web UI",
+      "log": null,
+      "enabled": true
+    },
+    {
+      "action": "ACCEPT",
+      "type": "in",
+      "proto": "icmp",
+      "dport": null,
+      "sport": null,
+      "source": null,
+      "dest": null,
+      "comment": "Ping",
+      "log": null,
+      "enabled": true
+    }
+  ]
+}

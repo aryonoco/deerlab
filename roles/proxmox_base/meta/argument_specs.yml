@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Bootstrap a Proxmox VE host
+    options:
+      proxmox_base_no_subscription_repo:
+        type: bool
+        description: Switch to the pve-no-subscription repo and disable enterprise repo.
+      proxmox_base_timezone:
+        type: str
+        description: System timezone.
+      proxmox_base_sysctl:
+        type: dict
+        description: Sysctl key/value pairs to apply.
+      proxmox_base_root_password_length:
+        type: int
+        description: Length of the generated root password (alphanumeric characters).

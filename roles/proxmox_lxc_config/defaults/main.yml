@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+proxmox_lxc_config_subuid_start: 100000
+proxmox_lxc_config_subuid_count: 1000000
+
+proxmox_lxc_config_sdn_bridges: []
+
+proxmox_lxc_config_containers: []

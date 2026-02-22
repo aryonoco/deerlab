@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Configure TOTP 2FA for a Proxmox VE user
+    description: >
+      Adds a TOTP two-factor authentication entry to a Proxmox VE user
+      via the pvesh API. The TOTP secret is generated on the first run,
+      registered with Proxmox, and persisted to SOPS-encrypted inventory.
+      Subsequent runs are idempotent. Optionally generates single-use
+      recovery keys stored alongside the secret. API tokens and local
+      pvesh/pveum CLI access are unaffected (per-user TFA, not
+      realm-level enforcement).
+    options:
+      proxmox_totp_enabled:
+        type: bool
+        description: >
+          Enable TOTP 2FA configuration. Set to false to skip entirely.
+      proxmox_totp_user:
+        type: str
+        description: >
+          Proxmox user ID to configure TOTP for (e.g. root@pam).
+      proxmox_totp_description:
+        type: str
+        description: >
+          Description label for the TOTP entry in Proxmox. Used to
+          identify the ansible-managed entry for idempotency checks.
+      proxmox_totp_issuer:
+        type: str
+        description: >
+          Issuer field in the otpauth URI. Displayed in authenticator
+          apps alongside the account name.
+      proxmox_totp_digits:
+        type: int
+        description: >
+          Number of digits in the TOTP code. Standard is 6.
+      proxmox_totp_period:
+        type: int
+        description: >
+          Time step in seconds for TOTP rotation. Standard is 30.
+      proxmox_totp_recovery_enabled:
+        type: bool
+        description: >
+          Generate single-use recovery keys alongside TOTP. Stored in
+          SOPS for emergency access if the authenticator is lost.
+      proxmox_totp_recovery_description:
+        type: str
+        description: >
+          Description label for the recovery key entry in Proxmox.

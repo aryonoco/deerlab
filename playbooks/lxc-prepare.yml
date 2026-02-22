@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Prepare host for LXC containers
+  hosts: proxmox
+  roles:
+    - role: proxmox_lxc_config
+      tags: [lxc-prepare]

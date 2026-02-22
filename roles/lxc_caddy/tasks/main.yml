@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Validation
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - lxc_caddy_caddyfile_content | length > 0
+    fail_msg: "lxc_caddy_caddyfile_content is required"
+
+- name: Allow unprivileged port binding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_unprivileged_port_start
+    value: "0"
+    sysctl_file: /etc/sysctl.d/91-lxc-caddy.conf
+    sysctl_set: true
+    reload: true
+
+- name: Install Podman and dependencies
+  ansible.builtin.apt:
+    name:
+      - podman
+      - fuse-overlayfs
+      - uidmap
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Create Caddy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ lxc_caddy_user }}"
+    group: "{{ lxc_caddy_user }}"
+    mode: "0755"
+  loop:
+    - "/home/{{ lxc_caddy_user }}/.config/containers/systemd"
+    - "/home/{{ lxc_caddy_user }}/.config/caddy"
+
+- name: Write Caddyfile
+  ansible.builtin.copy:
+    content: "{{ lxc_caddy_caddyfile_content }}"
+    dest: "/home/{{ lxc_caddy_user }}/.config/caddy/Caddyfile"
+    owner: "{{ lxc_caddy_user }}"
+    group: "{{ lxc_caddy_user }}"
+    mode: "0640"
+  notify: Restart caddy
+
+- name: Create caddy-data volume Quadlet
+  containers.podman.podman_volume:
+    name: caddy-data
+    state: quadlet
+    quadlet_dir: "/home/{{ lxc_caddy_user }}/.config/containers/systemd"
+  become: true
+  become_user: "{{ lxc_caddy_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ lxc_caddy_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ lxc_caddy_uid }}/bus"
+  notify: Reload user systemd daemon
+
+- name: Create caddy container Quadlet
+  containers.podman.podman_container:
+    name: caddy
+    image: "{{ lxc_caddy_image }}"
+    state: quadlet
+    quadlet_dir: "/home/{{ lxc_caddy_user }}/.config/containers/systemd"
+    publish:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volume:
+      - "caddy-data.volume:/data"
+      - "/home/{{ lxc_caddy_user }}/.config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    userns: keep-id
+    security_opt:
+      - "label=disable"
+    tmpfs:
+      /config: "size=64M"
+      /tmp: "size=64M"
+    label:
+      io.containers.autoupdate: registry
+    quadlet_options:
+      - |
+        [Service]
+        Restart=on-failure
+        RestartSec=5s
+        [Install]
+        WantedBy=default.target
+  become: true
+  become_user: "{{ lxc_caddy_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ lxc_caddy_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ lxc_caddy_uid }}/bus"
+  notify: Reload user systemd daemon
+
+- name: Fix Quadlet file ownership
+  ansible.builtin.file:
+    path: "/home/{{ lxc_caddy_user }}/.config/containers/systemd"
+    state: directory
+    owner: "{{ lxc_caddy_user }}"
+    group: "{{ lxc_caddy_user }}"
+    recurse: true
+  notify: Reload user systemd daemon
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Check if caddy service is active  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_caddy_user }}@ is-active caddy"
+  register: _lxc_caddy_service_active
+  changed_when: false
+  failed_when: false
+
+- name: Start caddy service  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_caddy_user }}@ start caddy"
+  changed_when: true
+  when: _lxc_caddy_service_active.stdout != "active"
+
+- name: Check if podman auto-update timer is active  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_caddy_user }}@ is-active podman-auto-update.timer"
+  register: _lxc_caddy_autoupdate_active
+  changed_when: false
+  failed_when: false
+
+- name: Enable podman auto-update timer  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_caddy_user }}@ enable --now podman-auto-update.timer"
+  changed_when: true
+  when: _lxc_caddy_autoupdate_active.stdout != "active"

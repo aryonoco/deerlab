@@ -1,0 +1,450 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Phase 1 — SSH hardening
+
+- name: Remove ECDSA and DSA host keys
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/ssh/ssh_host_ecdsa_key
+    - /etc/ssh/ssh_host_ecdsa_key.pub
+    - /etc/ssh/ssh_host_dsa_key
+    - /etc/ssh/ssh_host_dsa_key.pub
+  when: proxmox_hardening_ssh_enabled
+  notify: Restart sshd
+
+- name: Count weak DH moduli (< 3072 bits)
+  ansible.builtin.shell:
+    cmd: awk '!/^#/ && $5 < 3072 { count++ } END { print count+0 }' /etc/ssh/moduli
+  register: _proxmox_hardening_weak_moduli_count
+  changed_when: false
+  when: proxmox_hardening_ssh_enabled
+
+- name: Prune weak DH moduli (< 3072 bits)
+  ansible.builtin.shell:
+    cmd: awk '/^#/ || $5 >= 3072' /etc/ssh/moduli > /etc/ssh/moduli.tmp && mv /etc/ssh/moduli.tmp /etc/ssh/moduli
+  changed_when: true
+  when:
+    - proxmox_hardening_ssh_enabled
+    - _proxmox_hardening_weak_moduli_count.stdout | int > 0
+
+- name: Remove cloud-init SSH override
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+    state: absent
+  notify: Restart sshd
+
+- name: Deploy SSH hardening drop-in
+  when: proxmox_hardening_ssh_enabled
+  block:
+    - name: Write SSH hardening config
+      ansible.builtin.copy:
+        content: |
+          # Authentication
+          PermitRootLogin {{ proxmox_hardening_ssh_permit_root_login }}
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitEmptyPasswords no
+          AuthenticationMethods publickey
+          RequiredRSASize 3072
+          StrictModes yes
+
+          # Brute-force protection
+          MaxAuthTries {{ proxmox_hardening_ssh_max_auth_tries }}
+          LoginGraceTime {{ proxmox_hardening_ssh_login_grace_time }}
+          PerSourcePenalties crash:90 authfail:5 noauth:1 grace-exceeded:20 refuseconnection:10 max:600 min:15
+
+          # Session limits
+          ClientAliveInterval {{ proxmox_hardening_ssh_client_alive_interval }}
+          ClientAliveCountMax {{ proxmox_hardening_ssh_client_alive_count_max }}
+          MaxSessions {{ proxmox_hardening_ssh_max_sessions }}
+
+          # Forwarding
+          X11Forwarding no
+          AllowAgentForwarding no
+          AllowTcpForwarding no
+          AllowStreamLocalForwarding no
+
+          # Environment
+          PermitUserEnvironment no
+
+          # Logging
+          LogLevel VERBOSE
+
+          # Cryptographic algorithms (OpenSSH 10.0 / ssh-audit compliant)
+          KexAlgorithms {{ proxmox_hardening_ssh_kex_algorithms | join(',') }}
+          Ciphers {{ proxmox_hardening_ssh_ciphers | join(',') }}
+          MACs {{ proxmox_hardening_ssh_macs | join(',') }}
+          HostKeyAlgorithms {{ proxmox_hardening_ssh_host_key_algorithms | join(',') }}
+
+          # Host keys
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+        dest: /etc/ssh/sshd_config.d/50-hardening.conf
+        mode: "0644"
+      register: _proxmox_hardening_sshd_config
+
+    - name: Validate full sshd configuration  # noqa: no-handler
+      ansible.builtin.command:
+        cmd: sshd -t
+      changed_when: false
+      when: _proxmox_hardening_sshd_config.changed
+
+  rescue:
+    - name: Remove invalid SSH hardening drop-in
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/50-hardening.conf
+        state: absent
+
+    - name: Fail after removing invalid SSH config
+      ansible.builtin.fail:
+        msg: >-
+          sshd -t validation failed after deploying 50-hardening.conf.
+          The drop-in has been removed to prevent lockout.
+          Check the SSH configuration and re-run the play.
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+# Phase 2 — Kernel/sysctl hardening
+
+- name: Apply sysctl hardening parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-hardening.conf
+    sysctl_set: true
+    reload: true
+  loop: "{{ proxmox_hardening_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: proxmox_hardening_sysctl_enabled
+
+- name: Check if br_netfilter module is loaded
+  ansible.builtin.command:
+    cmd: lsmod
+  register: _proxmox_hardening_lsmod
+  changed_when: false
+  when: proxmox_hardening_sysctl_enabled
+
+- name: Harden bridge netfilter sysctls
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-hardening.conf
+    sysctl_set: true
+    reload: true
+  loop: "{{ _proxmox_hardening_bridge_nf_params | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    _proxmox_hardening_bridge_nf_params:
+      net.bridge.bridge-nf-call-iptables: 0
+      net.bridge.bridge-nf-call-ip6tables: 0
+  when:
+    - proxmox_hardening_sysctl_enabled
+    - "'br_netfilter' in _proxmox_hardening_lsmod.stdout"
+
+- name: Disable IPv6 via sysctl
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/91-disable-ipv6.conf
+    sysctl_set: true
+    reload: true
+  loop: "{{ _proxmox_hardening_ipv6_disable_params | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    _proxmox_hardening_ipv6_disable_params:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
+  when:
+    - proxmox_hardening_sysctl_enabled
+    - proxmox_hardening_ipv6_disable
+
+# Phase 3 — PVE firewall (nftables backend)
+
+- name: Install proxmox-firewall (nftables backend)
+  ansible.builtin.apt:
+    name: proxmox-firewall
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_hardening_nftables_pve_firewall
+
+- name: Enable nftables backend for PVE firewall  # noqa: risky-file-permissions — pmxcfs does not support chmod
+  ansible.builtin.copy:
+    content: |
+      [OPTIONS]
+      nftables: 1
+    dest: "/etc/pve/nodes/{{ inventory_hostname }}/host.fw"
+    unsafe_writes: true
+  when: proxmox_hardening_nftables_pve_firewall
+  notify: Restart proxmox-firewall
+
+- name: Remove stale vmbr0 NAT config (SDN SNAT handles this)
+  ansible.builtin.file:
+    path: /etc/nftables-nat.conf
+    state: absent
+
+- name: Write nftables config (DNAT only)
+  ansible.builtin.copy:
+    content: |
+      #!/usr/sbin/nft -f
+      flush ruleset
+      include "/etc/nftables-container-dnat.conf"
+    dest: /etc/nftables.conf
+    mode: "0644"
+  when: proxmox_hardening_firewall_enabled
+  notify: Reload nftables
+
+- name: Create empty container DNAT config (bootstrap)
+  ansible.builtin.copy:
+    content: |
+      #!/usr/sbin/nft -f
+      # Placeholder — populated by proxmox_lxc_config role
+      destroy table ip container_dnat
+      table ip container_dnat {
+        chain prerouting {
+          type nat hook prerouting priority dstnat; policy accept;
+        }
+      }
+    dest: /etc/nftables-container-dnat.conf
+    mode: "0644"
+    force: false
+  when: proxmox_hardening_firewall_enabled
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_hardening_firewall_enabled
+
+- name: Enable nftables service
+  ansible.builtin.service:
+    name: nftables
+    enabled: true
+    state: started
+  when: proxmox_hardening_firewall_enabled
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+# Phase 4 — Fail2ban
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_hardening_fail2ban_enabled
+
+- name: Write Proxmox fail2ban filter
+  ansible.builtin.copy:
+    content: |
+      [Definition]
+      failregex = pvedaemon\[.*\]: authentication failure; rhost=<HOST> user=.* msg=.*
+      ignoreregex =
+      journalmatch = _SYSTEMD_UNIT=pvedaemon.service
+    dest: /etc/fail2ban/filter.d/proxmox.conf
+    mode: "0644"
+  when: proxmox_hardening_fail2ban_enabled
+  notify: Restart fail2ban
+
+- name: Write fail2ban jail config
+  ansible.builtin.copy:
+    content: |
+      [sshd]
+      maxretry = {{ proxmox_hardening_fail2ban_sshd_maxretry }}
+      bantime  = {{ proxmox_hardening_fail2ban_sshd_bantime }}
+
+      [proxmox]
+      enabled  = true
+      port     = https,http,8006
+      filter   = proxmox
+      maxretry = {{ proxmox_hardening_fail2ban_proxmox_maxretry }}
+      bantime  = {{ proxmox_hardening_fail2ban_proxmox_bantime }}
+    dest: /etc/fail2ban/jail.d/99-ansible-hardening.conf
+    mode: "0644"
+  when: proxmox_hardening_fail2ban_enabled
+  notify: Restart fail2ban
+
+- name: Enable fail2ban service
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: proxmox_hardening_fail2ban_enabled
+
+# Phase 5 — Automatic security updates
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_hardening_auto_updates_enabled
+
+- name: Write unattended-upgrades local config
+  ansible.builtin.copy:
+    content: |
+      // Proxmox VE unattended-upgrades configuration
+      // Adds to (does not replace) defaults in 50unattended-upgrades
+
+      Unattended-Upgrade::Origins-Pattern {
+          "origin=Proxmox,codename=${distro_codename},label=Proxmox Debian Repository";
+      };
+
+      Unattended-Upgrade::Package-Blacklist {
+          "proxmox-ve";
+          "pve-kernel";
+          "pve-manager";
+          "qemu-server";
+          "pve-qemu-kvm";
+          "pve-container";
+      };
+      {% if proxmox_hardening_auto_updates_mail | length > 0 %}
+
+      Unattended-Upgrade::Mail "{{ proxmox_hardening_auto_updates_mail }}";
+      Unattended-Upgrade::MailReport "{{ proxmox_hardening_auto_updates_mail_report }}";
+      {% endif %}
+      {% if proxmox_hardening_auto_updates_auto_reboot %}
+
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "{{ proxmox_hardening_auto_updates_reboot_time }}";
+      {% endif %}
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    mode: "0644"
+  when: proxmox_hardening_auto_updates_enabled
+
+# Phase 6 — Audit logging
+
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: proxmox_hardening_auditd_enabled
+
+- name: Configure auditd settings
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^max_log_file\b', line: "max_log_file = {{ proxmox_hardening_auditd_max_log_file }}" }
+    - { regexp: '^num_logs\b', line: "num_logs = {{ proxmox_hardening_auditd_num_logs }}" }
+    - { regexp: '^max_log_file_action\b', line: "max_log_file_action = rotate" }
+    - { regexp: '^flush\b', line: "flush = incremental_async" }
+    - { regexp: '^freq\b', line: "freq = 50" }
+    - { regexp: '^space_left\b', line: "space_left = 75" }
+    - { regexp: '^space_left_action\b', line: "space_left_action = syslog" }
+    - { regexp: '^admin_space_left\b', line: "admin_space_left = 50" }
+    - { regexp: '^admin_space_left_action\b', line: "admin_space_left_action = halt" }
+  loop_control:
+    label: "{{ item.line }}"
+  when: proxmox_hardening_auditd_enabled
+  notify: Restart auditd
+
+- name: Write audit rules
+  ansible.builtin.copy:
+    content: |
+      # Backlog buffer
+      -b 8192
+
+      # Login/logout events
+      -w /var/log/faillog -p wa -k login
+      -w /var/log/lastlog -p wa -k login
+      -w /var/log/wtmp -p wa -k login
+      -w /var/log/btmp -p wa -k login
+
+      # Sudo usage
+      -w /etc/sudoers -p wa -k sudo
+      -w /etc/sudoers.d/ -p wa -k sudo
+
+      # Identity files
+      -w /etc/passwd -p wa -k identity
+      -w /etc/shadow -p wa -k identity
+      -w /etc/group -p wa -k identity
+      -w /etc/gshadow -p wa -k identity
+
+      # Network configuration
+      -w /etc/network/ -p wa -k network
+      -w /etc/hosts -p wa -k network
+
+      # SSH configuration
+      -w /etc/ssh/ -p wa -k sshd
+
+      # Cron
+      -w /etc/crontab -p wa -k cron
+      -w /etc/cron.d/ -p wa -k cron
+      -w /var/spool/cron/ -p wa -k cron
+
+      # Proxmox VE configuration (FUSE filesystem — may be unreliable)
+      -w /etc/pve/ -p wa -k pve-config
+      -w /etc/pve/priv/ -p wa -k pve-secrets
+      -w /etc/pve/firewall/ -p wa -k pve-firewall
+
+      # PVE CLI execution
+      -w /usr/bin/pveum -p x -k pve-usermgmt
+      -w /usr/bin/pvecm -p x -k pve-cluster
+      -w /usr/bin/qm -p x -k pve-vm
+      -w /usr/bin/pct -p x -k pve-container
+
+      # Make rules immutable (requires reboot to change)
+      -e 2
+    dest: /etc/audit/rules.d/99-hardening.rules
+    mode: "0640"
+  register: _proxmox_hardening_audit_rules
+  when: proxmox_hardening_auditd_enabled
+  notify:
+    - Restart auditd
+    - Reboot for auditd
+
+- name: Enable auditd service
+  ansible.builtin.service:
+    name: auditd
+    enabled: true
+  when: proxmox_hardening_auditd_enabled
+
+# Phase 7 — Proxmox-specific
+
+- name: Remove PVE subscription nag
+  ansible.builtin.replace:
+    path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+    regexp: >-
+      data\.status\.toLowerCase\(\) !== 'active'
+    replace: 'false'
+    backup: true
+  when: proxmox_hardening_pve_nosub_nag_enabled
+  notify: Restart pveproxy
+
+- name: Deploy nag removal helper script
+  ansible.builtin.copy:
+    content: |
+      #!/bin/sh
+      js=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+      if [ -f "$js" ]; then
+        sed -i "s/data\.status\.toLowerCase() !== 'active'/false/" "$js"
+        systemctl restart pveproxy.service 2>/dev/null || true
+      fi
+    dest: /usr/local/sbin/pve-nosub-nag
+    mode: "0755"
+  when: proxmox_hardening_pve_nosub_nag_enabled
+
+- name: Deploy APT hook to re-apply nag removal after package updates
+  ansible.builtin.copy:
+    content: |
+      DPkg::Post-Invoke { "/usr/local/sbin/pve-nosub-nag"; };
+    dest: /etc/apt/apt.conf.d/99-pve-nosub-nag
+    mode: "0644"
+  when: proxmox_hardening_pve_nosub_nag_enabled

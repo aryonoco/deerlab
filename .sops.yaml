@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+creation_rules:
+  - path_regex: '\.sops\.yaml$'
+    age: 'age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm'
+  - path_regex: '\.sops\.json$'
+    age: 'age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm'

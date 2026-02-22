@@ -1,0 +1,408 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+*.env.local
+
+# ---------------------------------------------------------------------------
+# Ansible
+# ---------------------------------------------------------------------------
+
+collections/
+*.retry
+.ansible_fact_cache/
+
+# Ansible secrets (non-SOPS)
+authorized_keys
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+
+__pycache__/
+*.pyc
+.venv/
+
+# ---------------------------------------------------------------------------
+# OpenTofu
+# ---------------------------------------------------------------------------
+
+# Provider plugins are fetched on init; never commit them
+tofu/.terraform/
+
+# Backup state files (the primary terraform.tfstate IS committed — encrypted)
+tofu/*.tfstate.backup
+.terraform.tfstate.lock.info
+
+# Auto-generated tfvars and override files may contain secrets
+*.auto.tfvars
+*.local.tfvars
+!terraform.tfvars.example
+
+# Override files
+tofu/override.tf
+tofu/override.tf.json
+tofu/*_override.tf
+tofu/*_override.tf.json
+
+# General OpenTofu/Terraform directories (outside tofu/)
+.opentofu/
+**/.opentofu/
+.terraform/
+**/.terraform/
+
+# Plan files may contain secrets
+*.tfplan
+*.plan
+plan.out
+
+crash.log
+crash.*.log
+
+# ---------------------------------------------------------------------------
+# OS-generated files
+# ---------------------------------------------------------------------------
+
+.DS_Store
+**/.DS_Store
+.DS_Store?
+._*
+**/._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+*.icloud
+
+Thumbs.db
+**/Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+**/ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+**/Desktop.ini
+[Dd]esktop.ini
+$RECYCLE.BIN/
+**/$RECYCLE.BIN/
+*.stackdump
+*.url
+*.lnk
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+.directory
+**/.directory
+.Trash-*
+**/.Trash-*
+.nfs*
+**/.nfs*
+.fuse_hidden*
+**/.fuse_hidden*
+
+# ---------------------------------------------------------------------------
+# Version control artefacts (other VCS / merge tools)
+# ---------------------------------------------------------------------------
+
+*.orig
+*.BACKUP.*
+*.BASE.*
+*.LOCAL.*
+*.REMOTE.*
+*_BACKUP_*.txt
+*_BASE_*.txt
+*_LOCAL_*.txt
+*_REMOTE_*.txt
+
+.svn/
+
+.hg/
+.hgignore
+.hgsigs
+.hgsub
+.hgsubstate
+.hgtags
+
+# ---------------------------------------------------------------------------
+# IDE and editor settings
+# ---------------------------------------------------------------------------
+
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.history/
+*.vsix
+
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+cmake-build-*/
+out/
+
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+!*.svg
+Session.vim
+Sessionx.vim
+.netrwhist
+*~
+tags
+[._]*.un~
+
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+.org-id-locations
+*_archive
+*_flymake.*
+/eshell/history
+/eshell/lastdir
+/elpa/
+*.rel
+/auto/
+.cask/
+flycheck_*.el
+/server/
+.projectile
+.dir-locals.el
+/network-security.data
+
+*.sublime-workspace
+*.sublime-project
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.stTheme.cache
+
+.ionide/
+*.bak
+*.gho
+*.ori
+
+# ---------------------------------------------------------------------------
+# AI / LLM artefacts
+# ---------------------------------------------------------------------------
+
+llms/
+**/llms/
+@llms/
+**/@llms/
+
+.ai/
+.ai-*
+ai-config*
+.llm/
+.llm-*
+llm-config*
+*.prompt
+*.prompts
+.prompts/
+prompts/
+AI_NOTES*
+LLM_NOTES*
+PROMPTS*
+generated-by-*
+ai-generated*
+llm-generated*
+*_ai.*
+*_llm.*
+
+.claude/
+.claude*
+*_claude.*
+.anthropic/
+anthropic-*
+
+.openai/
+.openai*
+.gpt*
+*_gpt.*
+.gptcommit*
+.chatgpt/
+chatgpt-*
+
+.copilot/
+.copilot*
+
+.gemini/
+gemini-*
+.bard/
+bard-*
+.palm/
+palm-*
+
+.aider*
+.cursor*
+.continue/
+.codeium*
+.tabnine*
+.kite/
+.sourcegraph/
+.bloop/
+
+.auto-gpt/
+.agent/
+.agents/
+.assistant/
+.assistants/
+.langchain/
+.autogen/
+.crewai/
+
+.chat/
+.chat-*
+chat-history*
+conversation-*
+.conversations/
+.threads/
+
+.models/
+.embeddings/
+.vectors/
+.checkpoints/
+fine-tuned-models/
+training-data/
+.wandb/
+.mlflow/
+.tensorboard/
+
+# ---------------------------------------------------------------------------
+# Keys, certificates, and credentials
+# ---------------------------------------------------------------------------
+
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+*.cer
+*credentials*
+*secret*
+!SECURITY.md
+# SOPS-encrypted files are safe to commit; negate the *secret* glob above
+!*.sops.yaml
+!*.sops.yaml.example
+!*.sops.json
+!*.sops.json.example
+!.sops.yaml
+!.sops.yaml.example
+private_key*
+api_key*
+auth_token*
+access_token*
+.credentials/
+.secrets/
+
+id_rsa
+id_rsa.pub
+id_dsa
+id_dsa.pub
+id_ecdsa
+id_ecdsa.pub
+id_ed25519
+id_ed25519.pub
+!example.pem
+!example.key
+!test.pem
+!test.key
+
+.token
+.session
+session_store/
+sessions/
+
+passwords.txt
+passwords.json
+passwords.yml
+.htpasswd
+
+# ---------------------------------------------------------------------------
+# Core dumps
+# ---------------------------------------------------------------------------
+
+core
+core.*
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+
+*.log
+*.log.*
+logs/
+log/
+*.out
+*.err
+error.log
+access.log
+debug.log
+info.log
+warn.log
+nohup.out
+
+# ---------------------------------------------------------------------------
+# Temp / cache
+# ---------------------------------------------------------------------------
+
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+.*.swp
+*.pid
+*.seed
+*.pid.lock
+
+*.backup
+*.old
+*.original
+*_backup
+*_bak
+backup/
+backups/
+
+.cache/
+*.cache
+cache/
+
+.test-results/
+coverage/

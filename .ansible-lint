@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+profile: production
+
+skip_list: []
+
+warn_list: []
+
+enable_list:
+  - args
+  - empty-string-compare
+  - no-log-password
+  - no-same-owner
+  - no-prompting
+
+use_default_rules: true
+offline: false
+
+exclude_paths:
+  - .cache/
+  - .git/
+  - .venv/
+  - collections/
+  # SOPS-encrypted files have machine-generated metadata with its own
+  # indentation style — sops --encrypt always regenerates it.
+  - "*.sops.yaml"
+  - "*.sops.json"

@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Check existing certificate
+  block:
+    - name: Check certificate validity and expiry
+      ansible.builtin.command:
+        cmd: openssl x509 -noout -checkend 2592000 -in /etc/pve/local/pveproxy-ssl.pem
+      register: _proxmox_acme_cert_expiry
+      changed_when: false
+      failed_when: false
+
+    - name: Read certificate subject
+      ansible.builtin.command:
+        cmd: openssl x509 -noout -subject -in /etc/pve/local/pveproxy-ssl.pem
+      register: _proxmox_acme_cert_subject
+      changed_when: false
+      failed_when: false
+      when: _proxmox_acme_cert_expiry.rc == 0
+
+    - name: Determine if valid certificate exists for FQDN
+      ansible.builtin.set_fact:
+        _proxmox_acme_cert_valid: >-
+          {{ _proxmox_acme_cert_expiry.rc == 0
+             and _proxmox_acme_fqdn in (_proxmox_acme_cert_subject.stdout | default('')) }}
+
+- name: Check node ACME domain configuration
+  ansible.builtin.command:
+    cmd: pvenode config get
+  register: _proxmox_acme_node_config
+  changed_when: false
+  when: not (_proxmox_acme_cert_valid | bool)
+
+- name: Configure node ACME settings
+  ansible.builtin.command:
+    cmd: >-
+      pvenode config set
+      --acme account={{ proxmox_acme_account_name }}
+      --acmedomain0 domain={{ _proxmox_acme_fqdn }},plugin={{ proxmox_acme_dns_plugin_name }}
+  register: _proxmox_acme_node_set
+  changed_when: _proxmox_acme_node_set.rc == 0
+  when:
+    - not (_proxmox_acme_cert_valid | bool)
+    - _proxmox_acme_fqdn not in (_proxmox_acme_node_config.stdout | default(''))
+
+- name: Order certificate
+  when: not (_proxmox_acme_cert_valid | bool)
+  block:
+    - name: Request certificate from ACME
+      ansible.builtin.command:
+        cmd: pvenode acme cert order
+      register: _proxmox_acme_order
+      changed_when: _proxmox_acme_order.rc == 0
+      notify: Restart pveproxy
+
+    - name: Flush handlers to restart pveproxy
+      ansible.builtin.meta: flush_handlers
+
+  rescue:
+    - name: Display certificate order failure guidance
+      ansible.builtin.debug:
+        msg: >-
+          ACME certificate order failed. Troubleshooting steps:
+          (1) Verify DNS A record exists for {{ _proxmox_acme_fqdn }}.
+          (2) Check DNS provider API credentials in secrets.sops.yaml.
+          (3) Ensure API access is enabled for the domain at your DNS provider.
+          (4) Try the staging directory first to avoid rate limits:
+              proxmox_acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+          (5) Check /var/log/syslog on the Proxmox host for detailed ACME errors.
+
+    - name: Fail after certificate order error
+      ansible.builtin.fail:
+        msg: "ACME certificate order failed — see guidance above."
+
+- name: Verify issued certificate
+  ansible.builtin.command:
+    cmd: openssl x509 -noout -subject -in /etc/pve/local/pveproxy-ssl.pem
+  register: _proxmox_acme_cert_verify
+  changed_when: false
+  failed_when: _proxmox_acme_fqdn not in _proxmox_acme_cert_verify.stdout
+  when: not (_proxmox_acme_cert_valid | bool)

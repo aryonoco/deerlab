@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Configure ACME certificates
+  hosts: proxmox
+  roles:
+    - role: proxmox_acme
+      tags: [acme]

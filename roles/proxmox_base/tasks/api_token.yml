@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Determine if token is already persisted
+  ansible.builtin.set_fact:
+    _proxmox_base_token_persisted: >-
+      {{ proxmox_api_token_secret is defined }}
+
+- name: Check existing API tokens
+  ansible.builtin.command:
+    cmd: pveum user token list root@pam --output-format json
+  register: _proxmox_base_existing_tokens
+  changed_when: false
+  failed_when: >-
+    _proxmox_base_existing_tokens.rc != 0
+    or (_proxmox_base_existing_tokens.stdout | from_json is not iterable)
+  no_log: true
+
+- name: Determine if ansible token exists in Proxmox
+  ansible.builtin.set_fact:
+    _proxmox_base_token_exists_in_pve: >-
+      {{ (_proxmox_base_existing_tokens.stdout | from_json
+          | selectattr('tokenid', 'equalto', 'ansible')
+          | list | length) > 0 }}
+
+- name: Fail if token exists in Proxmox but not in secrets
+  ansible.builtin.fail:
+    msg: >-
+      The API token 'root@pam!ansible' exists in Proxmox but is NOT
+      persisted in inventory/group_vars/proxmox/secrets.sops.yaml.
+      The token value cannot be retrieved from Proxmox after creation.
+      Either: (a) manually add proxmox_api_token_secret to
+      secrets.sops.yaml and encrypt with sops, or (b) delete the token
+      with 'pveum user token remove root@pam ansible' and re-run.
+  when:
+    - not (_proxmox_base_token_persisted | bool)
+    - _proxmox_base_token_exists_in_pve | bool
+
+- name: Check SOPS config exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _proxmox_base_sops_config_stat
+  when: not (_proxmox_base_token_exists_in_pve | bool)
+
+- name: Fail if SOPS config is missing
+  ansible.builtin.fail:
+    msg: >-
+      SOPS config '.sops.yaml' not found at repo root.
+      Copy .sops.yaml.example to .sops.yaml and set your age public key.
+      See README.md for setup instructions.
+  when:
+    - not (_proxmox_base_token_exists_in_pve | bool)
+    - not _proxmox_base_sops_config_stat.stat.exists
+
+- name: Create API token for automation
+  ansible.builtin.command:
+    cmd: >-
+      pveum user token add root@pam ansible
+      --privsep=0 --output-format json
+  register: _proxmox_base_api_token
+  changed_when: _proxmox_base_api_token.rc == 0
+  failed_when: _proxmox_base_api_token.rc != 0
+  when: not (_proxmox_base_token_exists_in_pve | bool)
+  no_log: true
+
+- name: Set token facts for current run
+  ansible.builtin.set_fact: # noqa: var-naming[no-role-prefix]
+    _proxmox_base_token_value: "{{ (_proxmox_base_api_token.stdout | from_json).value }}"
+    proxmox_api_token_secret: "{{ (_proxmox_base_api_token.stdout | from_json).value }}"
+  when:
+    - _proxmox_base_api_token is defined
+    - not (_proxmox_base_api_token.skipped | default(false))
+  no_log: true
+
+- name: Persist token to encrypted secrets file
+  when: _proxmox_base_token_value is defined
+  no_log: true
+  block:
+    - name: Merge token into existing secrets file
+      community.sops.sops_encrypt:
+        path: "{{ playbook_dir | dirname }}/inventory/group_vars/proxmox/secrets.sops.yaml"
+        content_yaml: >-
+          {{ lookup('community.sops.sops',
+             playbook_dir ~ '/../inventory/group_vars/proxmox/secrets.sops.yaml')
+             | from_yaml
+             | combine({'proxmox_api_token_secret': _proxmox_base_token_value}) }}
+        force: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Confirm token persisted
+      ansible.builtin.debug:
+        msg: >-
+          API token created and encrypted in
+          inventory/group_vars/proxmox/secrets.sops.yaml.
+
+  rescue:
+    - name: Display token after SOPS write failure
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Failed to encrypt/write secrets file.
+          Save this token -- it cannot be retrieved later:
+          {{ _proxmox_base_token_value }}
+
+    - name: Fail after displaying token
+      ansible.builtin.fail:
+        msg: >-
+          SOPS persistence failed. The token was displayed above.
+          Save it manually: create inventory/group_vars/proxmox/secrets.sops.yaml
+          with 'proxmox_api_token_secret: <token>' and run:
+          sops --encrypt --in-place inventory/group_vars/proxmox/secrets.sops.yaml

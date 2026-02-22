@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Configure Caddy reverse proxy container
+  hosts: reverse_proxy
+  roles:
+    - role: lxc_base
+    - role: lxc_caddy
+  tags: [caddy]

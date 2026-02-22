@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Antidote Plugin Configuration
+# https://antidote.sh/
+
+# Foundation (load first)
+getantidote/use-omz
+ohmyzsh/ohmyzsh path:lib
+
+# OMZ Core Plugins - Immediate loading
+ohmyzsh/ohmyzsh path:plugins/git
+ohmyzsh/ohmyzsh path:plugins/z
+ohmyzsh/ohmyzsh path:plugins/sudo
+ohmyzsh/ohmyzsh path:plugins/history
+ohmyzsh/ohmyzsh path:plugins/colored-man-pages
+ohmyzsh/ohmyzsh path:plugins/copypath
+ohmyzsh/ohmyzsh path:plugins/copyfile
+ohmyzsh/ohmyzsh path:plugins/jsontools
+ohmyzsh/ohmyzsh path:plugins/extract
+ohmyzsh/ohmyzsh path:plugins/encode64
+ohmyzsh/ohmyzsh path:plugins/pip
+
+# OMZ Dev Tool Plugins - Deferred for faster startup
+ohmyzsh/ohmyzsh path:plugins/terraform kind:defer
+ohmyzsh/ohmyzsh path:plugins/ansible kind:defer
+ohmyzsh/ohmyzsh path:plugins/gh kind:defer
+
+# External Plugins (syntax-highlighting MUST be last before theme)
+zsh-users/zsh-autosuggestions
+zsh-users/zsh-syntax-highlighting
+
+# Theme
+romkatv/powerlevel10k

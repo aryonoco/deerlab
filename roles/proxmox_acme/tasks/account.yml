@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Check existing ACME account
+  ansible.builtin.command:
+    cmd: "pvenode acme account info {{ proxmox_acme_account_name }}"
+  register: _proxmox_acme_account_check
+  changed_when: false
+  failed_when: false
+
+- name: Fetch ACME Terms of Service URL
+  ansible.builtin.command:
+    cmd: "pvesh get /cluster/acme/tos --directory {{ proxmox_acme_directory }} --output-format json"
+  register: _proxmox_acme_tos
+  changed_when: false
+  when: _proxmox_acme_account_check.rc != 0
+
+- name: Register ACME account
+  ansible.builtin.command:
+    cmd: >-
+      pvesh create /cluster/acme/account
+      --name {{ proxmox_acme_account_name }}
+      --contact {{ proxmox_acme_account_email }}
+      --tos_url {{ _proxmox_acme_tos.stdout | from_json }}
+      --directory {{ proxmox_acme_directory }}
+  register: _proxmox_acme_account_register
+  changed_when: _proxmox_acme_account_register.rc == 0
+  when: _proxmox_acme_account_check.rc != 0

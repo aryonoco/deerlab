@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Restart pveproxy
+  ansible.builtin.systemd_service:
+    name: pveproxy
+    state: restarted

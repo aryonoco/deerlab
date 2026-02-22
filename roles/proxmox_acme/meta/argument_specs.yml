@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Configure Let's Encrypt ACME certificates on Proxmox VE
+    description: >
+      Provisions automated TLS certificates for the Proxmox web UI
+      using the built-in ACME client with DNS-01 challenge validation.
+      Registers an ACME account, configures a DNS plugin with provider
+      credentials, orders a certificate for the node FQDN, and restarts
+      pveproxy. Proxmox's pve-daily-update timer handles automatic
+      renewal. DNS-provider-agnostic — switching providers is just a
+      variable change.
+    options:
+      proxmox_acme_enabled:
+        type: bool
+        description: >
+          Master toggle for the entire role. Set to false to skip
+          all ACME certificate tasks.
+      proxmox_acme_account_name:
+        type: str
+        description: >
+          Name for the ACME account registered on the node.
+          Proxmox uses "default" by convention.
+      proxmox_acme_account_email:
+        type: str
+        required: true
+        description: >
+          Contact email for the ACME account. Required by Let's
+          Encrypt for expiry notifications and abuse contact.
+          Stored in SOPS — not defaulted, fails fast if missing.
+      proxmox_acme_directory:
+        type: str
+        description: >
+          ACME directory URL. Use the staging URL
+          (https://acme-staging-v02.api.letsencrypt.org/directory)
+          for testing before switching to production.
+      proxmox_acme_dns_provider:
+        type: str
+        description: >
+          DNS provider name as recognized by the Proxmox ACME
+          DNS API (e.g. porkbun, cloudflare, route53). Used in
+          the pvenode acme plugin add command.
+      proxmox_acme_dns_plugin_name:
+        type: str
+        description: >
+          Name for the DNS plugin configuration stored on the
+          node. Used to reference the plugin in certificate
+          domain configuration.
+      proxmox_acme_dns_credentials:
+        type: dict
+        required: true
+        description: >
+          Dictionary of credential key-value pairs for the DNS
+          provider. Keys are provider-specific (e.g. PORKBUN_API_KEY,
+          PORKBUN_SECRET_API_KEY for Porkbun; CF_Token for
+          Cloudflare). Stored in SOPS — not defaulted, fails
+          fast if missing.
+      proxmox_acme_validation_delay:
+        type: int
+        description: >
+          Seconds to wait for DNS propagation before the ACME
+          server validates the challenge. Increase if validation
+          fails due to slow DNS propagation.

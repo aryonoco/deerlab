@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+version = 1
+
+# =============================================================================
+# Broad defaults — config/data files (0BSD)
+# =============================================================================
+
+# Data/config files by extension
+[[annotations]]
+path = ["**/*.toml", "**/*.json", "**/*.jsonc", "**/*.yml", "**/*.yaml",
+        "**/*.env", "**/*.txt", "**/*.cfg", "**/*.hcl"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# Root dotfiles and config without extensions
+[[annotations]]
+path = [".gitignore", ".editorconfig", ".shellcheckrc", ".trivyignore",
+        ".opentofu-version", "justfile", "ansible.cfg", ".ansible-lint",
+        ".yamllint"]
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# DevContainer (broad catch-all)
+[[annotations]]
+path = [".devcontainer/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# Ansible role metadata and defaults (declarations, no logic)
+[[annotations]]
+path = ["roles/*/defaults/**", "roles/*/meta/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# Inventory
+[[annotations]]
+path = ["inventory/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# .example template files (extension is .example, not caught by *.json/*.yaml globs)
+[[annotations]]
+path = ["**/*.example"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# Machine-generated / encrypted (annotation-only, no inline headers possible)
+[[annotations]]
+path = ["tofu/.terraform.lock.hcl", "tofu/terraform.tfstate",
+        "**/*.sops.yaml", "**/*.sops.json"]
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# Claude settings
+[[annotations]]
+path = [".claude/**"]
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "0BSD"
+
+# =============================================================================
+# Code with logic (CPAL-1.0) — overrides broad defaults above
+# =============================================================================
+
+# Shell scripts
+[[annotations]]
+path = ["scripts/**", ".devcontainer/scripts/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "CPAL-1.0"
+
+# OpenTofu infrastructure logic (.tf files only, not .hcl config)
+[[annotations]]
+path = ["tofu/*.tf"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "CPAL-1.0"
+
+# Ansible roles — tasks and handlers contain logic
+[[annotations]]
+path = ["roles/*/tasks/**", "roles/*/handlers/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "CPAL-1.0"
+
+# Ansible playbooks (orchestration logic)
+[[annotations]]
+path = ["playbooks/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "CPAL-1.0"
+
+# =============================================================================
+# Third-party (MIT) — upstream license, do not modify the file
+# =============================================================================
+
+[[annotations]]
+path = [".devcontainer/config/p10k.zsh"]
+precedence = "closest"
+SPDX-FileCopyrightText = [
+  "2009-2014 Robby Russell and contributors",
+  "2014-2017 Ben Hilburn <bhilburn@gmail.com>",
+  "2019 Roman Perepelitsa <roman.perepelitsa@gmail.com> and contributors",
+]
+SPDX-License-Identifier = "MIT"
+
+# =============================================================================
+# Documentation (CC-BY-4.0)
+# =============================================================================
+
+[[annotations]]
+path = ["docs/**", "**/*.md"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Aryan Ameri <info@ameri.me>"
+SPDX-License-Identifier = "CC-BY-4.0"
