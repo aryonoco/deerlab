@@ -36,6 +36,7 @@ age
 # Infrastructure Tools
 devcontainer
 devcontainers
+gitleaks
 healthcheck
 healthchecks
 justfile

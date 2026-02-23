@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+title = "deerlab gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow SOPS-encrypted files, encrypted state, and vendored collections"
+paths = [
+  # SOPS-encrypted files — values are ciphertext (ENC[AES256_GCM,...]), safe to commit
+  '''.*\.sops\.yaml$''',
+  '''.*\.sops\.json$''',
+  # SOPS configuration — contains age public key (not a secret)
+  '''\.sops\.yaml$''',
+  # Encrypted OpenTofu state (PBKDF2+AES-GCM)
+  '''tofu/terraform\.tfstate$''',
+  # Example/template files with placeholder values
+  '''.*\.sops\.yaml\.example$''',
+  '''.*\.sops\.json\.example$''',
+  # Vendored Ansible collections (excluded everywhere in this repo)
+  '''collections/''',
+]
+stopwords = [
+  # Age public key — encryption recipient, not a secret
+  "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm",
+]

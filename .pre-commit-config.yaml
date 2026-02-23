@@ -5,6 +5,15 @@
 repos:
   - repo: local
     hooks:
+      - id: gitleaks
+        name: gitleaks
+        entry: mise exec -- gitleaks protect --staged --redact
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  - repo: local
+    hooks:
       - id: shellcheck
         name: shellcheck
         entry: mise exec -- shellcheck
