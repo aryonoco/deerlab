@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Deploy Wallabag as rootless Podman Quadlet
+    description: >
+      Installs Podman and deploys Wallabag as a rootless container using
+      Quadlet systemd units. Creates a named volume for persistent
+      SQLite database and image data, and enables podman-auto-update
+      for automatic image pulls. Runs inside an unprivileged LXC with
+      nesting enabled. Uses systemd health check integration via
+      Notify=healthy and HealthOnFailure=kill.
+    options:
+      lxc_wallabag_user:
+        type: str
+        description: >
+          Name of the service user that runs rootless Podman. Must
+          match lxc_base_service_user from the lxc_base role.
+      lxc_wallabag_uid:
+        type: int
+        description: >
+          UID of the service user. Must match lxc_base_service_user_uid
+          from the lxc_base role.
+      lxc_wallabag_image:
+        type: str
+        description: >
+          OCI image reference for Wallabag. Uses latest tag with
+          podman-auto-update for automatic pulls.
+      lxc_wallabag_port:
+        type: int
+        description: >
+          Host port for the Wallabag container. Must be above 1024
+          to avoid requiring NET_BIND_SERVICE capability.
+      lxc_wallabag_domain_name:
+        type: str
+        required: true
+        description: >
+          Full URL for Wallabag (e.g. https://wallabag.example.com).
+          Passed from inventory data so the role stays generic.
+      lxc_wallabag_secret:
+        type: str
+        required: true
+        description: >
+          Symfony secret key for CSRF protection and encryption.
+          Must be a random string of at least 32 characters.

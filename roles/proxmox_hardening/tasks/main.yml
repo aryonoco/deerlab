@@ -176,14 +176,31 @@
     DEBIAN_FRONTEND: noninteractive
   when: proxmox_hardening_nftables_pve_firewall
 
-- name: Enable nftables backend for PVE firewall  # noqa: risky-file-permissions — pmxcfs does not support chmod
-  ansible.builtin.copy:
-    content: |
+- name: Read current PVE host firewall config
+  ansible.builtin.slurp:
+    src: "/etc/pve/nodes/{{ inventory_hostname }}/host.fw"
+  register: proxmox_hardening_host_fw
+  failed_when: false
+  when: proxmox_hardening_nftables_pve_firewall
+
+- name: Set expected PVE host firewall content
+  ansible.builtin.set_fact:
+    proxmox_hardening_host_fw_expected: "[OPTIONS]\nnftables: 1\n"
+  when: proxmox_hardening_nftables_pve_firewall
+
+- name: Enable nftables backend for PVE firewall  # shell required — pmxcfs does not support atomic writes used by copy/template
+  ansible.builtin.shell:
+    cmd: |
+      cat > "/etc/pve/nodes/{{ inventory_hostname }}/host.fw" <<'EOF'
       [OPTIONS]
       nftables: 1
-    dest: "/etc/pve/nodes/{{ inventory_hostname }}/host.fw"
-    unsafe_writes: true
-  when: proxmox_hardening_nftables_pve_firewall
+      EOF
+  changed_when: true
+  when:
+    - proxmox_hardening_nftables_pve_firewall
+    - >-
+      (proxmox_hardening_host_fw is failed) or
+      ((proxmox_hardening_host_fw.content | default('') | b64decode) != proxmox_hardening_host_fw_expected)
   notify: Restart proxmox-firewall
 
 - name: Remove stale vmbr0 NAT config (SDN SNAT handles this)

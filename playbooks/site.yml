@@ -21,3 +21,6 @@
 
 - name: Configure Caddy reverse proxy container
   ansible.builtin.import_playbook: caddy.yml
+
+- name: Configure Wallabag container
+  ansible.builtin.import_playbook: wallabag.yml

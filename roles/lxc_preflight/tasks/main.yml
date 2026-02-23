@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Gate role for container plays — skips the host gracefully when the
+# container has not been provisioned by OpenTofu yet.
+# Requires the play to set `gather_facts: false`.
+
+- name: Check if container is reachable
+  ansible.builtin.wait_for_connection:
+    timeout: 5
+  register: lxc_preflight_reachable
+  failed_when: false
+
+- name: Warn that container is not reachable
+  ansible.builtin.debug:
+    msg: >-
+      Container is not reachable — run 'just tofu-apply' to provision it.
+  when: lxc_preflight_reachable.ping | default('') != 'pong'
+
+- name: Skip host if container is not provisioned
+  ansible.builtin.meta: end_host
+  when: lxc_preflight_reachable.ping | default('') != 'pong'
+
+- name: Gather facts
+  ansible.builtin.setup:

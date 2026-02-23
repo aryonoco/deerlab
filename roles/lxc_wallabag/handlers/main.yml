@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Reload user systemd daemon  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ daemon-reload"
+  changed_when: true
+
+- name: Restart wallabag  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ restart wallabag"
+  changed_when: true

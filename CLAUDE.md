@@ -114,3 +114,4 @@ docs/               # design documents and analysis
 - ACME cert must complete before OpenTofu runs with `insecure=false`
 - One role = one concern. Split early, merge never
 - Data in inventory, logic in roles. Roles should be generic
+- **Principle of least privilege**: deploy LXC containers and rootless Podman/Quadlet services with minimum privileges and capabilities. If a service fails, investigate the required capabilities and add them one at a time — only the minimum needed to make the service run, never more

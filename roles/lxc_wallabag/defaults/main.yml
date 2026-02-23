@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+lxc_wallabag_user: wallabag
+lxc_wallabag_uid: 1000
+lxc_wallabag_image: "docker.io/wallabag/wallabag:latest"
+lxc_wallabag_port: 8443
+lxc_wallabag_domain_name: ""
+lxc_wallabag_secret: ""

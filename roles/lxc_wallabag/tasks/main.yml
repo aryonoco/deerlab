@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Validation
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - lxc_wallabag_domain_name | length > 0
+      - lxc_wallabag_secret | length > 0
+    fail_msg: "lxc_wallabag_domain_name and lxc_wallabag_secret are required"
+
+- name: Install Podman and dependencies
+  ansible.builtin.apt:
+    name:
+      - podman
+      - fuse-overlayfs
+      - uidmap
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Create Wallabag directories
+  ansible.builtin.file:
+    path: "/home/{{ lxc_wallabag_user }}/.config/containers/systemd"
+    state: directory
+    owner: "{{ lxc_wallabag_user }}"
+    group: "{{ lxc_wallabag_user }}"
+    mode: "0755"
+
+- name: Create wallabag-data volume Quadlet
+  containers.podman.podman_volume:
+    name: wallabag-data
+    state: quadlet
+    quadlet_dir: "/home/{{ lxc_wallabag_user }}/.config/containers/systemd"
+  become: true
+  become_user: "{{ lxc_wallabag_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ lxc_wallabag_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ lxc_wallabag_uid }}/bus"
+  notify: Reload user systemd daemon
+
+- name: Create wallabag container Quadlet
+  containers.podman.podman_container:
+    name: wallabag
+    image: "{{ lxc_wallabag_image }}"
+    state: quadlet
+    quadlet_dir: "/home/{{ lxc_wallabag_user }}/.config/containers/systemd"
+    publish:
+      - "{{ lxc_wallabag_port }}:80"
+    volume:
+      - "wallabag-data.volume:/var/www/wallabag/data"
+    cap_drop:
+      - ALL
+    userns: keep-id
+    security_opt:
+      - "label=disable"
+    tmpfs:
+      /tmp: "size=64M"
+    env:
+      SYMFONY__ENV__DATABASE_DRIVER: pdo_sqlite
+      SYMFONY__ENV__DOMAIN_NAME: "{{ lxc_wallabag_domain_name }}"
+      SYMFONY__ENV__SECRET: "{{ lxc_wallabag_secret }}"
+      SYMFONY__ENV__FOSUSER_REGISTRATION: "false"
+      SYMFONY__ENV__LOCALE: en
+      POPULATE_DATABASE: "True"
+    label:
+      io.containers.autoupdate: registry
+    healthcheck: "curl --fail --silent --show-error --user-agent healthcheck http://localhost/api/info || exit 1"
+    healthcheck_interval: 30s
+    healthcheck_timeout: 10s
+    healthcheck_retries: 3
+    healthcheck_start_period: 120s
+    quadlet_options:
+      - |
+        [Container]
+        Notify=healthy
+        HealthOnFailure=kill
+        [Service]
+        Restart=on-failure
+        RestartSec=5s
+        [Install]
+        WantedBy=default.target
+  become: true
+  become_user: "{{ lxc_wallabag_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ lxc_wallabag_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ lxc_wallabag_uid }}/bus"
+  no_log: true
+  notify: Reload user systemd daemon
+
+- name: Fix Quadlet file ownership
+  ansible.builtin.file:
+    path: "/home/{{ lxc_wallabag_user }}/.config/containers/systemd"
+    state: directory
+    owner: "{{ lxc_wallabag_user }}"
+    group: "{{ lxc_wallabag_user }}"
+    recurse: true
+  notify: Reload user systemd daemon
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Check if wallabag service is active  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ is-active wallabag"
+  register: _lxc_wallabag_service_active
+  changed_when: false
+  failed_when: false
+
+- name: Start wallabag service  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ start wallabag"
+  changed_when: true
+  when: _lxc_wallabag_service_active.stdout != "active"
+
+- name: Check if podman auto-update timer is active  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ is-active podman-auto-update.timer"
+  register: _lxc_wallabag_autoupdate_active
+  changed_when: false
+  failed_when: false
+
+- name: Enable podman auto-update timer  # noqa: command-instead-of-module — systemd module lacks --machine= for pct exec
+  ansible.builtin.command:
+    cmd: "systemctl --user --machine={{ lxc_wallabag_user }}@ enable --now podman-auto-update.timer"
+  changed_when: true
+  when: _lxc_wallabag_autoupdate_active.stdout != "active"

@@ -25,10 +25,30 @@
     label: "{{ item }}"
   when: proxmox_lxc_config_sdn_bridges | length > 0
 
-- name: Reload networking to activate SDN bridges
+- name: Apply SDN config to activate bridges
+  ansible.builtin.command:
+    cmd: pvesh set /cluster/sdn
+  register: _proxmox_lxc_config_sdn_apply
+  changed_when: _proxmox_lxc_config_sdn_apply.rc == 0
+  when:
+    - proxmox_lxc_config_sdn_bridges | length > 0
+    - _proxmox_lxc_config_bridge_check.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+- name: Reload networking after SDN apply
   ansible.builtin.command:
     cmd: ifreload -a
   changed_when: true
+  when:
+    - proxmox_lxc_config_sdn_bridges | length > 0
+    - _proxmox_lxc_config_bridge_check.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+- name: Verify SDN bridges are now active
+  ansible.builtin.command:
+    cmd: "ip link show {{ item }}"
+  changed_when: false
+  loop: "{{ proxmox_lxc_config_sdn_bridges }}"
+  loop_control:
+    label: "{{ item }}"
   when:
     - proxmox_lxc_config_sdn_bridges | length > 0
     - _proxmox_lxc_config_bridge_check.results | selectattr('rc', 'ne', 0) | list | length > 0
@@ -66,6 +86,33 @@
 
 # Phase 3 — Container idmaps (bpg provider v0.96.0 does not support idmap blocks)
 
+- name: Check which container config files exist
+  ansible.builtin.stat:
+    path: "/etc/pve/lxc/{{ item.vmid }}.conf"
+  register: proxmox_lxc_config_conf_stat
+  loop: "{{ proxmox_lxc_config_containers }}"
+  loop_control:
+    label: "{{ item.vmid }}"
+
+- name: Set list of provisioned container VMIDs
+  ansible.builtin.set_fact:
+    proxmox_lxc_config_provisioned_vmids: >-
+      {{ proxmox_lxc_config_conf_stat.results
+         | selectattr('stat.exists')
+         | map(attribute='item.vmid')
+         | map('int')
+         | list }}
+
+- name: Warn about unprovisioned containers
+  ansible.builtin.debug:
+    msg: >-
+      Container VMID {{ item.vmid }} has no config file yet —
+      run 'just tofu-apply' to provision it before configuring idmaps/features/tun.
+  loop: "{{ proxmox_lxc_config_containers }}"
+  loop_control:
+    label: "{{ item.vmid }}"
+  when: (item.vmid | int) not in proxmox_lxc_config_provisioned_vmids
+
 - name: Configure container idmaps
   ansible.builtin.shell:
     cmd: |
@@ -92,35 +139,32 @@
   loop: "{{ proxmox_lxc_config_containers | selectattr('idmaps', 'defined') | list }}"
   loop_control:
     label: "{{ item.vmid }}"
+  when: (item.vmid | int) in proxmox_lxc_config_provisioned_vmids
 
-# Phase 3b — Feature flags that API tokens cannot set
+# Phase 3b — Feature flags (pct set validates bridges which fails with SDN vnets,
+#            so write directly to the conf file like idmaps)
 
-- name: Read current container config
-  ansible.builtin.command:
-    cmd: "pct config {{ item.vmid }}"
-  register: _proxmox_lxc_config_pct
-  changed_when: false
+- name: Set container feature flags
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      conf="/etc/pve/lxc/{{ item.vmid }}.conf"
+      desired="features: {{ item.features }}"
+      current=$(grep '^features:' "$conf" || true)
+      if [ "$current" = "$desired" ]; then
+        echo "OK"
+      else
+        sed -i '/^features:/d' "$conf"
+        echo "$desired" >> "$conf"
+        echo "CHANGED"
+      fi
+    executable: /bin/bash
+  register: _proxmox_lxc_config_features
+  changed_when: "'CHANGED' in _proxmox_lxc_config_features.stdout"
   loop: "{{ proxmox_lxc_config_containers | selectattr('features', 'defined') | list }}"
   loop_control:
     label: "{{ item.vmid }}"
-
-- name: Set container feature flags
-  ansible.builtin.command:
-    cmd: "pct set {{ item.item.vmid }} --features {{ item.item.features }}"
-  register: _proxmox_lxc_config_features
-  changed_when: _proxmox_lxc_config_features.rc == 0
-  vars:
-    _current: >-
-      {{ item.stdout_lines | select('match', '^features:')
-         | first | default('features:')
-         | regex_replace('^features:\s*', '')
-         | split(',') | sort | join(',') }}
-    _desired: >-
-      {{ item.item.features | split(',') | sort | join(',') }}
-  when: _current != _desired
-  loop: "{{ _proxmox_lxc_config_pct.results }}"
-  loop_control:
-    label: "{{ item.item.vmid }}"
+  when: (item.vmid | int) in proxmox_lxc_config_provisioned_vmids
 
 # Phase 3c — TUN device passthrough (required for rootless Podman pasta networking)
 
@@ -151,6 +195,7 @@
   loop: "{{ proxmox_lxc_config_containers | selectattr('tun', 'defined') | selectattr('tun') | list }}"
   loop_control:
     label: "{{ item.vmid }}"
+  when: (item.vmid | int) in proxmox_lxc_config_provisioned_vmids
 
 # Phase 3d — Restart containers whose config changed (features/idmaps/tun need reboot)
 
@@ -164,7 +209,7 @@
          +
          (_proxmox_lxc_config_features.results
           | selectattr('changed')
-          | map(attribute='item.item.vmid')
+          | map(attribute='item.vmid')
           | list)
          +
          (_proxmox_lxc_config_tun.results
@@ -213,6 +258,7 @@
   loop: "{{ proxmox_lxc_config_containers }}"
   loop_control:
     label: "{{ item.vmid }}"
+  when: (item.vmid | int) in proxmox_lxc_config_provisioned_vmids
 
 # Phase 4 — Start containers
 
@@ -224,12 +270,15 @@
   loop: "{{ proxmox_lxc_config_containers }}"
   loop_control:
     label: "{{ item.vmid }}"
+  when: (item.vmid | int) in proxmox_lxc_config_provisioned_vmids
 
 - name: Start stopped containers
   ansible.builtin.command:
     cmd: "pct start {{ item.item.vmid }}"
   changed_when: true
-  when: "'running' not in item.stdout"
+  when:
+    - item is not skipped
+    - "'running' not in item.stdout"
   loop: "{{ _proxmox_lxc_config_status.results }}"
   loop_control:
     label: "{{ item.item.vmid }}"
