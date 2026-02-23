@@ -69,7 +69,7 @@ reuse-lint:
     reuse lint
 
 # Run all CI checks locally
-ci: reuse-lint fmt-check validate lint-all shellcheck ansible-lint markdownlint security-scan check-version-sync check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
+ci: reuse-lint fmt-check validate lint-all shellcheck ansible-lint markdownlint security-scan gitleaks check-version-sync check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
     @echo ""
     @echo "════════════════════════════════════════"
     @echo "  All CI checks passed"
@@ -149,6 +149,11 @@ markdownlint-fix:
 security-scan:
     @echo "=== Running Trivy security scan ==="
     trivy config . --severity HIGH,CRITICAL --exit-code 1 --skip-dirs collections
+
+# Run gitleaks secret scan
+gitleaks:
+    @echo "=== Running gitleaks secret scan ==="
+    gitleaks git --redact --verbose
 
 # Check for trailing whitespace (excludes .md files)
 check-trailing-whitespace:
