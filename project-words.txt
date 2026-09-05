@@ -122,3 +122,65 @@ REUSE
 spdx
 SPDX
 FileCopyrightText
+
+# Rootless Podman / Quadlet
+catatonit
+cgroupfs
+netavark
+overlayfs
+passt
+quadlet
+subgid
+subuid
+userns
+userspace
+freebind
+
+# systemd / kernel / networking
+chrony
+conntrack
+devsec
+hidepid
+iifname
+journalctl
+kcore
+keepalive
+logind
+mlkem
+needrestart
+netdev
+networkd
+nologin
+oifname
+pkexec
+polkit
+proc
+quic
+reimage
+rmem
+sched
+seccomp
+skuid
+sysctls
+sysinit
+timesyncd
+unconfigured
+vsock
+wmem
+writable
+
+# Capabilities
+fowner
+setgid
+setuid
+
+# Services
+ntfy
+restic
+symfony
+wallabag
+chowns
+passthrough
+
+# Names
+Ameri
