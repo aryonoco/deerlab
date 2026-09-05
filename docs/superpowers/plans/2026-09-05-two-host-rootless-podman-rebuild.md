@@ -2416,17 +2416,44 @@ so without this the hardening silently did nothing."
 
 - [ ] **Step 1: Generate the key pairs and store them**
 
-`wg` is not part of macOS or of `mise.toml`; install it once with
-`brew install wireguard-tools`.
+`wg` comes from `brew install wireguard-tools` and is already installed.
+
+Generate the material and write it straight into the encrypted files. Never
+write a private key to `/tmp`, never echo one, and never let one reach a log or
+a report — only the public keys are quotable.
 
 ```bash
+export SOPS_AGE_KEY_CMD="rbw get --field AGE-SECRET-KEY- deerlab-ansible-age-sops-key"
+
+# One key pair per host. The private half goes straight from wg into sops.
 for h in edge1 svc1; do
-  wg genkey > "/tmp/$h.key"
-  echo "$h public: $(wg pubkey < /tmp/$h.key)"
+  priv="$(wg genkey)"
+  pub="$(printf '%s' "$priv" | wg pubkey)"
+  mise x -- sops set "inventory/host_vars/$h/secrets.sops.yaml" \
+    '["base_wireguard_private_key"]' "\"$priv\""
+  unset priv
+  echo "$h public: $pub"
 done
+
+# One preshared key shared by both peers, the post-quantum hedge.
+mise x -- sops set inventory/group_vars/all/secrets.sops.yaml \
+  '["base_wireguard_preshared_key"]' "\"$(wg genpsk)\""
 ```
 
-Put each printed public key into `base_wireguard_public_key` in `inventory/host_vars/<host>/main.yml`. Put each private key into `base_wireguard_private_key` with `just secrets-edit inventory/host_vars/<host>/secrets.sops.yaml`. Then `rm -f /tmp/edge1.key /tmp/svc1.key`. The preshared key was generated in Task 5.
+`sops set` edits in place and is not interactive, unlike `just secrets-edit`
+which opens an editor. Put each printed public key into
+`base_wireguard_public_key` in `inventory/host_vars/<host>/main.yml`, replacing
+the `REPLACED-IN-TASK-9` placeholder.
+
+Confirm each value landed without printing it:
+
+```bash
+for f in inventory/host_vars/edge1/secrets.sops.yaml inventory/host_vars/svc1/secrets.sops.yaml; do
+  mise x -- sops -d "$f" | sed 's/:.*/: <set>/'
+done
+mise x -- sops -d inventory/group_vars/all/secrets.sops.yaml \
+  | grep -c '^base_wireguard_preshared_key: CHANGE-ME' || echo "preshared key set"
+```
 
 - [ ] **Step 2: Write the contract and add the role**
 
