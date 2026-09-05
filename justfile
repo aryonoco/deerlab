@@ -62,10 +62,6 @@ gitleaks:
     @echo "=== Running gitleaks secret scan ==="
     gitleaks git --redact --verbose
 
-# Spell check (advisory in CI)
-spellcheck:
-    cspell --config cspell.json --no-progress "**/*.md" "**/*.yml" "**/*.yaml" "**/*.j2" "**/*.toml" "!collections/**"
-
 # Check for trailing whitespace (excludes .md files)
 check-trailing-whitespace:
     #!/usr/bin/env bash

@@ -92,7 +92,7 @@ Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, 
 | `host-requirements.txt` | Python pins for the Ansible virtual environment on the hosts |
 | `ansible.cfg`, `.ansible-lint` | Unchanged paths, lint rule additions |
 | `justfile` | Developer and CI entry points |
-| `.github/workflows/ci.yml` | One lint job that runs `just ci` through mise, plus advisory spell check |
+| `.github/workflows/ci.yml` | One lint job that runs `just ci` through mise |
 | `.github/workflows/promote.yml` | Fast-forwards `release` to `main` when CI on `main` succeeds |
 | `renovate.json` | Dependency automation with digest pinning |
 | `inventory/hosts.yml` | Groups `edge`, `services`, `podman_hosts`; hosts `edge1`, `svc1` |
@@ -142,7 +142,7 @@ Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, 
 
 **Interfaces:**
 
-- Produces: `mise install` provides `ansible`, `ansible-playbook`, `ansible-galaxy`, `ansible-lint`, `yamllint`, `reuse`, `sops`, `age`, `age-keygen`, `restic`, `shellcheck`, `trivy`, `gitleaks`, `just`, `pre-commit`, `markdownlint-cli2`, `cspell`, `uv`, `node`. Every later task and CI assume these binaries come from mise.
+- Produces: `mise install` provides `ansible`, `ansible-playbook`, `ansible-galaxy`, `ansible-lint`, `yamllint`, `reuse`, `sops`, `age`, `age-keygen`, `restic`, `shellcheck`, `trivy`, `gitleaks`, `just`, `pre-commit`, `markdownlint-cli2`, `uv`, `node`. Every later task and CI assume these binaries come from mise.
 
 - [ ] **Step 1: Confirm the current pins are broken**
 
@@ -170,7 +170,6 @@ gitleaks = "8.30.1"
 sops = "3.13.3"
 age = "1.3.2"
 restic = "0.19.1"
-"npm:cspell" = "10.2.1"
 "pipx:ansible" = { version = "14.3.1", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib" }
 "pipx:ansible-lint" = { version = "26.8.0", uvx_args = "--with passlib" }
 "pipx:yamllint" = "1.38.0"
@@ -187,7 +186,7 @@ Run:
 
 ```bash
 mise install --yes
-for t in ansible-playbook ansible-galaxy ansible-lint yamllint reuse sops age age-keygen shellcheck trivy gitleaks just pre-commit markdownlint-cli2 cspell; do
+for t in ansible-playbook ansible-galaxy ansible-lint yamllint reuse sops age age-keygen shellcheck trivy gitleaks just pre-commit markdownlint-cli2; do
   printf '%-18s ' "$t"; mise x -- "$t" --version 2>&1 | head -1
 done
 mise x -- restic version
@@ -433,7 +432,7 @@ upstream, which had broken mise install."
 **Files:**
 
 - Delete: `tofu/`, `roles/proxmox_install`, `roles/proxmox_base`, `roles/proxmox_hardening`, `roles/proxmox_acme`, `roles/proxmox_totp`, `roles/proxmox_lxc_config`, `roles/lxc_base`, `roles/lxc_caddy`, `roles/lxc_preflight`, `roles/lxc_wallabag`, `playbooks/*.yml`, `inventory/`, `docs/networking-and-uid-mapping.md`, `docs/opentofu-integration-analysis.md`, `docs/TODO.md`, `.tflint.hcl`, `.opentofu-version`, `.github/dependabot.yml`, `.github/workflows/deploy.yml`, `scripts/upgrade-bookworm-to-trixie.sh`
-- Modify: `.gitignore`, `.gitleaks.toml`, `REUSE.toml`, `.markdownlint-cli2.jsonc`, `cspell.json`
+- Modify: `.gitignore`, `.gitleaks.toml`, `REUSE.toml`, `.markdownlint-cli2.jsonc`
 
 **Interfaces:**
 
@@ -482,13 +481,13 @@ SPDX-License-Identifier = "0BSD"
 Run: `grep -n 'tofu\|\.tf\b\|terraform' REUSE.toml`
 Expected: no output. If any annotation still names a Tofu path, delete it.
 
-- [ ] **Step 5: Trim `.markdownlint-cli2.jsonc` and `cspell.json`**
+- [ ] **Step 5: Trim `.markdownlint-cli2.jsonc`**
 
-In `.markdownlint-cli2.jsonc` remove the `"**/.terraform/**"` and `"**/.opentofu/**"` entries. In `cspell.json` remove `".terraform/**"`, `".opentofu/**"` and `"*.lock.hcl"` from `ignorePaths`.
+Remove the `"**/.terraform/**"` and `"**/.opentofu/**"` entries.
 
 - [ ] **Step 6: Verify nothing references the old stack**
 
-Run: `git grep -n -i -E 'tofu|terraform|tflint|proxmox|pct |lxc' -- ':!docs/superpowers/**' ':!project-words.txt' ':!CLAUDE.md' ':!README.md' ':!justfile' ':!.github/**' ':!LICENSE*' ':!LICENSES/**'`
+Run: `git grep -n -i -E 'tofu|terraform|tflint|proxmox|pct |lxc' -- ':!docs/superpowers/**' ':!CLAUDE.md' ':!README.md' ':!justfile' ':!.github/**' ':!LICENSE*' ':!LICENSES/**'`
 Expected: no output. `justfile` and the workflows are rewritten in Task 4, `CLAUDE.md` and `README.md` in Task 22.
 
 Run: `mise x -- reuse lint | tail -3`
@@ -683,10 +682,6 @@ gitleaks:
     @echo "=== Running gitleaks secret scan ==="
     gitleaks git --redact --verbose
 
-# Spell check (advisory in CI)
-spellcheck:
-    cspell --config cspell.json --no-progress "**/*.md" "**/*.yml" "**/*.yaml" "**/*.j2" "**/*.toml" "!collections/**"
-
 # Check for trailing whitespace (excludes .md files)
 check-trailing-whitespace:
     #!/usr/bin/env bash
@@ -869,24 +864,6 @@ jobs:
 
       - name: Run every check
         run: just ci
-
-  spell-check:
-    name: Spell check (advisory)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Setup tools via mise
-        uses: jdx/mise-action@v4.3.0
-        with:
-          install: true
-          cache: true
-
-      - name: Run cspell
-        run: just spellcheck
 ```
 
 - [ ] **Step 3: Create the promotion workflow**
@@ -5508,7 +5485,7 @@ Operations: `docs/runbook.md`.
 ## Code Quality
 
 - All linter rules are enforced as errors. Fix them, don't suppress them
-- ansible-lint production profile plus role-argument-spec, ShellCheck, markdownlint, yamllint, cspell, Trivy, gitleaks, REUSE
+- ansible-lint production profile plus role-argument-spec, ShellCheck, markdownlint, yamllint, Trivy, gitleaks, REUSE
 - A second playbook run must produce zero changes
 
 ## Ansible

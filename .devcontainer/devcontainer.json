@@ -5,10 +5,8 @@
   },
   "workspaceFolder": "/workspaces/deerlab",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/deerlab,type=bind,consistency=cached",
-
   "containerUser": "vscode",
   "remoteUser": "vscode",
-
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "installZsh": true,
@@ -31,7 +29,6 @@
       "version": "3.13"
     }
   },
-
   "mounts": [
     {
       "source": "deerlab-gh-config-${devcontainerId}",
@@ -54,7 +51,6 @@
       "type": "bind"
     }
   ],
-
   "containerEnv": {
     "MISE_DATA_DIR": "/home/vscode/.local/share/mise",
     "MISE_STATE_DIR": "/home/vscode/.local/share/mise/state",
@@ -68,16 +64,15 @@
     "VISUAL": "nano",
     "ANSIBLE_CONFIG": "/workspaces/deerlab/ansible.cfg"
   },
-
   "runArgs": [
     "--init",
-    "--hostname", "deerlab",
+    "--hostname",
+    "deerlab",
     "--cap-drop=ALL",
     "--cap-add=NET_BIND_SERVICE",
     "--cap-add=DAC_OVERRIDE",
     "--security-opt=no-new-privileges:true"
   ],
-
   "initializeCommand": "mkdir -p \"${HOME}/.config/sops/age\" \"${HOME}/.ssh\" && docker volume rm deerlab-vscode-server deerlab-vscode-extensions 2>/dev/null || true",
   "onCreateCommand": "bash .devcontainer/scripts/on-create.sh",
   "postCreateCommand": "bash .devcontainer/scripts/post-create.sh",
@@ -85,7 +80,6 @@
   "updateContentCommand": "echo 'Content updated -- rebuild container for system upgrades'",
   "waitFor": "onCreateCommand",
   "shutdownAction": "stopContainer",
-
   "customizations": {
     "vscode": {
       "extensions": [
@@ -100,7 +94,6 @@
         "usernamehw.errorlens",
         "Gruntfuggly.todo-tree",
         "timonwong.shellcheck",
-        "streetsidesoftware.code-spell-checker",
         "DavidAnson.vscode-markdownlint",
         "foxundermoon.shell-format",
         "hverlin.mise-vscode",
@@ -110,17 +103,25 @@
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
-          "zsh": { "path": "/bin/zsh", "args": ["-l"] },
-          "bash": { "path": "/bin/bash" }
+          "zsh": {
+            "path": "/bin/zsh",
+            "args": [
+              "-l"
+            ]
+          },
+          "bash": {
+            "path": "/bin/bash"
+          }
         },
-
         "editor.formatOnSave": true,
         "editor.tabSize": 2,
         "editor.insertSpaces": true,
-        "editor.rulers": [80, 120],
+        "editor.rulers": [
+          80,
+          120
+        ],
         "editor.bracketPairColorization.enabled": true,
         "editor.guides.bracketPairs": "active",
-
         "files.trimTrailingWhitespace": true,
         "files.insertFinalNewline": true,
         "files.trimFinalNewlines": true,
@@ -136,7 +137,6 @@
           "justfile": "makefile",
           "*.just": "makefile"
         },
-
         "[json]": {
           "editor.defaultFormatter": "esbenp.prettier-vscode"
         },
@@ -160,37 +160,25 @@
           "editor.defaultFormatter": "tombi-toml.tombi",
           "editor.formatOnSave": true
         },
-
         "ansible.validation.enabled": true,
         "ansible.validation.lint.enabled": true,
         "ansible.validation.lint.path": "/home/vscode/.local/share/mise/shims/ansible-lint",
         "ansible.ansible.path": "/home/vscode/.local/share/mise/shims/ansible",
-
         "gitlens.currentLine.enabled": true,
         "gitlens.codeLens.enabled": true,
-
-        "errorLens.enabledDiagnosticLevels": ["error", "warning"],
-
-        "todo-tree.general.tags": ["TODO", "FIXME", "HACK", "SECURITY"],
-
-        "cSpell.language": "en-GB",
-        "cSpell.enabledFileTypes": {
-          "markdown": true,
-          "yaml": true,
-          "json": true,
-          "shellscript": true,
-          "toml": true
-        },
-        "cSpell.words": [
-          "trivy",
-          "devcontainer",
-          "carlpett",
-          "sops"
+        "errorLens.enabledDiagnosticLevels": [
+          "error",
+          "warning"
+        ],
+        "todo-tree.general.tags": [
+          "TODO",
+          "FIXME",
+          "HACK",
+          "SECURITY"
         ]
       }
     }
   },
-
   "hostRequirements": {
     "cpus": 2,
     "memory": "4gb",
