@@ -5,7 +5,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Proxmox, LXC and OpenTofu stack with two Debian 13 VPSs, an edge running Caddy and a services host running Wallabag, both configured entirely by Ansible with rootless Podman Quadlets, kernel WireGuard between them, pull-based delivery, restic backups and ntfy alerts.
+**Goal:** Replace the Proxmox, LXC and OpenTofu stack with two Debian 13 VPSs, an edge running Caddy and a services host running Wallabag, both configured entirely by Ansible with rootless Podman Quadlets, kernel WireGuard between them, pull-based delivery, restic backups and Pushover alerts.
 
 **Architecture:** Ansible is the only executor. Host-wide concerns are `base_*` roles, the container platform is `podman_host`, `podman_user` and `podman_service`, and the two thin roles `caddy` and `wallabag` only place service-specific files. Service definitions are inventory data; one generic role renders every Quadlet from that data into a root-owned per-user directory. Each host pulls a signed `release` branch on a timer.
 
@@ -36,8 +36,8 @@ prerequisite.
 
 | Task | Prerequisite the operator must confirm |
 | --- | --- |
-| 5 | ntfy topic and write token exist; healthchecks.io project with four checks exists; a root password hash has been generated. Commit signing is configured in Step 4 of the task itself. |
-| 11 | The ntfy token in `deerlab_ntfy_token` is live, so the delivery test can be seen. |
+| 5 | A Pushover application token and user key exist; an Uptime Kuma instance is deployed with four push monitors; a root password hash has been generated. Commit signing is configured in Step 4 of the task itself. |
+| 11 | The Pushover credentials are live, so the delivery test can be seen on the operator's device. |
 | 12 | `main` has been merged to `release` and the head of `release` is signed by the `Deerlab` key. |
 | 18 | `A` and `AAAA` records for `wallabag.<domain>` point at `<edge public IPv4>`. Caddy requests a certificate on first start and a failed HTTP-01 challenge consumes Let's Encrypt rate limit. |
 | 20 | The S3 bucket exists and per-service access keys have been created and put in the SOPS files. |
@@ -97,7 +97,7 @@ Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, 
 | `renovate.json` | Dependency automation with digest pinning |
 | `inventory/hosts.yml` | Groups `edge`, `services`, `podman_hosts`; hosts `edge1`, `svc1` |
 | `inventory/group_vars/all/main.yml` | Non-secret shared data: admin keys, allowed signers, tunnel prefixes, port |
-| `inventory/group_vars/all/secrets.sops.yaml` | Admin user name, domain, ntfy, dead-man URLs, root hash, WireGuard PSK, S3 |
+| `inventory/group_vars/all/secrets.sops.yaml` | Domain, Pushover credentials, dead-man URLs, root hash, WireGuard PSK, S3 |
 | `inventory/group_vars/podman_hosts/main.yml` | Registry list shared by service users |
 | `inventory/group_vars/edge/main.yml` | Firewall role, Caddy service definition, Caddyfile data |
 | `inventory/group_vars/services/main.yml` | Firewall role, Wallabag service definition |
@@ -113,10 +113,10 @@ Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, 
 | `roles/base_ssh` | sshd drop-in with validation and rescue |
 | `roles/base_wireguard` | networkd netdev and network units, key files, wait-online, hosts entries |
 | `roles/base_firewall` | The single nftables ruleset template |
-| `roles/base_notify` | ntfy notifier units in system and user scope, reboot-required timer |
+| `roles/base_notify` | Pushover notifier units in system and user scope, reboot-required timer |
 | `roles/base_pull` | Ansible venv, sops and age, host age key, git verification config, pull timer |
 | `roles/podman_host` | Podman packages, image policy, registry defaults, version assertions |
-| `roles/podman_user` | Service accounts, subordinate IDs, linger, directories, slice and wait-network drop-ins, ntfy credential copy |
+| `roles/podman_user` | Service accounts, subordinate IDs, linger, directories, slice and wait-network drop-ins, Pushover credential copy |
 | `roles/podman_service` | Config files, secrets, image pre-pull, Quadlet volume and container units, reload, verify, start, smoke test |
 | `roles/backup` | Per-service restic timer and unit, repository initialisation, credentials |
 | `secrets/backup-admin.sops.yaml` | Operator-only S3 credentials for prune and restore, outside the inventory |
@@ -1021,7 +1021,7 @@ git push origin main:refs/heads/release
 
 **Interfaces:**
 
-- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_ntfy_url`, `deerlab_ntfy_token`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
+- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_pushover_url`, `deerlab_pushover_token`, `deerlab_pushover_user`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
 
 - [ ] **Step 1: Write the plain inventory files**
 
@@ -1072,6 +1072,11 @@ deerlab_allowed_signers:
   - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 3>"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
+
+# Pushover's message endpoint. Fixed and public; the token and user key that
+# authenticate against it are the secrets. Named globally because two roles
+# render the same curl configuration from it.
+deerlab_pushover_url: https://api.pushover.net/1/messages.json
 
 deerlab_wg_port: <WireGuard port>
 deerlab_wg_ipv4_prefix: <tunnel IPv4 prefix>
@@ -1168,16 +1173,16 @@ mkdir -p inventory/group_vars/all inventory/group_vars/services inventory/host_v
 cat > inventory/group_vars/all/secrets.sops.yaml <<'EOF'
 deerlab_domain: <domain>
 deerlab_acme_email: CHANGE-ME
-deerlab_ntfy_url: https://ntfy.sh/CHANGE-ME-topic
-deerlab_ntfy_token: CHANGE-ME
+deerlab_pushover_token: CHANGE-ME
+deerlab_pushover_user: CHANGE-ME
 deerlab_root_password_hash: CHANGE-ME
 deerlab_deadman_urls:
   pull:
-    edge1: https://hc-ping.com/CHANGE-ME
-    svc1: https://hc-ping.com/CHANGE-ME
+    edge1: https://CHANGE-ME/api/push/CHANGE-ME
+    svc1: https://CHANGE-ME/api/push/CHANGE-ME
   backup:
-    caddy: https://hc-ping.com/CHANGE-ME
-    wallabag: https://hc-ping.com/CHANGE-ME
+    caddy: https://CHANGE-ME/api/push/CHANGE-ME
+    wallabag: https://CHANGE-ME/api/push/CHANGE-ME
 base_wireguard_preshared_key: CHANGE-ME
 backup_s3_bucket: s3:https://CHANGE-ME.example/deerlab-backups
 backup_s3_endpoint: https://CHANGE-ME.example
@@ -1223,10 +1228,24 @@ openssl rand -base64 48 | tr -d '/+=' | cut -c1-48   # backup_wallabag_restic_pa
 ```
 
 `wg` comes from `brew install wireguard-tools`; `openssl` must be Homebrew's,
-because Apple's LibreSSL has no `passwd -6`. The ntfy topic and token come from
-ntfy.sh (a self-served access token with write permission on the topic), the
-dead-man URLs from a healthchecks.io project with four checks, and the S3 values
-from the bucket created in Task 20.
+because Apple's LibreSSL has no `passwd -6`.
+
+The remaining values come from services outside this repository:
+
+- **Pushover** supplies `deerlab_pushover_user` (the account's user key) and
+  `deerlab_pushover_token` (an application token created specifically for
+  deerlab, so it can be revoked without touching anything else).
+- **Uptime Kuma**, hosted away from both hosts, supplies the four
+  `deerlab_deadman_urls`. Each is a Push monitor's URL, of the form
+  `https://<kuma host>/api/push/<token>`. Kuma push monitors have no separate
+  grace period, so the heartbeat interval absorbs the slack: 2700 seconds for the
+  two pull monitors, which fire every 30 minutes with up to 5 minutes of jitter,
+  and 93600 seconds for the two backup monitors, which fire daily with up to 30
+  minutes of jitter. Attach the Pushover notification to all four, and add an
+  HTTP monitor on the public URL while you are there — that is the external
+  uptime check the design asks for. These URLs are bearer secrets: anyone holding
+  one can mark a check healthy and hide a real outage.
+- **The S3 provider** supplies the bucket and keys created in Task 20.
 
 - [ ] **Step 3: Register the secrets path in `.sops.yaml`**
 
@@ -1339,7 +1358,7 @@ mise x -- ansible-inventory --host svc1 | python3 -c "import sys,json;d=json.loa
 If either command hangs instead of failing, the Bitwarden vault is locked; ask
 the operator to run `rbw unlock`.
 
-Expected: the graph shows `podman_hosts` containing `edge` with `edge1` and `services` with `svc1`. The variable list includes `deerlab_domain`, `deerlab_ntfy_url`, `base_wireguard_private_key`, `base_wireguard_ipv4`, proving the SOPS vars plugin decrypts.
+Expected: the graph shows `podman_hosts` containing `edge` with `edge1` and `services` with `svc1`. The variable list includes `deerlab_domain`, `deerlab_pushover_token`, `base_wireguard_private_key`, `base_wireguard_ipv4`, proving the SOPS vars plugin decrypts.
 
 Run: `just ci`
 Expected: passes.
@@ -2944,14 +2963,14 @@ host, and the 80/443 redirects to Caddy on the edge."
 - Create: `roles/base_notify/meta/argument_specs.yml`
 - Create: `roles/base_notify/tasks/main.yml`
 - Create: `roles/base_notify/handlers/main.yml`
-- Create: `roles/base_notify/templates/ntfy.conf.j2`
+- Create: `roles/base_notify/templates/pushover.conf.j2`
 - Create: `roles/base_notify/templates/notify-failure@.service.j2`
 - Modify: `playbooks/base.yml`
 
 **Interfaces:**
 
-- Consumes: `deerlab_ntfy_url`, `deerlab_ntfy_token`.
-- Produces: `notify-failure@.service` in system scope reading `/etc/deerlab/ntfy.conf`, and in user scope reading `/etc/deerlab/ntfy/%u.conf`. Task 14 writes the per-user copies. Any unit may set `OnFailure=notify-failure@%n.service`. The template `ntfy.conf.j2` is reused by Task 14 through `template: src: ../../base_notify/templates/ntfy.conf.j2`, which is why its variables are the global `deerlab_ntfy_*` names.
+- Consumes: `deerlab_pushover_url`, `deerlab_pushover_token`, `deerlab_pushover_user`.
+- Produces: `notify-failure@.service` in system scope reading `/etc/deerlab/pushover.conf`, and in user scope reading `/etc/deerlab/pushover/%u.conf`. Task 14 writes the per-user copies. Any unit may set `OnFailure=notify-failure@%n.service`. The template `pushover.conf.j2` is reused by Task 14 through `template: src: ../../base_notify/templates/pushover.conf.j2`, which is why its variables are the global `deerlab_pushover_*` names rather than role-prefixed ones.
 
 - [ ] **Step 1: Write the contract and add the role**
 
@@ -2972,20 +2991,26 @@ dependencies: []
 
 argument_specs:
   main:
-    short_description: ntfy failure notifications
+    short_description: Pushover failure notifications
     description: >
-      A templated systemd unit in system and user scope that posts to an
-      ntfy topic with curl, a daily reboot-required reminder, and
-      OnFailure drop-ins for the host units that matter.
+      A templated systemd unit in system and user scope that posts to the
+      Pushover message API with curl, a daily reboot-required reminder,
+      and OnFailure drop-ins for the host units that matter. Delivery
+      depends on neither the edge nor the monitoring host, so an outage of
+      either still reaches the operator.
     options:
       base_notify_url:
         type: str
         required: true
-        description: Full ntfy topic URL.
+        description: Pushover message endpoint.
       base_notify_token:
         type: str
         required: true
-        description: Write-only access token for the topic.
+        description: Pushover application token for deerlab.
+      base_notify_user:
+        type: str
+        required: true
+        description: Pushover user key the messages are delivered to.
       base_notify_onfailure_units:
         type: list
         elements: str
@@ -3005,8 +3030,9 @@ Expected: FAIL, `base_notify` has no tasks yet.
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-base_notify_url: "{{ deerlab_ntfy_url }}"
-base_notify_token: "{{ deerlab_ntfy_token }}"
+base_notify_url: "{{ deerlab_pushover_url }}"
+base_notify_token: "{{ deerlab_pushover_token }}"
+base_notify_user: "{{ deerlab_pushover_user }}"
 base_notify_onfailure_units:
   - nftables.service
   - systemd-networkd.service
@@ -3024,7 +3050,9 @@ base_notify_onfailure_units:
       - base_notify_url | length > 0
       - base_notify_token | length > 0
       - base_notify_token != 'CHANGE-ME'
-    fail_msg: base_notify needs the ntfy URL and token
+      - base_notify_user | length > 0
+      - base_notify_user != 'CHANGE-ME'
+    fail_msg: base_notify needs the Pushover endpoint, application token and user key
     quiet: true
 
 - name: Create the configuration directories
@@ -3036,12 +3064,12 @@ base_notify_onfailure_units:
     mode: "0755"
   loop:
     - /etc/deerlab
-    - /etc/deerlab/ntfy
+    - /etc/deerlab/pushover
 
 - name: Write the curl configuration for the system notifier
   ansible.builtin.template:
-    src: ntfy.conf.j2
-    dest: /etc/deerlab/ntfy.conf
+    src: pushover.conf.j2
+    dest: /etc/deerlab/pushover.conf
     owner: root
     group: root
     mode: "0600"
@@ -3055,7 +3083,7 @@ base_notify_onfailure_units:
     group: root
     mode: "0644"
   vars:
-    base_notify_credential_path: /etc/deerlab/ntfy.conf
+    base_notify_credential_path: /etc/deerlab/pushover.conf
   notify: Reload systemd
 
 - name: Install the user-scope notifier
@@ -3066,7 +3094,7 @@ base_notify_onfailure_units:
     group: root
     mode: "0644"
   vars:
-    base_notify_credential_path: /etc/deerlab/ntfy/%u.conf
+    base_notify_credential_path: /etc/deerlab/pushover/%u.conf
   notify: Reload systemd
 
 - name: Install the reboot-required reminder
@@ -3079,8 +3107,8 @@ base_notify_onfailure_units:
 
       [Service]
       Type=oneshot
-      LoadCredential=ntfy.conf:/etc/deerlab/ntfy.conf
-      ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/ntfy.conf --data "Reboot required on %H"
+      LoadCredential=pushover.conf:/etc/deerlab/pushover.conf
+      ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/pushover.conf --data "message=Reboot required on %H"
     dest: /etc/systemd/system/deerlab-reboot-required.service
     owner: root
     group: root
@@ -3138,17 +3166,19 @@ base_notify_onfailure_units:
     daemon_reload: true
 ```
 
-`roles/base_notify/templates/ntfy.conf.j2`:
+`roles/base_notify/templates/pushover.conf.j2`:
 
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
 # {{ ansible_managed }}
-url = "{{ deerlab_ntfy_url }}"
-header = "Authorization: Bearer {{ deerlab_ntfy_token }}"
-header = "Title: deerlab {{ inventory_hostname }}"
-header = "Priority: high"
-header = "Tags: warning"
+# curl merges repeated data entries with &, so this is one form POST and
+# the unit only has to append the message field.
+url = "{{ deerlab_pushover_url }}"
+data = "token={{ deerlab_pushover_token }}"
+data = "user={{ deerlab_pushover_user }}"
+data = "title=deerlab {{ inventory_hostname }}"
+data = "priority=1"
 ```
 
 `roles/base_notify/templates/notify-failure@.service.j2`:
@@ -3158,12 +3188,12 @@ header = "Tags: warning"
 {# Copyright (c) 2026 Aryan Ameri #}
 # {{ ansible_managed }}
 [Unit]
-Description=Notify ntfy that %i failed
+Description=Notify Pushover that %i failed
 
 [Service]
 Type=oneshot
-LoadCredential=ntfy.conf:{{ base_notify_credential_path }}
-ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/ntfy.conf --data "%i failed on %H"
+LoadCredential=pushover.conf:{{ base_notify_credential_path }}
+ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/pushover.conf --data "message=%i failed on %H"
 ```
 
 - [ ] **Step 3: Lint**
@@ -3178,7 +3208,11 @@ just apply svc1
 mise x -- ansible svc1 -m ansible.builtin.shell -a 'systemctl start notify-failure@manual-test.service; systemctl is-active deerlab-reboot-required.timer; systemctl cat nftables.service | grep OnFailure'
 ```
 
-Expected: a notification titled `deerlab svc1` with the text `manual-test failed on svc1` arrives on the ntfy topic, the timer is `active`, and the nftables unit shows `OnFailure=notify-failure@%n.service`. Because Task 7 flagged a reboot, also run `systemctl start deerlab-reboot-required.service` and expect a `Reboot required on svc1` notification, then `rm /run/reboot-required` if the host was already rebooted in Task 7.
+Expected: a Pushover notification titled `deerlab svc1` with the text `manual-test failed on svc1` arrives on your device, the timer is `active`, and the nftables unit shows `OnFailure=notify-failure@%n.service`. Because Task 7 flagged a reboot, also run `systemctl start deerlab-reboot-required.service` and expect a `Reboot required on svc1` notification, then `rm /run/reboot-required` if the host was already rebooted in Task 7.
+
+If curl reports HTTP 400, Pushover rejected the form: check that the config file
+carries `token`, `user` and `priority` as separate `data` lines and that the unit
+appends `message=`. Pushover requires all three of token, user and message.
 
 - [ ] **Step 5: Commit**
 
@@ -3187,8 +3221,12 @@ git add roles/base_notify playbooks/base.yml
 git commit -m "Add the base_notify role
 
 One templated notifier unit in system and user scope that posts to
-ntfy with curl and a credential file, a daily reboot-required
-reminder, and OnFailure drop-ins for the firewall and networkd."
+Pushover with curl and a credential file, a daily reboot-required
+reminder, and OnFailure drop-ins for the firewall and networkd.
+
+Pushover rather than a self-hosted notifier on purpose: the alert path
+must not share a failure domain with the hosts it reports on or with
+the monitor that watches them."
 ```
 
 ### Task 12: base_pull role and host bootstrap completion
@@ -3310,7 +3348,7 @@ base_pull_enabled: true
       - base_pull_repo_url | length > 0
       - base_pull_allowed_signers | length > 0
       - base_pull_deadman_url | length > 0
-      - base_pull_deadman_url != 'https://hc-ping.com/CHANGE-ME'
+      - '"CHANGE-ME" not in base_pull_deadman_url'
     fail_msg: base_pull needs the repository URL, allowed signers, and a dead-man URL
     quiet: true
 
@@ -3517,7 +3555,7 @@ Wait for the `Promote` workflow to fast-forward `release`, then trigger a pull i
 mise x -- ansible svc1 -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service; journalctl -u deerlab-pull.service -n 40 --no-pager | grep -E "PLAY RECAP|ok=|verify|error" '
 ```
 
-Expected: `PLAY RECAP` with `svc1 : ok=... failed=0`, and no `error`. The healthchecks.io check for `pull/svc1` shows a fresh ping. A `Priority: high` notification did not arrive. If the log shows `Signature verification failed`, the commit on `release` is not signed by a key in `deerlab_allowed_signers`; sign your commits (`git config commit.gpgsign true`, `gpg.format ssh`, `user.signingkey <pubkey path>`) and push again.
+Expected: `PLAY RECAP` with `svc1 : ok=... failed=0`, and no `error`. The Uptime Kuma push monitor for `pull/svc1` goes green with a fresh heartbeat, and no Pushover notification arrived. If the log shows `Signature verification failed`, the commit on `release` is not signed by a key in `deerlab_allowed_signers`; sign your commits (`git config commit.gpgsign true`, `gpg.format ssh`, `user.signingkey <pubkey path>`) and push again.
 
 - [ ] **Step 5: Commit**
 
@@ -3780,8 +3818,8 @@ Quadlet templates were written against."
 
 **Interfaces:**
 
-- Consumes: `podman_services` (dictionary keyed by service name; each value has `uid`, `egress`, `limits` with `memory`, `cpu`, `tasks`), `deerlab_ntfy_url`, `deerlab_ntfy_token`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, and the template `roles/base_notify/templates/ntfy.conf.j2`.
-- Produces: for every service, a system user with home `/var/lib/<name>` (mode 0700) and a `config` subdirectory, a subordinate range, linger, a running user manager with `/run/user/<uid>/bus`, `/etc/deerlab/ntfy/<name>.conf`, a slice drop-in and a wait-network drop-in. Task 15 relies on all of these existing before it runs.
+- Consumes: `podman_services` (dictionary keyed by service name; each value has `uid`, `egress`, `limits` with `memory`, `cpu`, `tasks`), `deerlab_pushover_url`, `deerlab_pushover_token`, `deerlab_pushover_user`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, and the template `roles/base_notify/templates/pushover.conf.j2`.
+- Produces: for every service, a system user with home `/var/lib/<name>` (mode 0700) and a `config` subdirectory, a subordinate range, linger, a running user manager with `/run/user/<uid>/bus`, `/etc/deerlab/pushover/<name>.conf`, a slice drop-in and a wait-network drop-in. Task 15 relies on all of these existing before it runs.
 
 - [ ] **Step 1: Write the contract and add the role**
 
@@ -3808,7 +3846,7 @@ argument_specs:
       non-overlapping subordinate ID ranges as whole templated files,
       enables lingering, orders each user manager after the tunnel,
       applies resource ceilings on the per-user slice, and gives each
-      user its own copy of the ntfy credential.
+      user its own copy of the Pushover credential.
     options:
       podman_user_services:
         type: dict
@@ -3974,10 +4012,10 @@ podman_user_wg_prefixes:
     cmd: "loginctl enable-linger {{ podman_user_item.key }}"
     creates: "/var/lib/systemd/linger/{{ podman_user_item.key }}"
 
-- name: Give a private ntfy credential to {{ podman_user_item.key }}
+- name: Give a private Pushover credential to {{ podman_user_item.key }}
   ansible.builtin.template:
-    src: ../../base_notify/templates/ntfy.conf.j2
-    dest: "/etc/deerlab/ntfy/{{ podman_user_item.key }}.conf"
+    src: ../../base_notify/templates/pushover.conf.j2
+    dest: "/etc/deerlab/pushover/{{ podman_user_item.key }}.conf"
     owner: root
     group: "{{ podman_user_item.key }}"
     mode: "0640"
@@ -4063,7 +4101,7 @@ One system user per service with an explicit UID, a home under
 whole templated files because the user module never allocates them
 for system accounts. Linger, a slice with ceilings the user cannot
 raise, a drop-in ordering the user manager after the tunnel, and a
-private copy of the ntfy credential complete the account."
+private copy of the Pushover credential complete the account."
 ```
 
 ### Task 15: podman_service role
@@ -4818,7 +4856,7 @@ Expected: `HTTP/3 200`. If the connection fails or stalls, remove `h3` from the 
 mise x -- ansible podman_hosts -m ansible.builtin.shell -a 'systemctl list-timers deerlab-pull.timer --no-pager | tail -2; journalctl -u deerlab-pull.service --since "-2h" --no-pager | grep -c "PLAY RECAP"'
 ```
 
-Expected: the timer is scheduled on both hosts and at least one recap has been logged since the last promotion. Both healthchecks.io pull checks are green.
+Expected: the timer is scheduled on both hosts and at least one recap has been logged since the last promotion. Both Uptime Kuma pull monitors are green.
 
 ## Phase 5: Backups
 
@@ -5167,7 +5205,7 @@ mise x -- ansible svc1 -m ansible.builtin.shell -a 'systemctl --user --machine=w
 mise x -- ansible edge1 -m ansible.builtin.shell -a 'systemctl --user --machine=caddy@ start deerlab-backup-caddy.service; systemctl --user --machine=caddy@ list-timers deerlab-backup-caddy.timer --no-pager | tail -2'
 ```
 
-Expected: the Wallabag journal shows the unit finishing with `Deactivated successfully` and no `Failed` line, the two backup checks on healthchecks.io are green, and the Caddy timer is scheduled. Then from your machine:
+Expected: the Wallabag journal shows the unit finishing with `Deactivated successfully` and no `Failed` line, the two Uptime Kuma backup monitors are green, and the Caddy timer is scheduled. Then from your machine:
 
 ```bash
 just restore-drill wallabag services
@@ -5279,15 +5317,16 @@ break-glass only.
    the definition with `{{ }}`.
 2. Add a site block to `caddy_caddyfile` in `inventory/group_vars/edge/main.yml`
    pointing at `http://<services tunnel IPv4>:<port>` and create the DNS records.
-3. Create a healthchecks.io check for the backup and add its URL to
-   `deerlab_deadman_urls.backup`. Create S3 credentials scoped to the
-   service's prefix without delete permission.
+3. Create an Uptime Kuma push monitor for the backup and add its URL to
+   `deerlab_deadman_urls.backup`, with a heartbeat interval covering the
+   schedule plus its jitter. Create S3 credentials scoped to the service's
+   prefix.
 4. `just plan svc1`, then merge. The firewall chain, subordinate range,
    slice, timer and Quadlet all derive from the one definition.
 
 ## Reboots
 
-Automatic reboots are off. A daily ntfy message says `Reboot required on
+Automatic reboots are off. A daily Pushover message says `Reboot required on
 <host>` while `/run/reboot-required` exists. Reboot the services host first
 with `mise x -- ansible svc1 -m ansible.builtin.reboot`, confirm
 `systemctl --user --machine=wallabag@ is-active wallabag.service`, then the
@@ -5539,7 +5578,7 @@ Delete the `kartar` DNS record at the DNS provider. Destroy the old VPS at the h
 
 - [ ] **Step 3: Close out**
 
-Confirm both healthchecks.io pull checks and both backup checks have been green for at least a day, then mark the spec's status line as implemented and commit:
+Confirm both Uptime Kuma pull monitors and both backup monitors have been green for at least a day, then mark the spec's status line as implemented and commit:
 
 ```bash
 sed -i 's/^Status: approved design, 2026-09-05\./Status: implemented; see docs\/runbook.md for operations./' docs/superpowers/specs/2026-09-05-two-host-rootless-podman-design.md

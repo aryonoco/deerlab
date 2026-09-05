@@ -53,7 +53,7 @@ OpenTofu design described in `docs/networking-and-uid-mapping.md` and
 | First services | Caddy on the edge, Wallabag on the services host | Wallabag kept with documented exceptions |
 | TLS | HTTP-01 with the stock Caddy image | No DNS API credential on the edge |
 | Backups | restic per service to an S3-compatible bucket | Per-service credentials, append-only by policy |
-| Alerts | ntfy via systemd on-failure hooks | No mail relay on the hosts |
+| Alerts | Pushover via systemd on-failure hooks | No mail relay on the hosts; the account already exists and its delivery path shares no failure domain with the hosts or the monitor |
 | CI | Lint and static validation only | User decision |
 | Reboots | Notify, never reboot automatically | User wants to watch reboots |
 | Podman version | Debian 13's 5.4.2 | No backports exist; the Quadlet feature set is sufficient |
@@ -333,7 +333,7 @@ Applied to both hosts by the `base_*` roles.
   stays at Debian's default of 2, which is recoverable. `lockdown=integrity` on
   the kernel command line.
 - **Updates**: unattended-upgrades with automatic reboot off. A daily timer
-  notifies through ntfy while `/run/reboot-required` exists. needrestart restarts
+  notifies through Pushover while `/run/reboot-required` exists. needrestart restarts
   patched services automatically.
 - **Logging and time**: persistent journald with `SystemMaxUse=512M` and a
   retention cap. chrony with NTS, `systemd-timesyncd` masked, egress allowed on
@@ -514,8 +514,14 @@ One `backup` role, driven by the service definition, installs per service:
   dead-man ping. `podman unshare` is required because volume files written by
   in-container users are owned by subordinate UIDs.
 - A restic repository per service under a bucket prefix, S3 credentials per
-  service with no delete permission, and a repository password from SOPS
-  delivered as a credential file per 4.6.
+  service scoped to that prefix, and a repository password from SOPS delivered as
+  a credential file per 4.6. The credentials do carry delete, because `restic
+  backup` takes and releases a lock under `locks/` on every run and cannot
+  complete without it. Backblaze B2 application keys scope by bucket and name
+  prefix but not by operation, so the protection against a compromised host
+  erasing its own history comes from B2 keeping prior versions for 14 days rather
+  than from withholding delete. That is a detection deadline, not immutability:
+  the dead-man checks in 8.3 are what make it meaningful.
 - On the edge, Caddy's data volume is backed up the same way so a rebuild does
   not exhaust certificate rate limits.
 
@@ -530,18 +536,35 @@ well, otherwise a lost host cannot be restored.
 
 `base_notify` installs a templated `notify-failure@.service` in both system and
 user scope. Its `ExecStart` is `curl` with a config file loaded as a credential
-that carries the ntfy URL and a write-only token from SOPS, and a body naming the
-unit and host. No script. It is attached with `OnFailure=` to every Quadlet,
-every backup timer, the pull unit and the firewall unit. The reboot-required timer
-posts through the same path. Notifications leave each host directly and do not
-depend on the edge.
+that carries the Pushover endpoint, the application token and the user key from
+SOPS, and a body naming the unit and host. Pushover takes a form POST, and curl
+merges repeated `data` entries in a config file with `&`, so this stays one curl
+invocation and no script. It is attached with `OnFailure=` to every Quadlet, every
+backup timer, the pull unit and the firewall unit. The reboot-required timer posts
+through the same path.
+
+Notifications leave each host directly. They depend on neither the edge nor the
+monitoring host, which is the property that makes them worth having: an outage of
+the thing that watches must not also silence the thing that reports. That rules
+out running the notification service beside the monitor.
 
 ### 8.3 Observability
 
 Persistent journald with a size cap. Logs are read as root with
 `journalctl _UID=<uid>`; service users are not added to the `systemd-journal`
-group, which would expose every other service's logs. An external uptime monitor
-checks the public URLs. No metrics stack in v1.
+group, which would expose every other service's logs. No metrics stack in v1.
+
+Absence is monitored separately from failure. A failing unit reports itself; a
+host that stops running anything reports nothing, and silence is indistinguishable
+from health. An Uptime Kuma instance hosted away from both hosts closes that gap:
+each successful pull and each successful backup pings a push monitor, and Kuma
+alerts through Pushover when a ping does not arrive in time. Kuma's push monitors
+have no separate grace period, so each interval is set to the expected period plus
+enough slack to absorb a late run. The same instance runs an HTTP monitor against
+the public URL, which is the external uptime check. Push URLs are bearer secrets
+and live in SOPS: anyone holding one can mark a check healthy and mask a real
+outage. Nothing watches Kuma itself; the host provider's own pod-failure alert is
+the backstop.
 
 ## 9. Verification and first-boot experiments
 

@@ -29,6 +29,11 @@ deerlab_allowed_signers:
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 
+# Pushover's message endpoint. Fixed and public; the token and user key that
+# authenticate against it are the secrets. Named globally because both
+# base_notify and podman_user render the same curl configuration from it.
+deerlab_pushover_url: https://api.pushover.net/1/messages.json
+
 deerlab_wg_port: <WireGuard port>
 deerlab_wg_ipv4_prefix: <tunnel IPv4 prefix>
 deerlab_wg_ipv6_prefix: <tunnel IPv6 prefix>
