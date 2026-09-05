@@ -1671,12 +1671,31 @@ base_os_hidepid_enabled: false
   environment:
     DEBIAN_FRONTEND: noninteractive
 
-# Phase 2 — Accounts
+# Phase 2 — Directories
+#
+# copy and template both fail when the parent does not exist, and a stock
+# Debian 13 image ships none of these. Verified on the real hosts:
+# /etc/systemd/journald.conf.d is absent.
+
+- name: Create the configuration directories this role writes into
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/systemd/journald.conf.d
+    - /etc/default/grub.d
+    - /etc/needrestart/conf.d
+    - /etc/chrony/conf.d
+
+# Phase 3 — Accounts
 
 - name: Configure the admin and root accounts
   ansible.builtin.include_tasks: accounts.yml
 
-# Phase 3 — Time
+# Phase 4 — Time
 
 - name: Set the timezone
   community.general.timezone:
@@ -1697,7 +1716,7 @@ base_os_hidepid_enabled: false
     enabled: true
     state: started
 
-# Phase 4 — Kernel
+# Phase 5 — Kernel
 
 - name: Apply kernel parameters
   ansible.posix.sysctl:
@@ -1734,7 +1753,7 @@ base_os_hidepid_enabled: false
     msg: /etc/default/grub not found. Add "{{ base_os_kernel_cmdline }}" to the boot loader by hand.
   when: not base_os_grub.stat.exists
 
-# Phase 5 — Logging
+# Phase 6 — Logging
 
 - name: Create the persistent journal directory
   ansible.builtin.file:
@@ -1759,7 +1778,7 @@ base_os_hidepid_enabled: false
     mode: "0644"
   notify: Restart journald
 
-# Phase 6 — Updates
+# Phase 7 — Updates
 
 - name: Enable periodic unattended upgrades
   ansible.builtin.copy:
@@ -1795,7 +1814,7 @@ base_os_hidepid_enabled: false
     group: root
     mode: "0644"
 
-# Phase 7 — Audit
+# Phase 8 — Audit
 
 - name: Configure auditd
   when: base_os_auditd_enabled
@@ -1830,7 +1849,7 @@ base_os_hidepid_enabled: false
         enabled: true
         state: started
 
-# Phase 8 — /proc hiding (optional)
+# Phase 9 — /proc hiding (optional)
 
 - name: Hide other users' processes
   ansible.builtin.include_tasks: hidepid.yml
@@ -1894,6 +1913,17 @@ base_os_hidepid_enabled: false
     opts: rw,nosuid,nodev,noexec,relatime,hidepid=invisible,gid=proc
     state: present
   notify: Flag reboot required
+
+- name: Create the hidepid drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - systemd-logind
+    - polkit
 
 - name: Exempt logind and polkit from hidepid
   ansible.builtin.copy:
@@ -3109,6 +3139,15 @@ base_notify_onfailure_units:
     mode: "0644"
   notify: Reload systemd
 
+- name: Create the drop-in directories for the host units
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ base_notify_onfailure_units }}"
+
 - name: Attach the notifier to host units
   ansible.builtin.copy:
     content: |
@@ -3927,9 +3966,12 @@ podman_user_wg_prefixes:
     loop_var: podman_user_item
     label: "{{ podman_user_item.key }}"
 
-- name: Reload systemd for the drop-ins
+# systemd_service with only daemon_reload always reports changed, which would
+# fail the idempotency gate in Task 22. Gate it on the drop-ins actually moving.
+- name: Reload systemd for the drop-ins  # noqa: no-handler
   ansible.builtin.systemd_service:
     daemon_reload: true
+  when: podman_user_dropins_changed | default(false)
 
 - name: Start each user manager
   ansible.builtin.systemd_service:
@@ -3998,6 +4040,17 @@ podman_user_wg_prefixes:
     mode: "0640"
   no_log: true
 
+- name: Create the drop-in directories for {{ podman_user_item.key }}
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "/etc/systemd/system/user@{{ podman_user_item.value.uid }}.service.d"
+    - "/etc/systemd/system/user-{{ podman_user_item.value.uid }}.slice.d"
+
 - name: Order the user manager after the tunnel for {{ podman_user_item.key }}
   ansible.builtin.copy:
     content: |
@@ -4009,6 +4062,7 @@ podman_user_wg_prefixes:
     owner: root
     group: root
     mode: "0644"
+  register: podman_user_wait_dropin
 
 - name: Cap the slice resources of {{ podman_user_item.key }}
   ansible.builtin.copy:
@@ -4029,6 +4083,14 @@ podman_user_wg_prefixes:
     owner: root
     group: root
     mode: "0644"
+  register: podman_user_slice_dropin
+
+- name: Record whether a drop-in changed for {{ podman_user_item.key }}
+  ansible.builtin.set_fact:
+    podman_user_dropins_changed: >-
+      {{ podman_user_dropins_changed | default(false)
+         or podman_user_wait_dropin.changed
+         or podman_user_slice_dropin.changed }}
 ```
 
 `roles/podman_user/handlers/main.yml`:
