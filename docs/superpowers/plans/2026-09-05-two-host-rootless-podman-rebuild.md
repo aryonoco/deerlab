@@ -2138,7 +2138,7 @@ argument_specs:
         description: Prefixes exempt from PerSourcePenalties.
       base_ssh_max_auth_tries:
         type: int
-        default: 3
+        default: 6
       base_ssh_login_grace_time:
         type: int
         default: 30
@@ -2173,7 +2173,15 @@ base_ssh_admin_user: "{{ deerlab_admin_user }}"
 base_ssh_penalty_exempt:
   - "{{ deerlab_wg_ipv4_prefix }}"
   - "{{ deerlab_wg_ipv6_prefix }}"
-base_ssh_max_auth_tries: 3
+# Debian's default, and deliberately not lowered. Under `AuthenticationMethods
+# publickey` with passwords disabled, MaxAuthTries only caps how many public
+# keys a client may offer: an attacker either holds a key or does not, so a low
+# value buys no brute-force resistance. It does lock out an operator whose agent
+# holds several keys, because ssh offers them in agent order until one is
+# accepted — verified here, the deerlab key is the fourth offered, so a limit of
+# 3 would have made both hosts console-only. PerSourcePenalties below is the
+# actual brute-force control.
+base_ssh_max_auth_tries: 6
 base_ssh_login_grace_time: 30
 
 base_ssh_kex_algorithms:
@@ -5385,6 +5393,20 @@ with `mise x -- ansible svc1 -m ansible.builtin.reboot`, confirm
 `systemctl --user --machine=wallabag@ is-active wallabag.service`, then the
 edge. The tunnel re-establishes itself within 30 seconds of the edge
 returning.
+
+## SSH from a machine with several keys
+
+`ssh` offers agent keys in agent order until one is accepted, and each offer
+counts against the server's `MaxAuthTries`. If you carry many keys, pin the one
+that belongs to these hosts so only it is offered:
+
+    Host <edge public IPv4> <services public IPv4>
+        IdentitiesOnly yes
+        IdentityFile ~/.ssh/deerlab.pub
+
+Pointing `IdentityFile` at the *public* key selects that identity from the
+agent. This is a convenience, not a requirement — the server's limit is set high
+enough that an unpinned client still authenticates.
 
 ## Rotating a secret
 
