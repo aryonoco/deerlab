@@ -1065,8 +1065,11 @@ deerlab_admin_ssh_keys:
   - "ssh-ed25519 <Deerlab SSH public key> Deerlab"
 
 # Keys allowed to sign commits on the release branch, in allowed_signers format.
+# One per machine the operator commits from; any of them may sign a release head.
 deerlab_allowed_signers:
-  - "github@aryan.ameri.coffee ssh-ed25519 <Deerlab SSH public key>"
+  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 1>"
+  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 2>"
+  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 3>"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 
@@ -1077,9 +1080,15 @@ deerlab_wg_ipv6_prefix: <tunnel IPv6 prefix>
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
 ```
 
-Both entries are the operator's `Deerlab` SSH key, which lives only in the
-ssh-agent on the operator machine. It authenticates the admin login and signs
-release commits. These are public keys: inventory data, not secrets.
+These are two different keys with two different jobs, and conflating them
+breaks either login or delivery. `deerlab_admin_ssh_keys` is the `Deerlab` key,
+which lives only in the ssh-agent and authenticates the admin login on both
+hosts. `deerlab_allowed_signers` holds the operator's GitHub signing keys, one per
+machine they commit from, and that list is what the hosts check with
+`ansible-pull --verify-commit` before applying anything — so whichever machine
+signs a release head, its key must be in it. The `Deerlab` key is deliberately
+absent from that list: it authenticates a login and signs nothing. All of these
+are public keys: inventory data, not secrets.
 
 `inventory/group_vars/podman_hosts/main.yml`:
 
@@ -1238,30 +1247,43 @@ creation_rules:
 
 Task 12 runs `ansible-pull --verify-commit`, which rejects a `release` head that
 is not signed by a key in `deerlab_allowed_signers`. Configure signing now, in
-the repository, using the same `Deerlab` key the agent already holds. Git needs
-the public half on disk to name the key; the private half stays in the agent.
+this repository only, with the operator's GitHub signing key — not the `Deerlab`
+key, which is for SSH login to the hosts and nothing else.
 
 ```bash
-ssh-add -L | grep Deerlab > ~/.ssh/deerlab.pub
-chmod 644 ~/.ssh/deerlab.pub
 git config gpg.format ssh
-git config user.signingkey ~/.ssh/deerlab.pub
+git config user.signingkey ~/.ssh/id_ed25519.pub
 git config commit.gpgsign true
 git config tag.gpgsign true
 ```
+
+Git also needs an allowed-signers file to verify anything locally; without one it
+refuses to check an SSH signature at all and reports `N` for every commit,
+signed or not. Point it at the same line the inventory carries:
+
+```bash
+ssh-add -L | grep -v ' Deerlab *$' \
+  | awk '{printf "github@aryan.ameri.coffee %s %s\n", $1, $2}' \
+  > ~/.ssh/deerlab_allowed_signers
+git config gpg.ssh.allowedSignersFile ~/.ssh/deerlab_allowed_signers
+```
+
+That writes one line per signing key the agent holds, skipping `Deerlab`. It must
+match `deerlab_allowed_signers` in the inventory; the hosts get their copy of the
+same list from there in Task 12.
 
 From here on every commit in this repository is signed, including this task's
 own. Verify it on that commit rather than on a throwaway one — there is no need
 to create and reset an empty commit on a branch that already carries work:
 
 ```bash
-git log -1 --format='%G? %h %s'
+git log -1 --format='%G? %GS'
 ```
 
-Expected, once you have committed Step 7: a leading `U`, meaning a good
-signature by a key that is not in a local allowed-signers file. `N` means the
-commit was not signed and the configuration above did not take. The hosts hold
-the allowed-signers file, which is what turns `U` into `G` there.
+Expected, once you have committed Step 7: `G` and the signer identity. `U` means
+the signature is good but the allowed-signers file was not found or does not list
+the key. `N` means the commit is not signed at all and the configuration above
+did not take.
 
 - [ ] **Step 5: Write the playbooks**
 
