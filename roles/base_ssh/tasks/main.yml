@@ -23,31 +23,25 @@
     - /etc/ssh/ssh_host_dsa_key.pub
   notify: Restart ssh
 
-- name: Remove the cloud-init sshd override
-  ansible.builtin.file:
-    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
-    state: absent
-  notify: Restart ssh
-
-# sshd's `Include` keeps the first value it sees for a keyword, and
-# /etc/ssh/sshd_config.d/*.conf is expanded in glob (alphabetical) order.
-# Any other drop-in in this directory therefore outranks ours whenever it
-# sorts before "50-deerlab.conf" — found live on svc1, where the provider's
-# own 01-hosthatch.conf set `PermitRootLogin yes` and silently won. This
-# role is the sole owner of sshd_config.d, so anything else there is
-# removed rather than merged with.
-- name: Find other sshd drop-ins that could outrank this one
+# sshd reads sshd_config.d in lexical order and the FIRST value for a keyword
+# wins, so a file sorting ahead of ours silently overrides it. svc1's provider
+# ships /etc/ssh/sshd_config.d/01-hosthatch.conf with `PermitRootLogin yes`,
+# which beat a 50- drop-in and left root login enabled while sshd -T looked
+# fine. Two defences: this project owns the directory outright and removes
+# anything it did not write, and our file sorts first so it still wins if
+# cloud-init or the provider puts one back between pull runs.
+- name: Find foreign sshd drop-ins
   ansible.builtin.find:
     paths: /etc/ssh/sshd_config.d
     patterns: "*.conf"
-    excludes: "50-deerlab.conf"
-  register: base_ssh_other_dropins
+    excludes: "00-deerlab.conf"
+  register: base_ssh_foreign_dropins
 
-- name: Remove other sshd drop-ins
+- name: Remove foreign sshd drop-ins
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
-  loop: "{{ base_ssh_other_dropins.files }}"
+  loop: "{{ base_ssh_foreign_dropins.files }}"
   loop_control:
     label: "{{ item.path }}"
   notify: Restart ssh
@@ -56,8 +50,8 @@
   block:
     - name: Write the sshd drop-in
       ansible.builtin.template:
-        src: 50-deerlab.conf.j2
-        dest: /etc/ssh/sshd_config.d/50-deerlab.conf
+        src: 00-deerlab.conf.j2
+        dest: /etc/ssh/sshd_config.d/00-deerlab.conf
         owner: root
         group: root
         mode: "0644"
@@ -72,12 +66,12 @@
   rescue:
     - name: Remove the rejected drop-in
       ansible.builtin.file:
-        path: /etc/ssh/sshd_config.d/50-deerlab.conf
+        path: /etc/ssh/sshd_config.d/00-deerlab.conf
         state: absent
 
     - name: Fail after removing the rejected drop-in
       ansible.builtin.fail:
-        msg: sshd -t rejected 50-deerlab.conf. The file was removed to prevent a lockout.
+        msg: sshd -t rejected 00-deerlab.conf. The file was removed to prevent a lockout.
 
 - name: Restart ssh when the drop-in changed  # noqa: no-handler
   ansible.builtin.systemd_service:
