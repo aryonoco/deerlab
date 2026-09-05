@@ -27,6 +27,27 @@
 - Inventory host names are `edge1` and `svc1`. Tunnel addresses: edge `<edge tunnel IPv4>` / `<edge tunnel IPv6>`, services `<services tunnel IPv4>` / `<services tunnel IPv6>`. WireGuard port `<WireGuard port>`. Service UIDs start at `2000`; subordinate ranges are `100000 + (uid - 2000) * 65536`, width `65536`.
 - Deviations from the spec, agreed here: the repository is public, so hosts clone over anonymous HTTPS and no deploy key exists on any host, while signature verification of the `release` head still applies. There is no separate `bootstrap.yml`; the push path is `site.yml` run as root once, and the only extra bootstrap action is registering the host's age public key as a SOPS recipient. There are no thin `caddy` and `wallabag` roles: the service definition gained a `config_files` list that the generic role writes into the service user's home and restarts on, which covers the Caddyfile and leaves nothing service-specific for a role to do.
 
+## Operator Gates
+
+Some tasks depend on work only the operator can do, outside this repository.
+Before dispatching an implementer for a gated task, confirm with the operator
+that its prerequisite is done. Do not assume, and do not work around a missing
+prerequisite.
+
+| Task | Prerequisite the operator must confirm |
+| --- | --- |
+| 5 | ntfy topic and write token exist; healthchecks.io project with four checks exists; a root password hash has been generated. Commit signing is configured in Step 4 of the task itself. |
+| 11 | The ntfy token in `deerlab_ntfy_token` is live, so the delivery test can be seen. |
+| 12 | `main` has been merged to `release` and the head of `release` is signed by the `Deerlab` key. |
+| 18 | `A` and `AAAA` records for `wallabag.<domain>` point at `<edge public IPv4>`. Caddy requests a certificate on first start and a failed HTTP-01 challenge consumes Let's Encrypt rate limit. |
+| 20 | The S3 bucket exists and per-service access keys have been created and put in the SOPS files. |
+
+Both VPSs are already provisioned: edge `<edge public IPv4>`, services `<services public IPv4>`,
+stock Debian 13, root login by the operator's `Deerlab` SSH key, no provider
+firewall.
+
+---
+
 ---
 
 ## File Structure
@@ -1003,11 +1024,11 @@ deerlab_timezone: Etc/UTC
 
 # SSH public keys allowed to log in as the admin user.
 deerlab_admin_ssh_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPUTYOURKEYHERE operator@laptop"
+  - "ssh-ed25519 <Deerlab SSH public key> Deerlab"
 
 # Keys allowed to sign commits on the release branch, in allowed_signers format.
 deerlab_allowed_signers:
-  - "info@ameri.me ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPUTYOURKEYHERE"
+  - "github@aryan.ameri.coffee ssh-ed25519 <Deerlab SSH public key>"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 
@@ -1018,7 +1039,9 @@ deerlab_wg_ipv6_prefix: <tunnel IPv6 prefix>
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
 ```
 
-Replace the two `AAAAC3...PUTYOURKEYHERE` values with the operator's real public keys. They are inventory data, not secrets.
+Both entries are the operator's `Deerlab` SSH key, which lives only in the
+ssh-agent on the operator machine. It authenticates the admin login and signs
+release commits. These are public keys: inventory data, not secrets.
 
 `inventory/group_vars/podman_hosts/main.yml`:
 
@@ -1058,12 +1081,12 @@ podman_services: {}
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-ansible_host: 203.0.113.10
+ansible_host: <edge public IPv4>
 base_wireguard_ipv4: <edge tunnel IPv4>
 base_wireguard_ipv6: "<edge tunnel IPv6>"
 base_wireguard_public_key: "REPLACED-IN-TASK-8"
 # Public address and port the services host connects to. Literal IP, not a name.
-base_wireguard_public_endpoint: "203.0.113.10:<WireGuard port>"
+base_wireguard_public_endpoint: "<edge public IPv4>:<WireGuard port>"
 ```
 
 `inventory/host_vars/svc1/main.yml`:
@@ -1072,13 +1095,15 @@ base_wireguard_public_endpoint: "203.0.113.10:<WireGuard port>"
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-ansible_host: 203.0.113.20
+ansible_host: <services public IPv4>
 base_wireguard_ipv4: <services tunnel IPv4>
 base_wireguard_ipv6: "<services tunnel IPv6>"
 base_wireguard_public_key: "REPLACED-IN-TASK-8"
 ```
 
-Replace the two `203.0.113.x` addresses with the provider-assigned public IPv4 addresses when the VPSs exist. Task 8 replaces the WireGuard public keys.
+The addresses are the provider-assigned public IPv4 addresses of the two VPSs
+that already exist: `<edge public IPv4>` is the edge, `<services public IPv4>` the services
+host. Task 9 replaces the WireGuard public keys.
 
 - [ ] **Step 2: Create the encrypted files**
 
@@ -1151,7 +1176,36 @@ creation_rules:
     age: "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm"
 ```
 
-- [ ] **Step 4: Write the playbooks**
+- [ ] **Step 4: Configure commit signing on the operator machine**
+
+Task 12 runs `ansible-pull --verify-commit`, which rejects a `release` head that
+is not signed by a key in `deerlab_allowed_signers`. Configure signing now, in
+the repository, using the same `Deerlab` key the agent already holds. Git needs
+the public half on disk to name the key; the private half stays in the agent.
+
+```bash
+ssh-add -L | grep Deerlab > ~/.ssh/deerlab.pub
+chmod 644 ~/.ssh/deerlab.pub
+git config gpg.format ssh
+git config user.signingkey ~/.ssh/deerlab.pub
+git config commit.gpgsign true
+git config tag.gpgsign true
+```
+
+Verify that signing works before going further:
+
+```bash
+git commit --allow-empty -m "Check commit signing"
+git config gpg.ssh.allowedSignersFile /dev/null
+git log -1 --format='%G?'
+git reset --hard HEAD~1
+git config --unset gpg.ssh.allowedSignersFile
+```
+
+Expected: `%G?` prints `U` (good signature, unknown signer) rather than `N`.
+`N` means the commit was not signed and the configuration above did not take.
+
+- [ ] **Step 5: Write the playbooks**
 
 Only `site.yml` and `deps.yml` exist after this task. `base.yml` is created in Task 7 and grows one role per task, `services.yml` in Task 16 and `edge.yml` in Task 18, so that every intermediate commit lints green with no missing roles.
 
@@ -1189,7 +1243,7 @@ Only `site.yml` and `deps.yml` exist after this task. `base.yml` is created in T
       run_once: true
 ```
 
-- [ ] **Step 5: Verify the inventory parses and secrets decrypt**
+- [ ] **Step 6: Verify the inventory parses and secrets decrypt**
 
 Run:
 
@@ -1203,7 +1257,7 @@ Expected: the graph shows `podman_hosts` containing `edge` with `edge1` and `ser
 Run: `just ci`
 Expected: passes.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add inventory secrets .sops.yaml playbooks
@@ -1228,13 +1282,17 @@ from the start."
 
 - Produces: a reachable `svc1` with root key access, which every host verification step in Phase 2 uses.
 
-- [ ] **Step 1: Create the VPS**
+- [ ] **Step 1: Confirm the VPS**
 
-At the provider, create a VPS from the stock Debian 13 image with your SSH public key installed for root. Choose the smallest size with at least 2 GB RAM and 20 GB disk. Do not enable any provider firewall yet; the host firewall is the control.
+The services VPS already exists at `<services public IPv4>`, running stock Debian 13
+with the `Deerlab` public key installed for root. No provider firewall is
+enabled; the host firewall written in Task 10 is the only control.
 
-- [ ] **Step 2: Record its address**
+- [ ] **Step 2: Confirm the recorded address**
 
-Set `ansible_host` in `inventory/host_vars/svc1/main.yml` to the public IPv4 address the provider assigned.
+`ansible_host` in `inventory/host_vars/svc1/main.yml` is already `<services public IPv4>`
+from Task 5. Check it matches the host you intend to rebuild before running
+anything against it.
 
 - [ ] **Step 3: Trust the host key and verify reachability**
 
@@ -4457,9 +4515,17 @@ git commit -m "Trim Wallabag to the capabilities it proved to need"
 - Consumes: `deerlab_acme_email`, `deerlab_domain`, `hostvars['svc1']['base_wireguard_ipv4']`, the Wallabag backend on port 8080 from Task 16.
 - Produces: the `caddy` service on `edge1`, public HTTPS for `wallabag.<domain>`, and a working tunnel in both directions.
 
-- [ ] **Step 1: Create the VPS and point DNS at it**
+- [ ] **Step 1: Confirm the VPS and the DNS records**
 
-Create the edge VPS exactly as in Task 6 Step 1. Set `ansible_host` and `base_wireguard_public_endpoint` in `inventory/host_vars/edge1/main.yml` to the assigned IPv4 address (endpoint form `<ip>:<WireGuard port>`). At your DNS provider create `A` and `AAAA` records for `wallabag.<domain>` pointing at the edge's public addresses; Caddy needs them for the HTTP-01 challenge on first start.
+The edge VPS already exists at `<edge public IPv4>`, stock Debian 13 with the
+`Deerlab` key installed for root. `ansible_host` and
+`base_wireguard_public_endpoint` in `inventory/host_vars/edge1/main.yml` were set
+to it in Task 5.
+
+Before running anything in this task, confirm with the operator that `A` and
+`AAAA` records for `wallabag.<domain>` point at the edge's public addresses.
+Caddy requests a certificate on first start and the HTTP-01 challenge fails
+without them, which burns Let's Encrypt rate limit.
 
 ```bash
 ssh-keyscan -H "$(mise x -- ansible-inventory --host edge1 | python3 -c 'import sys,json;print(json.load(sys.stdin)["ansible_host"])')" >> ~/.ssh/known_hosts
