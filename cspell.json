@@ -16,9 +16,6 @@
     }
   ],
   "ignorePaths": [
-    ".terraform/**",
-    ".opentofu/**",
-    "*.lock.hcl",
     ".git/**",
     ".pre-commit-config.yaml",
     "collections/**"

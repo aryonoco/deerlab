@@ -3,8 +3,6 @@
 {
   "ignores": [
     "collections/**",
-    "**/.terraform/**",
-    "**/.opentofu/**",
     "CLAUDE.md",
     ".claude/**"
   ]

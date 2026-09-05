@@ -22,7 +22,6 @@ ohmyzsh/ohmyzsh path:plugins/encode64
 ohmyzsh/ohmyzsh path:plugins/pip
 
 # OMZ Dev Tool Plugins - Deferred for faster startup
-ohmyzsh/ohmyzsh path:plugins/terraform kind:defer
 ohmyzsh/ohmyzsh path:plugins/ansible kind:defer
 ohmyzsh/ohmyzsh path:plugins/gh kind:defer
 

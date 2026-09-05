@@ -31,33 +31,9 @@ __pycache__/
 *.pyc
 .venv/
 
-# ---------------------------------------------------------------------------
-# OpenTofu
-# ---------------------------------------------------------------------------
-
-# Provider plugins are fetched on init; never commit them
-tofu/.terraform/
-
-# Backup state files (the primary terraform.tfstate IS committed — encrypted)
-tofu/*.tfstate.backup
-.terraform.tfstate.lock.info
-
 # Auto-generated tfvars and override files may contain secrets
 *.auto.tfvars
 *.local.tfvars
-!terraform.tfvars.example
-
-# Override files
-tofu/override.tf
-tofu/override.tf.json
-tofu/*_override.tf
-tofu/*_override.tf.json
-
-# General OpenTofu/Terraform directories (outside tofu/)
-.opentofu/
-**/.opentofu/
-.terraform/
-**/.terraform/
 
 # Plan files may contain secrets
 *.tfplan

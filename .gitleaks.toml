@@ -11,14 +11,8 @@ description = "Allow SOPS-encrypted files, encrypted state, and vendored collect
 paths = [
   # SOPS-encrypted files — values are ciphertext (ENC[AES256_GCM,...]), safe to commit
   '''.*\.sops\.yaml$''',
-  '''.*\.sops\.json$''',
-  # SOPS configuration — contains age public key (not a secret)
+  # SOPS configuration — contains age public keys (not secrets)
   '''\.sops\.yaml$''',
-  # Encrypted OpenTofu state (PBKDF2+AES-GCM)
-  '''tofu/terraform\.tfstate$''',
-  # Example/template files with placeholder values
-  '''.*\.sops\.yaml\.example$''',
-  '''.*\.sops\.json\.example$''',
   # Vendored Ansible collections (excluded everywhere in this repo)
   '''collections/''',
 ]
