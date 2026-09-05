@@ -2094,7 +2094,7 @@ ruleset, and an optional hidepid mount that is off by default."
 - Create: `roles/base_ssh/meta/argument_specs.yml`
 - Create: `roles/base_ssh/tasks/main.yml`
 - Create: `roles/base_ssh/handlers/main.yml`
-- Create: `roles/base_ssh/templates/50-deerlab.conf.j2`
+- Create: `roles/base_ssh/templates/00-deerlab.conf.j2`
 - Modify: `playbooks/base.yml`
 
 **Interfaces:**
@@ -2239,18 +2239,35 @@ base_ssh_host_key_algorithms:
     - /etc/ssh/ssh_host_dsa_key.pub
   notify: Restart ssh
 
-- name: Remove the cloud-init sshd override
+# sshd reads sshd_config.d in lexical order and the FIRST value for a keyword
+# wins, so a file sorting ahead of ours silently overrides it. svc1's provider
+# ships /etc/ssh/sshd_config.d/01-hosthatch.conf with `PermitRootLogin yes`,
+# which beat a 50- drop-in and left root login enabled while sshd -T looked
+# fine. Two defences: this project owns the directory outright and removes
+# anything it did not write, and our file sorts first so it still wins if
+# cloud-init or the provider puts one back between pull runs.
+- name: Find foreign sshd drop-ins
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    patterns: "*.conf"
+    excludes: "00-deerlab.conf"
+  register: base_ssh_foreign_dropins
+
+- name: Remove foreign sshd drop-ins
   ansible.builtin.file:
-    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+    path: "{{ item.path }}"
     state: absent
+  loop: "{{ base_ssh_foreign_dropins.files }}"
+  loop_control:
+    label: "{{ item.path }}"
   notify: Restart ssh
 
 - name: Deploy the sshd drop-in with rollback on validation failure
   block:
     - name: Write the sshd drop-in
       ansible.builtin.template:
-        src: 50-deerlab.conf.j2
-        dest: /etc/ssh/sshd_config.d/50-deerlab.conf
+        src: 00-deerlab.conf.j2
+        dest: /etc/ssh/sshd_config.d/00-deerlab.conf
         owner: root
         group: root
         mode: "0644"
@@ -2265,12 +2282,12 @@ base_ssh_host_key_algorithms:
   rescue:
     - name: Remove the rejected drop-in
       ansible.builtin.file:
-        path: /etc/ssh/sshd_config.d/50-deerlab.conf
+        path: /etc/ssh/sshd_config.d/00-deerlab.conf
         state: absent
 
     - name: Fail after removing the rejected drop-in
       ansible.builtin.fail:
-        msg: sshd -t rejected 50-deerlab.conf. The file was removed to prevent a lockout.
+        msg: sshd -t rejected 00-deerlab.conf. The file was removed to prevent a lockout.
 
 - name: Restart ssh when the drop-in changed  # noqa: no-handler
   ansible.builtin.systemd_service:
@@ -2291,7 +2308,7 @@ base_ssh_host_key_algorithms:
     state: restarted
 ```
 
-`roles/base_ssh/templates/50-deerlab.conf.j2`:
+`roles/base_ssh/templates/00-deerlab.conf.j2`:
 
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
@@ -2356,6 +2373,11 @@ mise x -- ansible svc1 -e ansible_user=root -m ansible.builtin.ping
 
 Expected: the first command connects as the admin user and prints `permitrootlogin no`, `allowusers <admin>`, a key exchange list beginning with `mlkem768x25519-sha256`, and the penalty settings. The final command fails with `Permission denied (publickey)`, proving root is locked out.
 
+Also list the directory and confirm `00-deerlab.conf` is the only file in it.
+`sshd -T` reporting the right values is not sufficient on its own — it reports
+the merged result, and a provider file that sorts ahead of ours would show up
+there as our own setting having been applied when it had not.
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -2364,7 +2386,12 @@ git commit -m "Add the base_ssh role
 
 Key-only login for the admin user, root disabled, post-quantum key
 exchange first, per-source penalties instead of fail2ban, and a
-validated drop-in that removes itself if sshd rejects it."
+validated drop-in that removes itself if sshd rejects it.
+
+The role owns /etc/ssh/sshd_config.d and deletes anything it did not
+write. The provider ships a drop-in enabling root login that sorts
+ahead of ours, and sshd takes the first value it sees for a keyword,
+so without this the hardening silently did nothing."
 ```
 
 ### Task 9: base_wireguard role
