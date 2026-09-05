@@ -4,6 +4,10 @@
 base_firewall_services: "{{ podman_services }}"
 base_firewall_ssh_port: 22
 base_firewall_wg_port: "{{ deerlab_wg_port }}"
+# The interface backend access is scoped to. Named here rather than written
+# into the template, so it cannot drift from the interface base_wireguard
+# actually creates.
+base_firewall_wg_interface: wg0
 base_firewall_peer_ipv4: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv4'] | default('') }}"
 base_firewall_peer_ipv6: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv6'] | default('') }}"
 

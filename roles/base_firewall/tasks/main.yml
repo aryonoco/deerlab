@@ -9,16 +9,22 @@
       - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
     fail_msg: base_firewall_role must be edge or services, and a services host needs the edge's tunnel address
 
+# Split by protocol. A publish entry may carry a /udp suffix, and collapsing
+# both into one list would emit a tcp accept for a udp service: the rendered
+# ruleset would look correct, nft --check would pass, and the port would simply
+# be unreachable at runtime.
 - name: Collect the backend ports published on this host
   ansible.builtin.set_fact:
-    base_firewall_backend_ports: >-
-      {{ base_firewall_services.values()
-         | map(attribute='publish')
-         | flatten
+    base_firewall_backend_tcp_ports: >-
+      {{ base_firewall_services.values() | map(attribute='publish') | flatten
+         | reject('search', '/udp$')
          | map('regex_replace', '^([0-9]+):.*$', '\1')
-         | map('int')
-         | unique
-         | sort }}
+         | map('int') | unique | sort }}
+    base_firewall_backend_udp_ports: >-
+      {{ base_firewall_services.values() | map(attribute='publish') | flatten
+         | select('search', '/udp$')
+         | map('regex_replace', '^([0-9]+):.*$', '\1')
+         | map('int') | unique | sort }}
 
 - name: Write the ruleset
   ansible.builtin.template:

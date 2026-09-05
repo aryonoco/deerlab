@@ -25,6 +25,10 @@ argument_specs:
       base_firewall_wg_port:
         type: int
         required: true
+      base_firewall_wg_interface:
+        type: str
+        default: wg0
+        description: Tunnel interface that backend access is scoped to.
       base_firewall_peer_ipv4:
         type: str
         default: ""
