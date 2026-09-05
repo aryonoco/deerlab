@@ -1696,6 +1696,13 @@ base_os_hidepid_enabled: false
     - /etc/default/grub.d
     - /etc/needrestart/conf.d
     - /etc/chrony/conf.d
+    # Watched by the audit rules below and created by roles that run later.
+    # auditctl aborts the whole ruleset on one missing watch path, so on a
+    # stock image the rules would fail to load and take auditd down with them.
+    # /etc/deerlab is 0755 on purpose: service users must traverse it to reach
+    # their own credential file under /etc/deerlab/pushover/.
+    - /etc/deerlab
+    - /etc/containers/systemd
 
 # Phase 3 — Accounts
 
@@ -3069,16 +3076,16 @@ base_notify_onfailure_units:
     fail_msg: base_notify needs the Pushover endpoint, application token and user key
     quiet: true
 
-- name: Create the configuration directories
+# /etc/deerlab itself is created by base_os at 0755 and its mode is not set
+# here. Two roles setting different modes on one directory would flap on every
+# run and fail the idempotency check.
+- name: Create the notifier configuration directory
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: /etc/deerlab/pushover
     state: directory
     owner: root
     group: root
     mode: "0755"
-  loop:
-    - /etc/deerlab
-    - /etc/deerlab/pushover
 
 - name: Write the curl configuration for the system notifier
   ansible.builtin.template:
@@ -3392,16 +3399,16 @@ base_pull_enabled: true
     sops_version: "{{ base_pull_sops_version }}"
     sops_source: github
 
-- name: Create the deerlab directories
+# Only the pull working directory. /etc/deerlab belongs to base_os and must
+# stay 0755: at 0700 a service user could not traverse into its own credential
+# file, so the user-scope notifier would fail to start.
+- name: Create the pull working directory
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ base_pull_dir }}"
     state: directory
     owner: root
     group: root
     mode: "0700"
-  loop:
-    - "{{ base_pull_dir }}"
-    - /etc/deerlab
 
 - name: Copy the pinned Python requirements
   ansible.builtin.copy:
