@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_firewall_services: "{{ podman_services }}"
+base_firewall_ssh_port: 22
+base_firewall_wg_port: "{{ deerlab_wg_port }}"
+base_firewall_peer_ipv4: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv4'] | default('') }}"
+base_firewall_peer_ipv6: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv6'] | default('') }}"
+
+base_firewall_edge_tcp_redirects:
+  80: 8080
+  443: 8443
+base_firewall_edge_udp_redirects:
+  443: 8443
+
+base_firewall_private_v4:
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+  - 169.254.0.0/16
+  - 100.64.0.0/10
+  - 127.0.0.0/8
+base_firewall_private_v6:
+  - fc00::/7
+  - fe80::/10
+  - ::1/128
+
+base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"

@@ -7,3 +7,4 @@
     - role: base_os
     - role: base_ssh
     - role: base_wireguard
+    - role: base_firewall

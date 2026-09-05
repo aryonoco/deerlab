@@ -1,0 +1,77 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+#!/usr/sbin/nft -f
+# {{ deerlab_managed }}
+# Never `systemctl stop nftables`: Debian's unit flushes every rule on stop.
+flush ruleset
+
+table inet deerlab {
+{% for name, svc in base_firewall_services.items() %}
+  chain svc_{{ name }} {
+{% if svc.egress == 'any' %}
+    accept
+{% elif svc.egress == 'web' %}
+    ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
+    ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
+{% for resolver in base_firewall_resolvers %}
+    {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} udp dport 53 accept
+    {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} tcp dport 53 accept
+{% endfor %}
+    tcp dport { 80, 443 } accept
+    limit rate 10/minute log prefix "nft-out-{{ name }} " level info
+    counter drop
+{% else %}
+    limit rate 10/minute log prefix "nft-out-{{ name }} " level info
+    counter drop
+{% endif %}
+  }
+
+{% endfor %}
+  chain input {
+    type filter hook input priority filter; policy drop;
+    ct state established,related accept
+    ct state invalid drop
+    iifname "lo" accept
+    meta l4proto icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept
+    meta l4proto icmpv6 icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, nd-router-solicit, mld-listener-query } accept
+    tcp dport {{ base_firewall_ssh_port }} ct state new limit rate 10/minute burst 10 packets accept
+{% if base_firewall_role == 'edge' %}
+    tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } accept
+    udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } accept
+    udp dport {{ base_firewall_wg_port }} accept
+{% elif base_firewall_backend_ports | length > 0 %}
+    iifname "wg0" ip saddr {{ base_firewall_peer_ipv4 }} tcp dport { {{ base_firewall_backend_ports | join(', ') }} } ct state new accept
+{% if base_firewall_peer_ipv6 | length > 0 %}
+    iifname "wg0" ip6 saddr {{ base_firewall_peer_ipv6 }} tcp dport { {{ base_firewall_backend_ports | join(', ') }} } ct state new accept
+{% endif %}
+{% endif %}
+    limit rate 5/minute log prefix "nft-in-drop " level info
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+  }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+    ct state established,related accept
+    ct state invalid drop
+    oifname "lo" accept
+    meta skuid 0 accept
+{% for name, svc in base_firewall_services.items() %}
+    meta skuid {{ svc.uid }} jump svc_{{ name }}
+{% endfor %}
+  }
+{% if base_firewall_role == 'edge' %}
+
+  chain prerouting_nat {
+    type nat hook prerouting priority dstnat; policy accept;
+{% for from, to in base_firewall_edge_tcp_redirects.items() %}
+    iifname != "lo" tcp dport {{ from }} redirect to :{{ to }}
+{% endfor %}
+{% for from, to in base_firewall_edge_udp_redirects.items() %}
+    iifname != "lo" udp dport {{ from }} redirect to :{{ to }}
+{% endfor %}
+  }
+{% endif %}
+}

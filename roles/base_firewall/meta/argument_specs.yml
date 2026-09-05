@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: nftables ruleset for an edge or services host
+    description: >
+      One templated ruleset. Default-drop input with SSH, ICMP for path
+      MTU discovery, and either the edge's public ports and redirects
+      or the services host's backend ports scoped to the tunnel. Output
+      is permissive for root and gets a per-UID chain for every service
+      user according to its egress class.
+    options:
+      base_firewall_role:
+        type: str
+        required: true
+        choices: [edge, services]
+      base_firewall_services:
+        type: dict
+        required: true
+        description: The podman_services dictionary for this host.
+      base_firewall_ssh_port:
+        type: int
+        default: 22
+      base_firewall_wg_port:
+        type: int
+        required: true
+      base_firewall_peer_ipv4:
+        type: str
+        default: ""
+        description: Tunnel IPv4 address of the edge, required on a services host.
+      base_firewall_peer_ipv6:
+        type: str
+        default: ""
+      base_firewall_edge_tcp_redirects:
+        type: dict
+        description: Public port to Caddy's published port, TCP.
+      base_firewall_edge_udp_redirects:
+        type: dict
+        description: Public port to Caddy's published port, UDP.
+      base_firewall_private_v4:
+        type: list
+        elements: str
+      base_firewall_private_v6:
+        type: list
+        elements: str
+      base_firewall_resolvers:
+        type: list
+        elements: str
+        description: Resolver addresses web-class services may reach on port 53.

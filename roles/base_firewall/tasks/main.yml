@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_firewall_role in ['edge', 'services']
+      - base_firewall_services is mapping
+      - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
+    fail_msg: base_firewall_role must be edge or services, and a services host needs the edge's tunnel address
+
+- name: Collect the backend ports published on this host
+  ansible.builtin.set_fact:
+    base_firewall_backend_ports: >-
+      {{ base_firewall_services.values()
+         | map(attribute='publish')
+         | flatten
+         | map('regex_replace', '^([0-9]+):.*$', '\1')
+         | map('int')
+         | unique
+         | sort }}
+
+- name: Write the ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/nft --check --file %s
+  notify: Reload nftables
+
+- name: Enable nftables
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Flush handlers so the ruleset applies before later roles test connectivity
+  ansible.builtin.meta: flush_handlers
