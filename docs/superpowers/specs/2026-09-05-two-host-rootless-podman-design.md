@@ -364,6 +364,16 @@ Kept: repository history, REUSE licensing, the devcontainer, the justfile,
 pre-commit, the lint stack, the SOPS layout, and the SSH, sysctl, nftables and
 unattended-upgrades work from `proxmox_hardening`, split into `base_*` roles.
 
+### 6.1.1 Operator machine
+
+The operator works on macOS, directly on the host, not in a container. The
+devcontainer stays in the repository but is not the execution environment: the
+age identity is no longer a file on disk, so `sops` cannot decrypt inside it.
+The identity is fetched from Bitwarden at runtime through `SOPS_AGE_KEY_CMD`,
+which the login shell exports; a process that does not inherit that variable
+cannot decrypt. `mise.toml` supplies the toolchain, with `wireguard-tools` and
+an HTTP/3-capable `curl` installed from Homebrew alongside it.
+
 ### 6.2 Versions
 
 Ansible 14 with core 2.21. Collection pins move to `community.general 13`,
@@ -446,7 +456,7 @@ roles call it rather than reimplement it.
 
 ### 7.1 Bootstrap
 
-Run once per host from the devcontainer against the provider's fresh image:
+Run once per host from the operator's machine against the provider's fresh image:
 `just bootstrap <host>`. The `bootstrap.yml` playbook creates the admin user,
 places the age private key and a read-only deploy key as root-only files,
 creates a Python virtual environment with the pinned Ansible version from a
@@ -469,13 +479,13 @@ signers file by `base_pull`.
 Branch protection on `main` requires signed commits, passing status checks and
 linear history. Because signature verification on the host must see the
 operator's signature on the branch head, merges are fast-forwards performed from
-the devcontainer with `just merge <branch>` once CI is green; GitHub's own merge
-buttons rewrite or re-sign commits. A workflow then fast-forwards `release` to
+the operator's machine with `just merge <branch>` once CI is green; GitHub's own
+merge buttons rewrite or re-sign commits. A workflow then fast-forwards `release` to
 `main`. Only that workflow may push `release`.
 
 ### 7.4 Plan visibility
 
-`just plan <host>` runs `site.yml` in check and diff mode from the devcontainer
+`just plan <host>` runs `site.yml` in check and diff mode from the operator's machine
 against the real host over SSH, for when the effect of a change should be seen
 before merging. The pull logs its own diff to the journal.
 
@@ -509,7 +519,7 @@ One `backup` role, driven by the service definition, installs per service:
 - On the edge, Caddy's data volume is backed up the same way so a rebuild does
   not exhaust certificate rate limits.
 
-Retention runs from the devcontainer with `just backup-prune`, using
+Retention runs from the operator's machine with `just backup-prune`, using
 `forget --keep-within`, as restic recommends for append-only repositories. Hosts
 never hold delete rights. `just restore-drill <service>` restores the latest
 snapshot to a scratch path, integrity-checks it and reports. The runbook schedules

@@ -46,6 +46,39 @@ Both VPSs are already provisioned: edge `<edge public IPv4>`, services `<service
 stock Debian 13, root login by the operator's `Deerlab` SSH key, no provider
 firewall.
 
+## Operator Machine
+
+Every command in this plan runs on the operator's macOS host. There is no
+container in the loop: the devcontainer still exists in the repository, but it
+cannot decrypt secrets, because the age identity is no longer a file on disk.
+
+The toolchain comes from `mise.toml`. Two things it does not provide and macOS
+does not ship come from Homebrew instead, and both are already installed:
+
+| Tool | Source | Needed by |
+| --- | --- | --- |
+| `wireguard-tools` 1.0.20260223 | `brew install wireguard-tools` | Task 5 (`wg genpsk`), Task 9 (`wg genkey`, `wg pubkey`) |
+| `curl` 8.22.0 with HTTP/3 | `brew install curl`; keg-only, so call it as `/opt/homebrew/opt/curl/bin/curl` | Task 19 Step 3. macOS ships curl 8.7.1 with no HTTP3; Homebrew's links ngtcp2 and nghttp3 |
+
+Also present and verified on this host: `sqlite3` 3.51, `gh` 2.100, Homebrew
+OpenSSL 3.6 (Apple's LibreSSL cannot do `openssl passwd -6`), GNU `sed`,
+`coreutils` and `findutils` ahead of the BSD versions on `PATH`, and `bash` 5.
+
+**Decrypting anything requires `SOPS_AGE_KEY_CMD`.** The age identity lives in
+Bitwarden and is fetched at runtime. The login shell exports the variable, but a
+process that does not inherit it — an agent shell, a `just` recipe launched from
+one — cannot decrypt, and `sops` fails with `no identity matched any of the
+recipients`. Prefix such commands:
+
+```bash
+SOPS_AGE_KEY_CMD="rbw get --field AGE-SECRET-KEY- deerlab-ansible-age-sops-key" <command>
+```
+
+Never create `~/.config/sops/age/keys.txt` to work around this: `sops` checks
+`SOPS_AGE_KEY_FILE` before `SOPS_AGE_KEY_CMD`, so that file would silently
+retire the vault route and put the key back on disk. If `sops` hangs rather than
+failing, the vault is locked and only the operator can run `rbw unlock`.
+
 ---
 
 ## File Structure
@@ -988,7 +1021,7 @@ git push origin main:refs/heads/release
 
 **Interfaces:**
 
-- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_ntfy_url`, `deerlab_ntfy_token`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
+- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_ntfy_url`, `deerlab_ntfy_token`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
 
 - [ ] **Step 1: Write the plain inventory files**
 
@@ -1019,6 +1052,13 @@ all:
 # Public data shared by every host. Secrets live in secrets.sops.yaml.
 
 deerlab_timezone: Etc/UTC
+
+# The administrative account the roles create on each host. Deliberately
+# separate from ansible_user, which only says who Ansible connects as:
+# `just bootstrap` overrides ansible_user to root, and if the roles read
+# that they would make root the admin and then lock every account out.
+deerlab_admin_user: deerlab
+ansible_user: "{{ deerlab_admin_user }}"
 
 # SSH public keys allowed to log in as the admin user.
 deerlab_admin_ssh_keys:
@@ -1053,7 +1093,7 @@ podman_user_registries:
   - docker.io
 ```
 
-`inventory/group_vars/edge/main.yml` (the `podman_services` dictionary and `caddy_caddyfile` are filled in Task 16; create the file now with the firewall role only):
+`inventory/group_vars/edge/main.yml` (the `podman_services` dictionary and `caddy_caddyfile` are filled in Task 18; create the file now with the firewall role only):
 
 ```yaml
 # SPDX-License-Identifier: 0BSD
@@ -1063,7 +1103,7 @@ base_firewall_role: edge
 podman_services: {}
 ```
 
-`inventory/group_vars/services/main.yml` (the Wallabag definition is added in Task 14):
+`inventory/group_vars/services/main.yml` (the Wallabag definition is added in Task 16):
 
 ```yaml
 # SPDX-License-Identifier: 0BSD
@@ -1082,7 +1122,7 @@ podman_services: {}
 ansible_host: <edge public IPv4>
 base_wireguard_ipv4: <edge tunnel IPv4>
 base_wireguard_ipv6: "<edge tunnel IPv6>"
-base_wireguard_public_key: "REPLACED-IN-TASK-8"
+base_wireguard_public_key: "REPLACED-IN-TASK-9"
 # Public address and port the services host connects to. Literal IP, not a name.
 base_wireguard_public_endpoint: "<edge public IPv4>:<WireGuard port>"
 ```
@@ -1096,7 +1136,7 @@ base_wireguard_public_endpoint: "<edge public IPv4>:<WireGuard port>"
 ansible_host: <services public IPv4>
 base_wireguard_ipv4: <services tunnel IPv4>
 base_wireguard_ipv6: "<services tunnel IPv6>"
-base_wireguard_public_key: "REPLACED-IN-TASK-8"
+base_wireguard_public_key: "REPLACED-IN-TASK-9"
 ```
 
 The addresses are the provider-assigned public IPv4 addresses of the two VPSs
@@ -1105,12 +1145,18 @@ host. Task 9 replaces the WireGuard public keys.
 
 - [ ] **Step 2: Create the encrypted files**
 
-Each file is created with `sops` so it is encrypted from the first commit. Values marked `CHANGE-ME` are filled by the operator; the plan cannot know them.
+Each file is written at its final path and then encrypted in place. Do **not**
+write the plaintext to `/tmp` and use `sops --encrypt --output`: `sops` matches
+`creation_rules` against the *input* path, so `/tmp/all-secrets.yaml` matches
+nothing and the command fails with `no matching creation rules found`.
+Encrypting in place also keeps plaintext out of `/tmp` entirely.
+
+Values marked `CHANGE-ME` are filled by the operator; the plan cannot know them.
+Leave them as placeholders here and generate no real secrets in this task.
 
 ```bash
 mkdir -p inventory/group_vars/all inventory/group_vars/services inventory/host_vars/edge1 inventory/host_vars/svc1 secrets
-cat > /tmp/all-secrets.yaml <<'EOF'
-ansible_user: deerlab
+cat > inventory/group_vars/all/secrets.sops.yaml <<'EOF'
 deerlab_domain: <domain>
 deerlab_acme_email: CHANGE-ME
 deerlab_ntfy_url: https://ntfy.sh/CHANGE-ME-topic
@@ -1127,37 +1173,51 @@ base_wireguard_preshared_key: CHANGE-ME
 backup_s3_bucket: s3:https://CHANGE-ME.example/deerlab-backups
 backup_s3_endpoint: https://CHANGE-ME.example
 EOF
-mise x -- sops --encrypt --output inventory/group_vars/all/secrets.sops.yaml /tmp/all-secrets.yaml
-cat > /tmp/services-secrets.yaml <<'EOF'
+mise x -- sops --encrypt --in-place inventory/group_vars/all/secrets.sops.yaml
+cat > inventory/group_vars/services/secrets.sops.yaml <<'EOF'
 wallabag_symfony_secret: CHANGE-ME
 backup_wallabag_restic_password: CHANGE-ME
 backup_wallabag_s3_access_key: CHANGE-ME
 backup_wallabag_s3_secret_key: CHANGE-ME
 EOF
-mise x -- sops --encrypt --output inventory/group_vars/services/secrets.sops.yaml /tmp/services-secrets.yaml
+mise x -- sops --encrypt --in-place inventory/group_vars/services/secrets.sops.yaml
 for h in edge1 svc1; do
-  printf 'base_wireguard_private_key: CHANGE-ME\n' > /tmp/host-secrets.yaml
-  mise x -- sops --encrypt --output "inventory/host_vars/$h/secrets.sops.yaml" /tmp/host-secrets.yaml
+  printf 'base_wireguard_private_key: CHANGE-ME\n' > "inventory/host_vars/$h/secrets.sops.yaml"
+  mise x -- sops --encrypt --in-place "inventory/host_vars/$h/secrets.sops.yaml"
 done
-cat > /tmp/backup-admin.yaml <<'EOF'
+cat > secrets/backup-admin.sops.yaml <<'EOF'
 AWS_ACCESS_KEY_ID: CHANGE-ME
 AWS_SECRET_ACCESS_KEY: CHANGE-ME
 EOF
-mise x -- sops --encrypt --output secrets/backup-admin.sops.yaml /tmp/backup-admin.yaml
-rm -f /tmp/all-secrets.yaml /tmp/services-secrets.yaml /tmp/host-secrets.yaml /tmp/backup-admin.yaml
+mise x -- sops --encrypt --in-place secrets/backup-admin.sops.yaml
 ```
 
-Then fill the real values with `just secrets-edit <file>`. Generate the pieces you can generate now:
+Confirm each file really is ciphertext before moving on:
 
 ```bash
-mise x -- age --version >/dev/null
+head -3 inventory/group_vars/all/secrets.sops.yaml
+```
+
+Expected: a line of the form `deerlab_domain: ENC[AES256_GCM,data:...]`. If any
+file is still plaintext, its encrypt step failed and must be rerun before it is
+committed.
+
+**The operator fills the real values, not this task.** Later, with the vault
+unlocked, run `just secrets-edit <file>` for each and replace the placeholders.
+The pieces that can be generated locally:
+
+```bash
 wg genpsk                                  # base_wireguard_preshared_key
 openssl passwd -6                          # deerlab_root_password_hash, for the provider console
 openssl rand -base64 48 | tr -d '/+=' | cut -c1-48   # wallabag_symfony_secret
 openssl rand -base64 48 | tr -d '/+=' | cut -c1-48   # backup_wallabag_restic_password
 ```
 
-The ntfy topic and token come from ntfy.sh (a self-served access token with write permission on the topic), the dead-man URLs from a healthchecks.io project with four checks, and the S3 values from the bucket you create in Task 18.
+`wg` comes from `brew install wireguard-tools`; `openssl` must be Homebrew's,
+because Apple's LibreSSL has no `passwd -6`. The ntfy topic and token come from
+ntfy.sh (a self-served access token with write permission on the topic), the
+dead-man URLs from a healthchecks.io project with four checks, and the S3 values
+from the bucket created in Task 20.
 
 - [ ] **Step 3: Register the secrets path in `.sops.yaml`**
 
@@ -1190,22 +1250,22 @@ git config commit.gpgsign true
 git config tag.gpgsign true
 ```
 
-Verify that signing works before going further:
+From here on every commit in this repository is signed, including this task's
+own. Verify it on that commit rather than on a throwaway one — there is no need
+to create and reset an empty commit on a branch that already carries work:
 
 ```bash
-git commit --allow-empty -m "Check commit signing"
-git config gpg.ssh.allowedSignersFile /dev/null
-git log -1 --format='%G?'
-git reset --hard HEAD~1
-git config --unset gpg.ssh.allowedSignersFile
+git log -1 --format='%G? %h %s'
 ```
 
-Expected: `%G?` prints `U` (good signature, unknown signer) rather than `N`.
-`N` means the commit was not signed and the configuration above did not take.
+Expected, once you have committed Step 7: a leading `U`, meaning a good
+signature by a key that is not in a local allowed-signers file. `N` means the
+commit was not signed and the configuration above did not take. The hosts hold
+the allowed-signers file, which is what turns `U` into `G` there.
 
 - [ ] **Step 5: Write the playbooks**
 
-Only `site.yml` and `deps.yml` exist after this task. `base.yml` is created in Task 7 and grows one role per task, `services.yml` in Task 16 and `edge.yml` in Task 18, so that every intermediate commit lints green with no missing roles.
+Only `site.yml` and `deps.yml` exist after this task, despite the Files list above naming five playbooks. `base.yml` is created in Task 7 and grows one role per task, `services.yml` in Task 13 and `edge.yml` in Task 18, so that every intermediate commit lints green with no missing roles.
 
 `playbooks/site.yml`:
 
@@ -1245,10 +1305,17 @@ Only `site.yml` and `deps.yml` exist after this task. `base.yml` is created in T
 
 Run:
 
+Decryption needs the age identity from the vault, so carry
+`SOPS_AGE_KEY_CMD` on any command that reads a SOPS file:
+
 ```bash
+export SOPS_AGE_KEY_CMD="rbw get --field AGE-SECRET-KEY- deerlab-ansible-age-sops-key"
 mise x -- ansible-inventory --graph
 mise x -- ansible-inventory --host svc1 | python3 -c "import sys,json;d=json.load(sys.stdin);print(sorted(k for k in d if k.startswith('deerlab_') or k.startswith('base_')))"
 ```
+
+If either command hangs instead of failing, the Bitwarden vault is locked; ask
+the operator to run `rbw unlock`.
 
 Expected: the graph shows `podman_hosts` containing `edge` with `edge1` and `services` with `svc1`. The variable list includes `deerlab_domain`, `deerlab_ntfy_url`, `base_wireguard_private_key`, `base_wireguard_ipv4`, proving the SOPS vars plugin decrypts.
 
@@ -1334,8 +1401,8 @@ git commit -m "Point svc1 at the new services VPS"
 
 **Interfaces:**
 
-- Consumes: `ansible_user`, `deerlab_admin_ssh_keys`, `deerlab_root_password_hash`, `deerlab_timezone` from inventory.
-- Produces: the admin user named by `ansible_user` with passwordless sudo and the operator's keys, so Task 8 can disable root login. The handler name `Flag reboot required` is reused by other roles through `notify`.
+- Consumes: `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_root_password_hash`, `deerlab_timezone` from inventory.
+- Produces: the admin user named by `deerlab_admin_user` with passwordless sudo and the operator's keys, so Task 8 can disable root login. The handler name `Flag reboot required` is reused by other roles through `notify`.
 
 - [ ] **Step 1: Write the contract first**
 
@@ -1457,7 +1524,7 @@ Expected: FAIL, `base_os` has no tasks file yet. This confirms the linter is che
 # Copyright (c) 2026 Aryan Ameri
 
 base_os_timezone: "{{ deerlab_timezone | default('Etc/UTC') }}"
-base_os_admin_user: "{{ ansible_user }}"
+base_os_admin_user: "{{ deerlab_admin_user }}"
 base_os_admin_ssh_keys: "{{ deerlab_admin_ssh_keys }}"
 base_os_root_password_hash: "{{ deerlab_root_password_hash }}"
 
@@ -2033,7 +2100,7 @@ Expected: FAIL, `base_ssh` has no tasks yet.
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-base_ssh_admin_user: "{{ ansible_user }}"
+base_ssh_admin_user: "{{ deerlab_admin_user }}"
 base_ssh_penalty_exempt:
   - "{{ deerlab_wg_ipv4_prefix }}"
   - "{{ deerlab_wg_ipv6_prefix }}"
@@ -2245,6 +2312,9 @@ validated drop-in that removes itself if sshd rejects it."
 - Produces: interface `wg0` with the tunnel addresses, and `/etc/hosts` entries `<host>.wg` for every peer. Task 10 and Task 16 use `hostvars[groups['edge'][0]].base_wireguard_ipv4` for the edge's tunnel address.
 
 - [ ] **Step 1: Generate the key pairs and store them**
+
+`wg` is not part of macOS or of `mise.toml`; install it once with
+`brew install wireguard-tools`.
 
 ```bash
 for h in edge1 svc1; do
@@ -4718,10 +4788,10 @@ Expected: `active`, `NRestarts=0`, `active`, `active`. If `NRestarts` is above z
 
 - [ ] **Step 3: HTTP/3**
 
-Run from any machine whose curl reports `HTTP3` in `curl -V` (the devcontainer's Debian curl does):
+macOS ships curl 8.7.1 with no HTTP/3. Use Homebrew's, which is keg-only, so call it by path:
 
 ```bash
-curl -sI --http3-only "https://wallabag.$(mise x -- sops -d --extract '["deerlab_domain"]' inventory/group_vars/all/secrets.sops.yaml)/login" | head -1
+/opt/homebrew/opt/curl/bin/curl -sI --http3-only "https://wallabag.$(mise x -- sops -d --extract '["deerlab_domain"]' inventory/group_vars/all/secrets.sops.yaml)/login" | head -1
 ```
 
 Expected: `HTTP/3 200`. If the connection fails or stalls, remove `h3` from the `protocols` line in `caddy_caddyfile`, drop the UDP publish and redirect, and record the failure in the runbook.
@@ -5081,7 +5151,7 @@ mise x -- ansible svc1 -m ansible.builtin.shell -a 'systemctl --user --machine=w
 mise x -- ansible edge1 -m ansible.builtin.shell -a 'systemctl --user --machine=caddy@ start deerlab-backup-caddy.service; systemctl --user --machine=caddy@ list-timers deerlab-backup-caddy.timer --no-pager | tail -2'
 ```
 
-Expected: the Wallabag journal shows the unit finishing with `Deactivated successfully` and no `Failed` line, the two backup checks on healthchecks.io are green, and the Caddy timer is scheduled. Then from the devcontainer:
+Expected: the Wallabag journal shows the unit finishing with `Deactivated successfully` and no `Failed` line, the two backup checks on healthchecks.io are green, and the Caddy timer is scheduled. Then from your machine:
 
 ```bash
 just restore-drill wallabag services
@@ -5160,7 +5230,7 @@ against the keys in `deerlab_allowed_signers`, and applies its own plays.
 
 1. Branch, change, run `just ci`, push, open a pull request.
 2. When CI is green: `just merge <branch>`. This fast-forwards `main` from
-   the devcontainer so your signature stays on the head commit. GitHub's
+   your machine so your signature stays on the head commit. GitHub's
    merge buttons would rewrite it.
 3. The `Promote` workflow fast-forwards `release`. Within 30 minutes both
    hosts apply it. Start it sooner with
@@ -5224,7 +5294,7 @@ or `nft -f /etc/nftables.conf`.
 
 ## Restore
 
-Quarterly drill from the devcontainer: `just restore-drill wallabag services`
+Quarterly drill from your machine: `just restore-drill wallabag services`
 restores the latest snapshot to `/tmp/deerlab-restore-wallabag` and prints
 the integrity check.
 
@@ -5247,8 +5317,8 @@ Real restore into the live volume, as root on the services host:
 Deleting the write-ahead log before copying is what stops a restored
 database from being overwritten by stale journal pages.
 
-Retention: `just backup-prune wallabag services` from the devcontainer,
-never from a host. The hosts' keys cannot delete.
+Retention: `just backup-prune wallabag services` from your machine, never
+from a host. The hosts' keys cannot delete.
 
 ## First-boot experiment results
 
@@ -5347,6 +5417,17 @@ Operations: `docs/runbook.md`.
 - Write commit messages as if a human wrote them
 - Sign commits. Hosts verify the release branch head against `deerlab_allowed_signers`
 
+## Development Environment
+
+- Work runs directly on the operator's macOS host, not in a container
+- Tool versions come from `mise.toml`; run `just setup` to install them.
+  `wireguard-tools` and an HTTP/3-capable `curl` come from Homebrew instead
+- The SOPS age identity is not on disk. It is fetched from Bitwarden at runtime
+  through `SOPS_AGE_KEY_CMD`, which the login shell exports. A process that does
+  not inherit it cannot decrypt; prefix the command rather than writing the key
+  to a file, because `sops` prefers `SOPS_AGE_KEY_FILE` and a keys.txt would
+  silently retire the vault route
+
 ## CRITICAL
 
 - Tool versions are managed by mise. `mise.toml` is the single source of truth, including Python tools
@@ -5364,7 +5445,7 @@ Operations: `docs/runbook.md`.
 - `just plan HOST` — check and diff against a real host
 - `just apply HOST` — push to a host; bootstrap and break-glass only, delivery is pull-based
 - `just bootstrap HOST` — first run against a fresh image as root
-- `just merge BRANCH` — fast-forward main from the devcontainer so signatures survive
+- `just merge BRANCH` — fast-forward main from your machine so signatures survive
 - `just secrets-edit FILE`, `just secrets-rekey`
 - `just backup-prune SERVICE GROUP`, `just restore-drill SERVICE GROUP`
 - `just idempotency HOST`

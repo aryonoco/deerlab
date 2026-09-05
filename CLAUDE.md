@@ -62,9 +62,12 @@ Homelab IaC for Proxmox VE 9 — Ansible + OpenTofu.
 
 ## Development Environment
 
-- You are running inside a devcontainer defined in `.devcontainer/`
-- Never install tools locally — add them to the devcontainer (Dockerfile, features, or lifecycle scripts)
-- The devcontainer uses mise to install tool versions from `mise.toml`
+- Work runs directly on the operator's macOS host, not in a container
+- Tool versions come from `mise.toml`; run `just setup` to install them
+- The SOPS age identity is not on disk. It is fetched from Bitwarden at
+  runtime through `SOPS_AGE_KEY_CMD`, which the login shell exports. A
+  process that does not inherit it cannot decrypt; prefix the command
+  rather than writing the key to a file
 
 ## Secrets
 
