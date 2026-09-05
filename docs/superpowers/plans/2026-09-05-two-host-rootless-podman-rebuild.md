@@ -1396,7 +1396,12 @@ Expected: `svc1 | SUCCESS` with `"ping": "pong"`.
 mise x -- ansible svc1 -e ansible_user=root -m ansible.builtin.shell -a 'dpkg -l ifupdown netplan.io 2>/dev/null | grep "^ii"; systemctl is-enabled systemd-networkd networking 2>/dev/null; cat /etc/os-release | grep VERSION='
 ```
 
-Expected: `VERSION="13 (trixie)"`. Note whether `ifupdown` or `netplan.io` is installed; Task 9 leaves that configuration alone either way.
+Expected: `VERSION="13 (trixie)"`. Already observed on both hosts, so treat a
+difference as a signal that something changed under you: Debian 13 trixie,
+kernel 6.12.63, `netplan.io 1.1.2-7` rendering through systemd-networkd, one
+interface `eth0` carrying a public IPv4 and a public IPv6, configured by
+`/run/systemd/network/10-netplan-eth0.network`. Task 9 adds units matching `wg0`
+only and must not touch `eth0`.
 
 - [ ] **Step 5: Commit**
 
@@ -1573,6 +1578,8 @@ base_os_kernel_cmdline: "lockdown=integrity systemd.ssh_auto=no"
 
 base_os_sysctl:
   # Rootless Podman needs this. Assert it explicitly so nothing can flip it.
+  # Confirmed present on both hosts: Debian 13 still carries this knob, and it
+  # already reads 1.
   kernel.unprivileged_userns_clone: 1
   # Kernel
   kernel.randomize_va_space: 2
@@ -2323,7 +2330,6 @@ validated drop-in that removes itself if sshd rejects it."
 - Create: `roles/base_wireguard/handlers/main.yml`
 - Create: `roles/base_wireguard/templates/wg.netdev.j2`
 - Create: `roles/base_wireguard/templates/wg.network.j2`
-- Create: `roles/base_wireguard/templates/unmanaged.network.j2`
 - Modify: `inventory/host_vars/edge1/main.yml`, `inventory/host_vars/svc1/main.yml`
 - Modify: `inventory/host_vars/edge1/secrets.sops.yaml`, `inventory/host_vars/svc1/secrets.sops.yaml`
 - Modify: `playbooks/base.yml`
@@ -2414,10 +2420,6 @@ argument_specs:
       base_wireguard_keepalive:
         type: int
         default: 25
-      base_wireguard_unmanaged_match:
-        type: str
-        default: "en* eth*"
-        description: Interface names networkd must leave to the provider's configuration.
 ```
 
 Append `- role: base_wireguard` to the `roles` list in `playbooks/base.yml`.
@@ -2440,8 +2442,17 @@ base_wireguard_ipv6_prefix: "{{ deerlab_wg_ipv6_prefix }}"
 base_wireguard_public_endpoint: ""
 base_wireguard_mtu: 1420
 base_wireguard_keepalive: 25
-base_wireguard_unmanaged_match: "en* eth*"
 ```
+
+Note what is deliberately absent: there is no "mark the public NIC unmanaged"
+setting. Both hosts render their networking with netplan, which generates
+`/run/systemd/network/10-netplan-eth0.network`, so systemd-networkd is already
+the thing configuring `eth0` — `networkctl` reports it `configured`, not
+`unmanaged`. Dropping an `05-unmanaged.network` in `/etc` would match `eth0`
+first, because networkd takes the lexically first matching file, and the next
+`networkctl reload` would strip DHCP and the static IPv6 from the only interface
+either host has. The role's own units match `wg0` alone and cannot collide with
+netplan's, so nothing needs guarding.
 
 `roles/base_wireguard/tasks/main.yml`:
 
@@ -2494,15 +2505,6 @@ base_wireguard_unmanaged_match: "en* eth*"
   no_log: true
   notify: Reconfigure wg
 
-- name: Leave the provider's interfaces to their own configuration
-  ansible.builtin.template:
-    src: unmanaged.network.j2
-    dest: /etc/systemd/network/05-unmanaged.network
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Reload networkd
-
 - name: Define the WireGuard netdev
   ansible.builtin.template:
     src: wg.netdev.j2
@@ -2550,11 +2552,6 @@ base_wireguard_unmanaged_match: "en* eth*"
 ```yaml
 # SPDX-License-Identifier: CPAL-1.0
 # Copyright (c) 2026 Aryan Ameri
-
-- name: Reload networkd
-  ansible.builtin.command:
-    cmd: networkctl reload
-  changed_when: true
 
 - name: Reconfigure wg
   ansible.builtin.command:
@@ -2616,20 +2613,6 @@ MTUBytes={{ base_wireguard_mtu }}
 RequiredForOnline=routable
 ```
 
-`roles/base_wireguard/templates/unmanaged.network.j2`:
-
-```jinja
-{# SPDX-License-Identifier: CPAL-1.0 #}
-{# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
-# The provider configures the public NIC. networkd must not touch it.
-[Match]
-Name={{ base_wireguard_unmanaged_match }}
-
-[Link]
-Unmanaged=yes
-```
-
 - [ ] **Step 4: Lint**
 
 Run: `just ci`
@@ -2642,7 +2625,13 @@ just apply svc1
 mise x -- ansible svc1 -m ansible.builtin.shell -a 'networkctl status wg0 | head -12; wg show wg0 | sed "s/private key.*/private key: hidden/"; getent hosts edge1.wg; ls -l /etc/systemd/network/'
 ```
 
-Expected: `wg0` is `configured` with `<services tunnel IPv4>/24` and the ULA address, `wg show` lists one peer with `endpoint: <edge ip>:<WireGuard port>` and `persistent keepalive: every 25 seconds`, `getent hosts edge1.wg` prints `<edge tunnel IPv4>`, and the key files are `-rw-r----- root systemd-network`. No handshake yet; the edge does not exist until Task 18. The public interface must still show the provider's address in `networkctl status` as `unmanaged`.
+Expected: `wg0` is `configured` with `<services tunnel IPv4>/24` and the ULA address, `wg show` lists one peer with `endpoint: <edge ip>:<WireGuard port>` and `persistent keepalive: every 25 seconds`, `getent hosts edge1.wg` prints `<edge tunnel IPv4>`, and the key files are `-rw-r----- root systemd-network`. No handshake yet; the edge does not exist until Task 18.
+
+Check `eth0` too, and stop if it is wrong: `networkctl list` must still show it
+`configured` and `ip -brief addr` must still show the public IPv4 and IPv6. If
+`eth0` has gone `unmanaged` or lost an address, something in this role matched it
+that should only have matched `wg0`; fix that before going further, because the
+next reboot would take the host off the network.
 
 - [ ] **Step 6: Commit**
 
@@ -3654,6 +3643,11 @@ podman_host_packages_absent:
 podman_host_registries: "{{ podman_user_registries }}"
 podman_host_min_passt_version: "0.0~git20250503.587980c-2+deb13u1"
 ```
+
+Package availability confirmed on the hosts before writing this: `podman`
+5.4.2+ds1-2+b2, `passt` 0.0~git20250503.587980c-2+deb13u1 (exactly the floor
+asserted above) and `containers-storage` 1.57.2+ds1-1+b2 are all candidates in
+trixie, so nothing in the install list is a guess.
 
 `roles/podman_host/tasks/main.yml`:
 
