@@ -183,10 +183,7 @@
         },
         "cSpell.words": [
           "trivy",
-          "tfvars",
-          "tfstate",
           "devcontainer",
-          "proxmox",
           "carlpett",
           "sops"
         ]

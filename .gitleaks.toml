@@ -7,7 +7,7 @@ title = "deerlab gitleaks configuration"
 useDefault = true
 
 [allowlist]
-description = "Allow SOPS-encrypted files, encrypted state, and vendored collections"
+description = "Allow SOPS-encrypted files, SOPS configuration, and vendored collections"
 paths = [
   # SOPS-encrypted files — values are ciphertext (ENC[AES256_GCM,...]), safe to commit
   '''.*\.sops\.yaml$''',
