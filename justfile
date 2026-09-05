@@ -14,137 +14,45 @@ setup:
     pre-commit install
     @echo "Setup complete"
 
-# Extract TF_VAR_state_passphrase from SOPS (used by tofu recipes)
-[private]
-tofu-env:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "export TF_VAR_state_passphrase=$(sops -d --extract '["tofu_state_passphrase"]' inventory/group_vars/proxmox/secrets.sops.yaml)"
-
-# Run tofu init
-tofu-init:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    eval "$(just tofu-env)"
-    cd tofu && tofu init
-
-# Run tofu plan
-tofu-plan:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    eval "$(just tofu-env)"
-    cd tofu && tofu plan
-
-# Run tofu apply
-tofu-apply:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    eval "$(just tofu-env)"
-    cd tofu && tofu apply -auto-approve
-
-# Run ansible-playbook playbooks/site.yml
-ansible-site:
-    ansible-playbook playbooks/site.yml
-
-# Run ansible-playbook on a specific playbook
-ansible playbook:
-    ansible-playbook "playbooks/{{ playbook }}.yml"
-
-# Edit SOPS-encrypted Ansible secrets
-secrets-edit:
-    sops inventory/group_vars/proxmox/secrets.sops.yaml
-
-# Edit SOPS-encrypted tofu variables
-tfvars-edit:
-    sops tofu/terraform.tfvars.sops.json
-
-# Generate terraform-docs for tofu/ directory
-docs:
-    terraform-docs markdown table tofu
+# Run all CI checks locally
+ci: reuse-lint ansible-lint shellcheck markdownlint security-scan gitleaks check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
+    @echo ""
+    @echo "════════════════════════════════════════"
+    @echo "  All CI checks passed"
+    @echo "════════════════════════════════════════"
 
 # Check REUSE/SPDX licensing compliance
 reuse-lint:
     @echo "=== Checking REUSE compliance ==="
     reuse lint
 
-# Run all CI checks locally
-ci: reuse-lint fmt-check validate lint-all shellcheck ansible-lint markdownlint security-scan gitleaks check-version-sync check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
-    @echo ""
-    @echo "════════════════════════════════════════"
-    @echo "  All CI checks passed"
-    @echo "════════════════════════════════════════"
+# Lint all Ansible playbooks and roles
+ansible-lint:
+    @echo "=== Running ansible-lint ==="
+    ansible-lint
 
-# Check formatting without modifying
-fmt-check:
-    @echo "=== Checking OpenTofu formatting ==="
-    tofu fmt -check -recursive -diff tofu/
-
-# Validate OpenTofu configuration
-validate:
+# Lint Ansible with auto-fix
+ansible-lint-fix:
     #!/usr/bin/env bash
     set -euo pipefail
-    eval "$(just tofu-env)"
-    echo "Validating tofu/..."
-    cd tofu
-    tofu init
-    tofu validate
-    echo "All configurations valid"
-
-# Validate OpenTofu configuration (CI-safe — no SOPS required)
-validate-ci:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "=== Validating OpenTofu configuration (CI mode) ==="
-    cd tofu
-    TF_VAR_state_passphrase="ci-placeholder-passphrase" tofu init -backend=false
-    TF_VAR_state_passphrase="ci-placeholder-passphrase" tofu validate
-    echo "All configurations valid"
-
-# Run TFLint on the tofu/ directory
-lint-all:
-    #!/usr/bin/env bash
-    set -e
-    echo "=== Initializing TFLint plugins ==="
-    tflint --init --config="$(pwd)/.tflint.hcl"
-    echo "=== Running TFLint on tofu/ ==="
-    tflint --config="$(pwd)/.tflint.hcl" --chdir="tofu"
-    echo "TFLint passed"
+    rc=0
+    ansible-lint --fix || rc=$?
+    if [[ $rc -ne 0 && $rc -ne 8 ]]; then exit "$rc"; fi
 
 # Run shellcheck on all shell scripts
 shellcheck:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Running shellcheck ==="
-    find . -name '*.sh' -not -path './collections/*' -not -path './.terraform/*' -not -path '*/.terraform/*' -not -path './.devcontainer/config/*' -print0 \
-      | xargs -0 shellcheck
+    find . -name '*.sh' -not -path './collections/*' -not -path './.devcontainer/config/*' -print0 | xargs -0 shellcheck
     echo "shellcheck passed"
-
-# Lint all Ansible playbooks and roles
-ansible-lint:
-    @echo "=== Running ansible-lint ==="
-    ansible-lint --profile=production
-
-# Lint Ansible with auto-fix
-ansible-lint-fix:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "=== Running ansible-lint with fixes ==="
-    rc=0
-    ansible-lint --fix --profile=production || rc=$?
-    # exit code 8 = files were modified (success)
-    if [[ $rc -ne 0 && $rc -ne 8 ]]; then exit "$rc"; fi
 
 # Lint all Markdown files
 markdownlint:
     @echo "=== Running markdownlint ==="
     markdownlint-cli2 "**/*.md" "!collections/**"
 
-# Lint Markdown with auto-fix
-markdownlint-fix:
-    @echo "=== Running markdownlint with fixes ==="
-    markdownlint-cli2 --fix "**/*.md" "!collections/**"
-
-# Run Trivy security scan
+# Run Trivy configuration scan
 security-scan:
     @echo "=== Running Trivy security scan ==="
     trivy config . --severity HIGH,CRITICAL --exit-code 1 --skip-dirs collections
@@ -154,12 +62,16 @@ gitleaks:
     @echo "=== Running gitleaks secret scan ==="
     gitleaks git --redact --verbose
 
+# Spell check (advisory in CI)
+spellcheck:
+    cspell --config cspell.json --no-progress "**/*.md" "**/*.yml" "**/*.yaml" "**/*.j2" "**/*.toml" "!collections/**"
+
 # Check for trailing whitespace (excludes .md files)
 check-trailing-whitespace:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Checking for trailing whitespace ==="
-    if git --no-pager grep -n '[[:blank:]]$' -- ':!*.md' ':!*.lock' ':!collections/*'; then
+    if git --no-pager grep -n '[[:blank:]]$' -- ':!*.md' ':!collections/*'; then
         echo "ERROR: Trailing whitespace found"
         exit 1
     fi
@@ -177,7 +89,7 @@ check-eof-newline:
             echo "ERROR: Missing final newline: $f"
             failed=1
         fi
-    done < <(git ls-files -- ':!collections/*' ':!*.tfstate')
+    done < <(git ls-files -- ':!collections/*')
     if [ "$failed" -ne 0 ]; then exit 1; fi
     echo "All files end with newline"
 
@@ -215,24 +127,76 @@ check-merge-conflicts:
     fi
     echo "No merge conflict markers found"
 
-# Validate .opentofu-version matches mise.toml
-check-version-sync:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "=== Checking version file sync ==="
-    MISE_VERSION=$(grep '^opentofu' mise.toml | sed 's/.*= *"//;s/".*//')
-    FILE_VERSION=$(cat .opentofu-version)
-    if [ "$MISE_VERSION" != "$FILE_VERSION" ]; then
-        echo "ERROR: .opentofu-version ($FILE_VERSION) does not match mise.toml ($MISE_VERSION)"
-        exit 1
-    fi
-    echo "Version files in sync"
-
 # Run pre-commit on all files
 pre-commit:
     pre-commit run --all-files
 
-# Format all code (OpenTofu + Markdown)
+# Format Markdown and YAML
 fmt:
-    tofu fmt -recursive tofu/
     markdownlint-cli2 --fix "**/*.md" "!collections/**"
+    just ansible-lint-fix
+
+# Check and diff a host without changing it
+plan host:
+    ansible-playbook playbooks/site.yml --limit {{ host }} --check --diff
+
+# Push the playbook to a host as the admin user (development and break-glass only)
+apply host:
+    ansible-playbook playbooks/site.yml --limit {{ host }}
+
+# First run against a freshly imaged host, connecting as root
+bootstrap host:
+    ansible-playbook playbooks/site.yml --limit {{ host }} --extra-vars ansible_user=root
+
+# Run the playbook twice and fail if the second run changed anything
+idempotency host:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ansible-playbook playbooks/site.yml --limit {{ host }}
+    ansible-playbook playbooks/site.yml --limit {{ host }} | tee /tmp/deerlab-idempotency.log
+    if grep -E 'changed=[1-9]' /tmp/deerlab-idempotency.log; then
+        echo "ERROR: second run was not idempotent"
+        exit 1
+    fi
+    echo "Idempotent"
+
+# Fast-forward main to a green branch and push, preserving your commit signatures
+merge branch:
+    gh pr checks {{ branch }} --required --watch
+    git switch main
+    git pull --ff-only origin main
+    git merge --ff-only {{ branch }}
+    git push origin main
+
+# Edit a SOPS-encrypted file
+secrets-edit file:
+    sops {{ file }}
+
+# Re-encrypt every SOPS file for the recipients currently listed in .sops.yaml
+secrets-rekey:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git ls-files '*.sops.yaml' | while IFS= read -r f; do
+        echo "updatekeys $f"
+        sops updatekeys --yes "$f"
+    done
+
+# Apply retention to a service's restic repository from the operator's full-access credentials
+backup-prune service:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RESTIC_REPOSITORY="$(sops -d --extract '["backup_s3_bucket"]' inventory/group_vars/all/secrets.sops.yaml)/{{ service }}"
+    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' inventory/group_vars/services/secrets.sops.yaml"
+    sops exec-env secrets/backup-admin.sops.yaml 'restic forget --keep-within 30d --keep-within-weekly 3m --keep-within-monthly 1y --prune'
+
+# Restore the latest snapshot of a service to a scratch directory and integrity-check it
+restore-drill service:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="/tmp/deerlab-restore-{{ service }}"
+    rm -rf "$target"
+    export RESTIC_REPOSITORY="$(sops -d --extract '["backup_s3_bucket"]' inventory/group_vars/all/secrets.sops.yaml)/{{ service }}"
+    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' inventory/group_vars/services/secrets.sops.yaml"
+    sops exec-env secrets/backup-admin.sops.yaml "restic restore latest --target $target"
+    find "$target" -name '*.sqlite' -print -exec sqlite3 {} 'PRAGMA integrity_check' \;
+    echo "Restored to $target"

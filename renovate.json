@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "timezone": "Australia/Sydney",
+  "schedule": ["before 6am on monday"],
+  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "github-actions", "pip_requirements", "pre-commit"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Container image references in inventory service definitions (image: registry/repo:tag@sha256:digest)",
+      "managerFilePatterns": ["/^inventory/group_vars/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "image:\\s*\"?(?<depName>[a-z0-9.-]+(?:/[a-z0-9._-]+)+):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\"?"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["custom.regex"],
+      "groupName": "container images",
+      "labels": ["dependencies", "images"]
+    },
+    {
+      "matchManagers": ["mise", "pip_requirements"],
+      "matchPackageNames": ["ansible", "pipx:ansible"],
+      "groupName": "ansible"
+    }
+  ]
+}
