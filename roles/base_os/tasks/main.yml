@@ -1,0 +1,223 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_os_admin_user | length > 0
+      - base_os_admin_ssh_keys | length > 0
+      - base_os_root_password_hash | length > 0
+      - base_os_root_password_hash != 'CHANGE-ME'
+      - ansible_facts['distribution'] == 'Debian'
+      - ansible_facts['distribution_major_version'] == '13'
+    fail_msg: base_os needs an admin user, admin keys, a root password hash, and a Debian 13 target
+
+# Phase 1 — Packages
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ base_os_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Purge packages that conflict with the design
+  ansible.builtin.apt:
+    name: "{{ base_os_packages_absent }}"
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# Phase 2 — Directories
+#
+# copy and template both fail when the parent does not exist, and a stock
+# Debian 13 image ships none of these. Verified on the real hosts:
+# /etc/systemd/journald.conf.d is absent.
+
+- name: Create the configuration directories this role writes into
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/systemd/journald.conf.d
+    - /etc/default/grub.d
+    - /etc/needrestart/conf.d
+    - /etc/chrony/conf.d
+    # Watched by the audit rules below and created by roles that run later.
+    # auditctl aborts the whole ruleset on one missing watch path, so on a
+    # stock image the rules would fail to load and take auditd down with them.
+    # /etc/deerlab is 0755 on purpose: service users must traverse it to reach
+    # their own credential file under /etc/deerlab/pushover/.
+    - /etc/deerlab
+    - /etc/containers/systemd
+
+# Phase 3 — Accounts
+
+- name: Configure the admin and root accounts
+  ansible.builtin.include_tasks: accounts.yml
+
+# Phase 4 — Time
+
+- name: Set the timezone
+  community.general.timezone:
+    name: "{{ base_os_timezone }}"
+
+- name: Configure chrony for NTS-only time sources
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/conf.d/deerlab.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Enable chrony
+  ansible.builtin.systemd_service:
+    name: chrony
+    enabled: true
+    state: started
+
+# Phase 5 — Kernel
+
+- name: Apply kernel parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-deerlab.conf
+    sysctl_set: true
+    reload: true
+  loop: "{{ (base_os_sysctl | combine(base_os_sysctl_extra)) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Check that GRUB is the boot loader
+  ansible.builtin.stat:
+    path: /etc/default/grub
+  register: base_os_grub
+
+- name: Add kernel command line parameters
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT {{ base_os_kernel_cmdline }}"
+    dest: /etc/default/grub.d/90-deerlab.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  when: base_os_grub.stat.exists
+  notify:
+    - Update grub
+    - Flag reboot required
+
+- name: Warn when GRUB is absent
+  ansible.builtin.debug:
+    msg: /etc/default/grub not found. Add "{{ base_os_kernel_cmdline }}" to the boot loader by hand.
+  when: not base_os_grub.stat.exists
+
+# Phase 6 — Logging
+
+- name: Create the persistent journal directory
+  ansible.builtin.file:
+    path: /var/log/journal
+    state: directory
+    owner: root
+    group: systemd-journal
+    mode: "2755"
+
+- name: Configure journald retention
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse={{ base_os_journald_max_use }}
+      MaxRetentionSec={{ base_os_journald_retention }}
+    dest: /etc/systemd/journald.conf.d/10-deerlab.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart journald
+
+# Phase 7 — Updates
+
+- name: Enable periodic unattended upgrades
+  ansible.builtin.copy:
+    content: |
+      // {{ deerlab_managed }}
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure unattended upgrades without automatic reboot
+  ansible.builtin.copy:
+    content: |
+      // {{ deerlab_managed }}
+      Unattended-Upgrade::Automatic-Reboot "false";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Let needrestart restart services automatically
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      $nrconf{restart} = 'a';
+    dest: /etc/needrestart/conf.d/50-deerlab.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+# Phase 8 — Audit
+
+- name: Configure auditd
+  when: base_os_auditd_enabled
+  block:
+    - name: Set auditd log handling
+      ansible.builtin.lineinfile:
+        path: /etc/audit/auditd.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^max_log_file\b', line: "max_log_file = 50" }
+        - { regexp: '^num_logs\b', line: "num_logs = 10" }
+        - { regexp: '^max_log_file_action\b', line: "max_log_file_action = rotate" }
+        - { regexp: '^space_left_action\b', line: "space_left_action = syslog" }
+        - { regexp: '^admin_space_left_action\b', line: "admin_space_left_action = syslog" }
+      loop_control:
+        label: "{{ item.line }}"
+      notify: Restart auditd
+
+    - name: Write the audit rules
+      ansible.builtin.template:
+        src: audit.rules.j2
+        dest: /etc/audit/rules.d/99-deerlab.rules
+        owner: root
+        group: root
+        mode: "0640"
+      notify: Restart auditd
+
+    - name: Enable auditd
+      ansible.builtin.systemd_service:
+        name: auditd
+        enabled: true
+        state: started
+
+# Phase 9 — /proc hiding (optional)
+
+- name: Hide other users' processes
+  ansible.builtin.include_tasks: hidepid.yml
+  when: base_os_hidepid_enabled

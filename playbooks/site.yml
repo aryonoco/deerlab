@@ -3,3 +3,6 @@
 
 - name: Install collections into the checkout
   ansible.builtin.import_playbook: deps.yml
+
+- name: Configure every host
+  ansible.builtin.import_playbook: base.yml

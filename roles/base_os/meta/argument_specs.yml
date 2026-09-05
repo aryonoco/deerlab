@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Debian 13 host baseline
+    description: >
+      Packages, the admin account, the console root password, sysctl,
+      kernel command line, journald, chrony with NTS, needrestart,
+      unattended-upgrades without automatic reboot, auditd with a minimal
+      ruleset, and optional /proc hiding.
+    options:
+      base_os_timezone:
+        type: str
+        default: Etc/UTC
+        description: System timezone.
+      base_os_admin_user:
+        type: str
+        required: true
+        description: Login name of the administrative user with sudo.
+      base_os_admin_ssh_keys:
+        type: list
+        elements: str
+        required: true
+        description: Public keys allowed for the admin user. Replaces the file.
+      base_os_root_password_hash:
+        type: str
+        required: true
+        description: Crypt hash for root, used only at the provider console.
+      base_os_packages:
+        type: list
+        elements: str
+        description: Packages installed on every host.
+      base_os_packages_absent:
+        type: list
+        elements: str
+        description: Packages purged from every host.
+      base_os_sysctl:
+        type: dict
+        description: Kernel parameters applied on every host.
+      base_os_sysctl_extra:
+        type: dict
+        default: {}
+        description: Additional kernel parameters for a host or group.
+      base_os_kernel_cmdline:
+        type: str
+        description: Extra parameters appended to GRUB_CMDLINE_LINUX_DEFAULT.
+      base_os_journald_max_use:
+        type: str
+        default: 512M
+        description: journald SystemMaxUse.
+      base_os_journald_retention:
+        type: str
+        default: 90day
+        description: journald MaxRetentionSec.
+      base_os_chrony_nts_servers:
+        type: list
+        elements: str
+        description: NTS-capable time servers.
+      base_os_auditd_enabled:
+        type: bool
+        default: true
+        description: Install auditd with the minimal ruleset.
+      base_os_hidepid_enabled:
+        type: bool
+        default: false
+        description: >
+          Mount /proc with hidepid=invisible and a proc exemption group.
+          Unsupported by systemd upstream; test a lingering user manager
+          before enabling.

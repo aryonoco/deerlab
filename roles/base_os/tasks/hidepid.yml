@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Create the proc exemption group
+  ansible.builtin.group:
+    name: proc
+    system: true
+
+- name: Mount /proc with hidepid
+  ansible.posix.mount:
+    path: /proc
+    src: proc
+    fstype: proc
+    opts: rw,nosuid,nodev,noexec,relatime,hidepid=invisible,gid=proc
+    state: present
+  notify: Flag reboot required
+
+- name: Create the hidepid drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - systemd-logind
+    - polkit
+
+- name: Exempt logind and polkit from hidepid
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Service]
+      SupplementaryGroups=proc
+    dest: "/etc/systemd/system/{{ item }}.service.d/10-hidepid.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - systemd-logind
+    - polkit
+  notify:
+    - Reload systemd
+    - Flag reboot required

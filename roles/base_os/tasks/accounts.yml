@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Create the admin user
+  ansible.builtin.user:
+    name: "{{ base_os_admin_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+
+- name: Install the admin user's SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ base_os_admin_user }}"
+    key: "{{ base_os_admin_ssh_keys | join('\n') }}"
+    exclusive: true
+
+- name: Allow the admin user to sudo without a password
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      {{ base_os_admin_user }} ALL=(ALL) NOPASSWD: ALL
+    dest: /etc/sudoers.d/90-deerlab-admin
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Set the root password for the provider console
+  ansible.builtin.user:
+    name: root
+    password: "{{ base_os_root_password_hash }}"
+  no_log: true

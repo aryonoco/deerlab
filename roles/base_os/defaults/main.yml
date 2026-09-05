@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_os_timezone: "{{ deerlab_timezone | default('Etc/UTC') }}"
+base_os_admin_user: "{{ deerlab_admin_user }}"
+base_os_admin_ssh_keys: "{{ deerlab_admin_ssh_keys }}"
+base_os_root_password_hash: "{{ deerlab_root_password_hash }}"
+
+base_os_packages:
+  - acl
+  - auditd
+  - ca-certificates
+  - chrony
+  - curl
+  - git
+  - needrestart
+  - nftables
+  - python3-venv
+  - restic
+  - sqlite3
+  - unattended-upgrades
+  - wireguard-tools
+
+base_os_packages_absent:
+  - fail2ban
+  - systemd-timesyncd
+
+base_os_kernel_cmdline: "lockdown=integrity systemd.ssh_auto=no"
+
+base_os_sysctl:
+  # Rootless Podman needs this. Assert it explicitly so nothing can flip it.
+  # Confirmed present on both hosts: Debian 13 still carries this knob, and it
+  # already reads 1.
+  kernel.unprivileged_userns_clone: 1
+  # Kernel
+  kernel.randomize_va_space: 2
+  kernel.dmesg_restrict: 1
+  kernel.kptr_restrict: 2
+  kernel.sysrq: 0
+  kernel.yama.ptrace_scope: 2
+  kernel.kexec_load_disabled: 1
+  kernel.unprivileged_bpf_disabled: 2
+  kernel.perf_event_paranoid: 3
+  net.core.bpf_jit_harden: 2
+  # Filesystem
+  fs.protected_hardlinks: 1
+  fs.protected_symlinks: 1
+  fs.protected_fifos: 2
+  fs.protected_regular: 2
+  fs.suid_dumpable: 0
+  # Memory
+  vm.mmap_min_addr: 65536
+  vm.swappiness: 10
+  # Network
+  net.ipv4.ip_forward: 0
+  net.ipv6.conf.all.forwarding: 0
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.tcp_rfc1337: 1
+  net.ipv4.conf.all.rp_filter: 2
+  net.ipv4.conf.default.rp_filter: 2
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.secure_redirects: 0
+  net.ipv4.conf.default.secure_redirects: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.default.accept_source_route: 0
+
+base_os_sysctl_extra: {}
+
+base_os_journald_max_use: 512M
+base_os_journald_retention: 90day
+
+base_os_chrony_nts_servers:
+  - time.cloudflare.com
+  - nts.netnod.se
+
+base_os_auditd_enabled: true
+base_os_hidepid_enabled: false

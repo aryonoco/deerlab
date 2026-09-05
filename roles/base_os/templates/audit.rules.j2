@@ -1,0 +1,30 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+## {{ deerlab_managed }}
+-D
+-b 8192
+-f 1
+
+# Identity and privilege
+-w /etc/sudoers -p wa -k sudo
+-w /etc/sudoers.d/ -p wa -k sudo
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/subuid -p wa -k identity
+-w /etc/subgid -p wa -k identity
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -k privilege_escalation
+
+# Configuration this repository owns
+-w /etc/ssh/ -p wa -k sshd
+-w /etc/nftables.conf -p wa -k firewall
+-w /etc/systemd/network/ -p wa -k network
+-w /etc/containers/systemd/ -p wa -k quadlets
+-w /var/lib/systemd/linger/ -p wa -k linger
+-w /etc/deerlab/ -p wa -k deerlab
+
+# Kernel modules
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
+
+-e 1

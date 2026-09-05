@@ -1,0 +1,10 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+# Only authenticated sources may be selected. The Debian pool in
+# chrony.conf stays as an unauthenticated fallback that is never chosen
+# while an NTS source is reachable.
+authselectmode require
+{% for server in base_os_chrony_nts_servers %}
+server {{ server }} iburst nts
+{% endfor %}
