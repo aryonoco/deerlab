@@ -406,3 +406,9 @@ cache/
 
 .test-results/
 coverage/
+
+# ---------------------------------------------------------------------------
+# Subagent-driven development workspace (ledger, briefs, review packages)
+# ---------------------------------------------------------------------------
+
+.superpowers/
