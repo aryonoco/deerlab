@@ -5,6 +5,12 @@
 
 deerlab_timezone: Etc/UTC
 
+# Header stamped into every generated file. `ansible_managed` cannot be used:
+# the template action plugin injects it, so it is undefined inside
+# `copy: content:` and the task fails to resolve its arguments. Defining it
+# here means one string works in both, and there is only one place to change it.
+deerlab_managed: "Managed by deerlab Ansible. Edit the repository, not this file."
+
 # The administrative account the roles create on each host. Deliberately
 # separate from ansible_user, which only says who Ansible connects as:
 # `just bootstrap` overrides ansible_user to root, and if the roles read

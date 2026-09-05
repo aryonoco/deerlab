@@ -22,6 +22,7 @@
 - ansible-lint production profile plus `role-argument-spec`. FQCN everywhere. Every `command`/`shell` has `changed_when` or `creates`. Every file task has `mode`. Every role variable is prefixed with the role name. Task names start with a capital letter. Secrets tasks set `no_log: true`.
 - yamllint: 160-column lines, file modes quoted as strings like `"0644"`, truthy values only `true`/`false`.
 - No bespoke check scripts. Validation uses ansible-lint, `validate:` on template tasks, `systemd-analyze verify`, `nft --check`.
+- Generated files carry `{{ deerlab_managed }}`, never `{{ ansible_managed }}`. The builtin is supplied by the `template` action plugin only and is undefined inside `copy: content:`, where it fails argument resolution.
 - REUSE headers on every new file: tasks, handlers and templates are `CPAL-1.0` (`# SPDX-License-Identifier: CPAL-1.0` / `# Copyright (c) 2026 Aryan Ameri`; in Jinja templates wrap them as `{# ... #}`), defaults, meta, inventory and config are `0BSD`, docs are `CC-BY-4.0` in HTML comments.
 - Commit messages read as if a human wrote them. No AI attribution lines. Run `just ci` before every commit. Never `--no-verify`.
 - Inventory host names are `edge1` and `svc1`. Tunnel addresses: edge `<edge tunnel IPv4>` / `<edge tunnel IPv6>`, services `<services tunnel IPv4>` / `<services tunnel IPv6>`. WireGuard port `<WireGuard port>`. Service UIDs start at `2000`; subordinate ranges are `100000 + (uid - 2000) * 65536`, width `65536`.
@@ -998,7 +999,7 @@ git push origin main:refs/heads/release
 
 **Interfaces:**
 
-- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_pushover_url`, `deerlab_pushover_token`, `deerlab_pushover_user`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
+- Produces: the variable names every role reads. Roles reference these exact names: `deerlab_managed`, `deerlab_admin_user`, `deerlab_admin_ssh_keys`, `deerlab_wg_port`, `deerlab_wg_ipv4_prefix`, `deerlab_wg_ipv6_prefix`, `deerlab_domain`, `deerlab_pushover_url`, `deerlab_pushover_token`, `deerlab_pushover_user`, `deerlab_deadman_urls`, `deerlab_root_password_hash`, `deerlab_allowed_signers`, `deerlab_repo_url`, `base_wireguard_preshared_key`, `base_wireguard_private_key`, `base_wireguard_public_key`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_public_endpoint`, `base_firewall_role`, `podman_services`, `podman_user_registries`, `backup_s3_bucket`, `backup_s3_endpoint`, `backup_<service>_restic_password`, `backup_<service>_s3_access_key`, `backup_<service>_s3_secret_key`, `wallabag_symfony_secret`, `deerlab_acme_email`, `caddy_caddyfile`.
 
 - [ ] **Step 1: Write the plain inventory files**
 
@@ -1029,6 +1030,12 @@ all:
 # Public data shared by every host. Secrets live in secrets.sops.yaml.
 
 deerlab_timezone: Etc/UTC
+
+# Header stamped into every generated file. `ansible_managed` cannot be used:
+# the template action plugin injects it, so it is undefined inside
+# `copy: content:` and the task fails to resolve its arguments. Defining it
+# here means one string works in both, and there is only one place to change it.
+deerlab_managed: "Managed by deerlab Ansible. Edit the repository, not this file."
 
 # The administrative account the roles create on each host. Deliberately
 # separate from ansible_user, which only says who Ansible connects as:
@@ -1737,7 +1744,7 @@ base_os_hidepid_enabled: false
 - name: Add kernel command line parameters
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT {{ base_os_kernel_cmdline }}"
     dest: /etc/default/grub.d/90-deerlab.cfg
     owner: root
@@ -1766,7 +1773,7 @@ base_os_hidepid_enabled: false
 - name: Configure journald retention
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Journal]
       Storage=persistent
       Compress=yes
@@ -1783,7 +1790,7 @@ base_os_hidepid_enabled: false
 - name: Enable periodic unattended upgrades
   ansible.builtin.copy:
     content: |
-      // {{ ansible_managed }}
+      // {{ deerlab_managed }}
       APT::Periodic::Update-Package-Lists "1";
       APT::Periodic::Unattended-Upgrade "1";
       APT::Periodic::AutocleanInterval "7";
@@ -1795,7 +1802,7 @@ base_os_hidepid_enabled: false
 - name: Configure unattended upgrades without automatic reboot
   ansible.builtin.copy:
     content: |
-      // {{ ansible_managed }}
+      // {{ deerlab_managed }}
       Unattended-Upgrade::Automatic-Reboot "false";
       Unattended-Upgrade::Remove-Unused-Dependencies "true";
       Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
@@ -1807,7 +1814,7 @@ base_os_hidepid_enabled: false
 - name: Let needrestart restart services automatically
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       $nrconf{restart} = 'a';
     dest: /etc/needrestart/conf.d/50-deerlab.conf
     owner: root
@@ -1879,7 +1886,7 @@ base_os_hidepid_enabled: false
 - name: Allow the admin user to sudo without a password
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       {{ base_os_admin_user }} ALL=(ALL) NOPASSWD: ALL
     dest: /etc/sudoers.d/90-deerlab-admin
     owner: root
@@ -1928,7 +1935,7 @@ base_os_hidepid_enabled: false
 - name: Exempt logind and polkit from hidepid
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Service]
       SupplementaryGroups=proc
     dest: "/etc/systemd/system/{{ item }}.service.d/10-hidepid.conf"
@@ -1989,7 +1996,7 @@ base_os_hidepid_enabled: false
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 # Only authenticated sources may be selected. The Debian pool in
 # chrony.conf stays as an unauthenticated fallback that is never chosen
 # while an NTS source is reachable.
@@ -2004,7 +2011,7 @@ server {{ server }} iburst nts
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-## {{ ansible_managed }}
+## {{ deerlab_managed }}
 -D
 -b 8192
 -f 1
@@ -2274,7 +2281,7 @@ base_ssh_host_key_algorithms:
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 
 # Authentication
 PermitRootLogin no
@@ -2597,7 +2604,7 @@ netplan's, so nothing needs guarding.
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [NetDev]
 Name={{ base_wireguard_interface }}
 Kind=wireguard
@@ -2626,7 +2633,7 @@ PersistentKeepalive={{ base_wireguard_keepalive }}
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Match]
 Name={{ base_wireguard_interface }}
 
@@ -2859,7 +2866,7 @@ base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
 #!/usr/sbin/nft -f
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 # Never `systemctl stop nftables`: Debian's unit flushes every rule on stop.
 flush ruleset
 
@@ -3107,7 +3114,7 @@ base_notify_onfailure_units:
 - name: Install the reboot-required reminder
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Unit]
       Description=Notify that a reboot is required
       ConditionPathExists=/run/reboot-required
@@ -3125,7 +3132,7 @@ base_notify_onfailure_units:
 - name: Schedule the reboot-required reminder daily
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Timer]
       OnCalendar=daily
       RandomizedDelaySec=1h
@@ -3151,7 +3158,7 @@ base_notify_onfailure_units:
 - name: Attach the notifier to host units
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Unit]
       OnFailure=notify-failure@%n.service
     dest: "/etc/systemd/system/{{ item }}.d/10-deerlab-notify.conf"
@@ -3187,7 +3194,7 @@ base_notify_onfailure_units:
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 # curl merges repeated data entries with &, so this is one form POST and
 # the unit only has to append the message field.
 url = "{{ deerlab_pushover_url }}"
@@ -3202,7 +3209,7 @@ data = "priority=1"
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Unit]
 Description=Notify Pushover that %i failed
 
@@ -3455,7 +3462,7 @@ base_pull_enabled: true
 - name: Write the dead-man curl configuration
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       url = "{{ base_pull_deadman_url }}"
     dest: /etc/deerlab/deadman-pull.conf
     owner: root
@@ -3507,7 +3514,7 @@ base_pull_enabled: true
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Unit]
 Description=deerlab configuration pull
 Wants=network-online.target
@@ -3529,7 +3536,7 @@ ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config 
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Timer]
 OnCalendar={{ base_pull_interval }}
 RandomizedDelaySec=300
@@ -3765,7 +3772,7 @@ trixie, so nothing in the install list is a guess.
 - name: Disable short image names
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       unqualified-search-registries = []
       short-name-mode = "enforcing"
     dest: /etc/containers/registries.conf.d/10-deerlab.conf
@@ -4054,7 +4061,7 @@ podman_user_wg_prefixes:
 - name: Order the user manager after the tunnel for {{ podman_user_item.key }}
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Unit]
       Wants=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
       After=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
@@ -4067,7 +4074,7 @@ podman_user_wg_prefixes:
 - name: Cap the slice resources of {{ podman_user_item.key }}
   ansible.builtin.copy:
     content: |
-      # {{ ansible_managed }}
+      # {{ deerlab_managed }}
       [Slice]
       MemoryMax={{ podman_user_item.value.limits.memory }}
       CPUQuota={{ podman_user_item.value.limits.cpu }}
@@ -4412,7 +4419,7 @@ podman_service_unit_root: /etc/containers/systemd/users
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 # Podman 5.4.2 Quadlet. Only keys that exist in 5.4.2 belong here.
 [Unit]
 Description={{ podman_service_name }}
@@ -4485,7 +4492,7 @@ WantedBy=default.target
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Volume]
 VolumeName={{ podman_service_name }}-{{ item.name }}
 ```
@@ -5170,7 +5177,7 @@ backup_deadman_urls: "{{ deerlab_deadman_urls['backup'] }}"
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Unit]
 Description=Back up {{ backup_name }} with restic
 OnFailure=notify-failure@%n.service
@@ -5196,7 +5203,7 @@ ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config 
 ```jinja
 {# SPDX-License-Identifier: CPAL-1.0 #}
 {# Copyright (c) 2026 Aryan Ameri #}
-# {{ ansible_managed }}
+# {{ deerlab_managed }}
 [Timer]
 OnCalendar={{ backup_schedule }}
 RandomizedDelaySec=1800
