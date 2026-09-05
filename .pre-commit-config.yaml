@@ -24,25 +24,13 @@ repos:
 
   - repo: local
     hooks:
-      - id: tofu-fmt
-        name: tofu fmt
-        entry: mise exec -- tofu fmt -write=true
+      - id: ansible-lint
+        name: ansible-lint
+        entry: mise exec -- ansible-lint --offline
         language: system
-        files: \.tf$
-        exclude: (\.terraform/|^collections/)
-
-  - repo: local
-    hooks:
-      - id: tflint
-        name: tflint
-        entry: >-
-          mise exec -- bash -c
-          'ROOT=$(git rev-parse --show-toplevel);
-          tflint --init --config="$ROOT/.tflint.hcl" >/dev/null 2>&1;
-          tflint --config="$ROOT/.tflint.hcl" --chdir="$ROOT/tofu"'
-        language: system
-        files: ^tofu/.*\.tf$
         pass_filenames: false
+        files: \.(ya?ml)$
+        exclude: ^(collections/|\.github/)
 
   - repo: local
     hooks:
@@ -59,7 +47,7 @@ repos:
       - id: trailing-whitespace
         exclude: (\.md$|^collections/)
       - id: end-of-file-fixer
-        exclude: (^collections/|\.tfstate$|^LICENSE)
+        exclude: (^collections/|^LICENSE)
       - id: check-yaml
         exclude: ^collections/
       - id: check-json
@@ -71,7 +59,7 @@ repos:
     hooks:
       - id: reuse-lint
         name: REUSE compliance
-        entry: reuse lint
+        entry: mise exec -- reuse lint
         language: system
         pass_filenames: false
         always_run: true

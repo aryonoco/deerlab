@@ -5,10 +5,9 @@ set -euo pipefail
 
 # Docker named volumes default to root ownership regardless of Dockerfile COPY/RUN
 # directives. Correcting ownership here avoids permission-denied failures for
-# tooling that writes to these paths (gh, mise, tofu).
+# tooling that writes to these paths (gh, mise).
 sudo chown -R vscode:vscode \
     /home/vscode/.config/gh \
-    /home/vscode/.opentofu.d/plugin-cache \
     /home/vscode/.local/share/mise \
     2>/dev/null || true
 

@@ -51,27 +51,6 @@ setopt SHARE_HISTORY
 setopt AUTO_CD
 setopt AUTO_PUSHD
 
-# --- OpenTofu aliases ---
-alias tofui='tofu init'
-alias tofup='tofu plan'
-alias tofua='tofu apply'
-alias tofud='tofu destroy'
-alias tofuv='tofu validate'
-alias tofuf='tofu fmt -recursive'
-alias tofuo='tofu output'
-alias tofus='tofu state list'
-alias tofuss='tofu state show'
-alias tofuw='tofu workspace'
-alias tofuwl='tofu workspace list'
-alias tofuws='tofu workspace select'
-
-# --- Trivy / terraform-docs aliases ---
-alias tfscan='trivy config .'
-alias tfscanmed='trivy config . --severity MEDIUM,HIGH,CRITICAL'
-alias tfscanhigh='trivy config . --severity HIGH,CRITICAL'
-alias tofudocs='terraform-docs markdown table .'
-alias tofudocsmd='terraform-docs markdown .'
-
 # --- Ansible aliases ---
 alias ap='ansible-playbook'
 alias av='ansible-vault'
@@ -111,67 +90,12 @@ alias sde='sops'
 
 # --- Functions ---
 
-# Extract TF_VAR_state_passphrase from SOPS-encrypted secrets
-tofuenv() {
-    export TF_VAR_state_passphrase
-    TF_VAR_state_passphrase=$(sops -d --extract '["tofu_state_passphrase"]' \
-        /workspaces/deerlab/inventory/group_vars/proxmox/secrets.sops.yaml)
-    echo "TF_VAR_state_passphrase set from SOPS"
-}
-
-# mirrors the CI validation pipeline for local pre-push checks
-tofucheck() {
-    echo "=== Formatting ===" && tofu fmt -check -recursive
-    echo "=== Validating ===" && cd /workspaces/deerlab/tofu && tofu validate
-    echo "=== Linting ===" && tflint --config=/workspaces/deerlab/.tflint.hcl --chdir=/workspaces/deerlab/tofu
-    echo "=== Security Scan ===" && trivy config . --severity HIGH,CRITICAL
-}
-
-tofupo() {
-    tofu plan -out="${1:-tofuplan}" "${@:2}"
-}
-
-tofuao() {
-    tofu apply "${1:-tofuplan}"
-}
-
-tofuready() {
-    tofuenv
-    cd /workspaces/deerlab/tofu && tofu init -upgrade && tofu validate && tofu plan
-}
-
-tofuworkspace() {
-    tofu workspace show
-}
-
-tofufmtall() {
-    tofu fmt -recursive
-}
-
-tofuouts() {
-    tofu output -json | jq -r 'keys[]'
-}
-
-infoctx() {
-    echo "=== Infrastructure Context ==="
-    echo "Tofu WS:   $(cd /workspaces/deerlab/tofu && tofu workspace show 2>/dev/null || echo 'N/A')"
-    echo "SOPS key:  $([ -f "${SOPS_AGE_KEY_FILE:-}" ] && echo 'Present' || echo 'Missing')"
-    echo "Git:       $(git branch --show-current 2>/dev/null || echo 'N/A')"
-}
-
 infrahelp() {
     cat << 'EOF'
 === Quick Reference ===
-Tofu:     tofup (plan) | tofua (apply) | tofucheck (validate) | tofuready (init+plan)
-          tofuenv (load passphrase) | tofupo (plan -out) | tofuao (apply saved)
-Ansible:  ap (playbook) | ave (vault edit) | al (lint) | agi (galaxy install)
-SOPS:     se (encrypt) | sd (decrypt) | sde (edit)
-GitHub:   ghpr (pr list) | ghprc (pr create) | ghprv (pr view) | ghprs (pr status) | ghra (repo web)
-uv:       uvs (sync) | uvl (lock) | uvr (run) | uvt (tool list) | uva (add) | uvad (add --dev)
-Just:     j (just) | jl (just --list)
-Trivy:    tfscan (scan) | tfscanmed (med+) | tfscanhigh (high+)
-Docs:     tofudocs (table) | tofudocsmd (full markdown)
-Helpers:  infoctx (context) | infrahelp (this) | tofucheck (validate all) | tofuready (init+plan)
+  just ci        - run every CI check locally
+  just plan HOST - check and diff a host without changing it
+  just apply HOST - push the playbook to a host (bootstrap only)
 EOF
 }
 

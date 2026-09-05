@@ -8,10 +8,9 @@ default:
 
 # Install all tools and pre-commit hooks
 setup:
+    mise trust --yes mise.toml
     mise install --yes
-    mise run install-python-tools
     ansible-galaxy collection install -r requirements.yml
-    tflint --init --config=.tflint.hcl
     pre-commit install
     @echo "Setup complete"
 

@@ -1,38 +1,23 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-# Single source of truth for tool versions so CI and devcontainer stay in lockstep.
+# Single source of truth for every tool the repo needs. CI, the devcontainer
+# and `just setup` all run `mise install` and nothing else.
 
 [tools]
 node = "lts"
-opentofu = "1.11.4"
-tflint = "0.61.0"
-trivy = "0.69.1"
-gitleaks = "8.30.0"
-just = "1.46.0"
-terraform-docs = "0.21.0"
-pre-commit = "4.5.1"
-uv = "0.10.0"
-markdownlint-cli2 = "latest"
-
-# These versions live in [env] rather than [tools] because mise cannot install
-# them directly; post-create.sh installs them via `uv tool install`.
-
-[env]
-# Consumed by .pre-commit-config.yaml
-PRECOMMIT_HOOKS_VERSION = "v6.0.0"
-SOPS_VERSION = "3.9.4"
-AGE_VERSION = "1.2.1"
-# Installed outside mise via uv tool install (in post-create.sh)
-ANSIBLE_VERSION = "13.3.0"
-ANSIBLE_LINT_VERSION = "26.1.1"
-YAMLLINT_VERSION = "1.38.0"
-
-[tasks.install-python-tools]
-description = "Install Python CLI tools via uv tool install"
-run = """
-uv tool install ansible==$ANSIBLE_VERSION --with-executables-from ansible-core --with paramiko
-uv tool install ansible-lint==$ANSIBLE_LINT_VERSION --with passlib
-uv tool install yamllint==$YAMLLINT_VERSION
-uv tool install reuse
-"""
+uv = "0.12.9"
+just = "1.58.0"
+pre-commit = "4.6.2"
+markdownlint-cli2 = "0.23.2"
+shellcheck = "0.11.0"
+trivy = "0.74.0"
+gitleaks = "8.30.1"
+sops = "3.13.3"
+age = "1.3.2"
+restic = "0.19.1"
+"npm:cspell" = "10.2.1"
+"pipx:ansible" = { version = "14.3.1", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib" }
+"pipx:ansible-lint" = { version = "26.8.0", uvx_args = "--with passlib" }
+"pipx:yamllint" = "1.38.0"
+"pipx:reuse" = "6.2.0"
