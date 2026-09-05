@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Runs on the controller. In pull mode the controller is the host itself and
+# the checkout is the working directory, so collections land in
+# <checkout>/collections where ansible.cfg looks for them.
+- name: Install collections into the checkout
+  hosts: podman_hosts
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Install the pinned collections
+      ansible.builtin.command:
+        cmd: "{{ ansible_playbook_python | dirname }}/ansible-galaxy collection install -r requirements.yml -p collections"
+        chdir: "{{ playbook_dir }}/.."
+      register: deps_galaxy
+      changed_when: "'Installing' in deps_galaxy.stdout"
+      delegate_to: localhost
+      run_once: true

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+ansible_host: <edge public IPv4>
+base_wireguard_ipv4: <edge tunnel IPv4>
+base_wireguard_ipv6: "<edge tunnel IPv6>"
+base_wireguard_public_key: "REPLACED-IN-TASK-9"
+# Public address and port the services host connects to. Literal IP, not a name.
+base_wireguard_public_endpoint: "<edge public IPv4>:<WireGuard port>"

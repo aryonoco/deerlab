@@ -293,7 +293,15 @@ training-data/
 *credentials*
 *secret*
 !SECURITY.md
-# SOPS-encrypted files are safe to commit; negate the *secret* glob above
+# SOPS-encrypted files are safe to commit; negate the *secret* glob above.
+# The secrets/ directory itself matches *secret*, so it must be re-included
+# before the file-level negations below can apply to anything inside it.
+!/secrets/
+# Re-ignore everything under secrets/ except SOPS-encrypted files, so a
+# plaintext file dropped there (e.g. a typo'd .yaml missing the .sops infix)
+# stays blocked instead of falling through the blanket re-inclusion above.
+/secrets/*
+!/secrets/*.sops.yaml
 !*.sops.yaml
 !*.sops.yaml.example
 !*.sops.json

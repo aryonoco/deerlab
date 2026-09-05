@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Registries every service user may pull from. Anything else is rejected
+# by the per-user policy.json that roles/podman_user writes.
+podman_user_registries:
+  - docker.io
