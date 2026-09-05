@@ -4,6 +4,8 @@
   "ignores": [
     "collections/**",
     "CLAUDE.md",
-    ".claude/**"
+    ".claude/**",
+    ".ansible/**",
+    ".superpowers/**"
   ]
 }

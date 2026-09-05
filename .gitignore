@@ -19,6 +19,7 @@
 collections/
 *.retry
 .ansible_fact_cache/
+.ansible/
 
 # Ansible secrets (non-SOPS)
 authorized_keys

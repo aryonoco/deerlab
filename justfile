@@ -44,7 +44,7 @@ shellcheck:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Running shellcheck ==="
-    find . -name '*.sh' -not -path './collections/*' -not -path './.devcontainer/config/*' -print0 | xargs -0 shellcheck
+    find . -name '*.sh' -not -path './collections/*' -not -path './.devcontainer/config/*' -not -path './.ansible/*' -print0 | xargs -0 shellcheck
     echo "shellcheck passed"
 
 # Lint all Markdown files
@@ -55,7 +55,7 @@ markdownlint:
 # Run Trivy configuration scan
 security-scan:
     @echo "=== Running Trivy security scan ==="
-    trivy config . --severity HIGH,CRITICAL --exit-code 1 --skip-dirs collections
+    trivy config . --severity HIGH,CRITICAL --exit-code 1 --skip-dirs collections --skip-dirs .ansible
 
 # Run gitleaks secret scan
 gitleaks:
