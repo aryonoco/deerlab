@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_ssh_admin_user | length > 0
+    fail_msg: base_ssh_admin_user is required
+
+- name: Confirm the admin user exists before locking root out
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ base_ssh_admin_user }}"
+
+- name: Remove ECDSA and DSA host keys
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/ssh/ssh_host_ecdsa_key
+    - /etc/ssh/ssh_host_ecdsa_key.pub
+    - /etc/ssh/ssh_host_dsa_key
+    - /etc/ssh/ssh_host_dsa_key.pub
+  notify: Restart ssh
+
+- name: Remove the cloud-init sshd override
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+    state: absent
+  notify: Restart ssh
+
+# sshd's `Include` keeps the first value it sees for a keyword, and
+# /etc/ssh/sshd_config.d/*.conf is expanded in glob (alphabetical) order.
+# Any other drop-in in this directory therefore outranks ours whenever it
+# sorts before "50-deerlab.conf" — found live on svc1, where the provider's
+# own 01-hosthatch.conf set `PermitRootLogin yes` and silently won. This
+# role is the sole owner of sshd_config.d, so anything else there is
+# removed rather than merged with.
+- name: Find other sshd drop-ins that could outrank this one
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    patterns: "*.conf"
+    excludes: "50-deerlab.conf"
+  register: base_ssh_other_dropins
+
+- name: Remove other sshd drop-ins
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ base_ssh_other_dropins.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify: Restart ssh
+
+- name: Deploy the sshd drop-in with rollback on validation failure
+  block:
+    - name: Write the sshd drop-in
+      ansible.builtin.template:
+        src: 50-deerlab.conf.j2
+        dest: /etc/ssh/sshd_config.d/50-deerlab.conf
+        owner: root
+        group: root
+        mode: "0644"
+      register: base_ssh_dropin
+
+    - name: Validate the full sshd configuration  # noqa: no-handler
+      ansible.builtin.command:
+        cmd: sshd -t
+      changed_when: false
+      when: base_ssh_dropin.changed
+
+  rescue:
+    - name: Remove the rejected drop-in
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/50-deerlab.conf
+        state: absent
+
+    - name: Fail after removing the rejected drop-in
+      ansible.builtin.fail:
+        msg: sshd -t rejected 50-deerlab.conf. The file was removed to prevent a lockout.
+
+- name: Restart ssh when the drop-in changed  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: restarted
+  when: base_ssh_dropin.changed

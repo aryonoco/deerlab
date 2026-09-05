@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: OpenSSH server hardening
+    description: >
+      Key-only authentication for one admin user, root login disabled,
+      post-quantum key exchange first, per-source penalties with the
+      tunnel exempt, and a validated drop-in that is removed again if
+      sshd rejects it.
+    options:
+      base_ssh_admin_user:
+        type: str
+        required: true
+        description: The only login allowed.
+      base_ssh_penalty_exempt:
+        type: list
+        elements: str
+        description: Prefixes exempt from PerSourcePenalties.
+      base_ssh_max_auth_tries:
+        type: int
+        default: 6
+      base_ssh_login_grace_time:
+        type: int
+        default: 30
+      base_ssh_kex_algorithms:
+        type: list
+        elements: str
+      base_ssh_ciphers:
+        type: list
+        elements: str
+      base_ssh_macs:
+        type: list
+        elements: str
+      base_ssh_host_key_algorithms:
+        type: list
+        elements: str

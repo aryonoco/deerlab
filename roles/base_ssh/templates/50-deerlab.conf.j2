@@ -1,0 +1,45 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+
+# Authentication
+PermitRootLogin no
+AllowUsers {{ base_ssh_admin_user }}
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AuthenticationMethods publickey
+RequiredRSASize 3072
+StrictModes yes
+
+# Brute-force protection
+MaxAuthTries {{ base_ssh_max_auth_tries }}
+LoginGraceTime {{ base_ssh_login_grace_time }}
+PerSourcePenalties crash:90 authfail:5 noauth:1 grace-exceeded:20 refuseconnection:10 max:600 min:15
+PerSourcePenaltyExemptList {{ base_ssh_penalty_exempt | join(',') }}
+
+# Sessions
+ClientAliveInterval 300
+ClientAliveCountMax 3
+MaxSessions 4
+
+# Forwarding
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+PermitUserEnvironment no
+
+# Logging
+LogLevel VERBOSE
+
+# Algorithms
+KexAlgorithms {{ base_ssh_kex_algorithms | join(',') }}
+Ciphers {{ base_ssh_ciphers | join(',') }}
+MACs {{ base_ssh_macs | join(',') }}
+HostKeyAlgorithms {{ base_ssh_host_key_algorithms | join(',') }}
+
+# Host keys
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_ssh_admin_user: "{{ deerlab_admin_user }}"
+base_ssh_penalty_exempt:
+  - "{{ deerlab_wg_ipv4_prefix }}"
+  - "{{ deerlab_wg_ipv6_prefix }}"
+# Debian's default, and deliberately not lowered. Under `AuthenticationMethods
+# publickey` with passwords disabled, MaxAuthTries only caps how many public
+# keys a client may offer: an attacker either holds a key or does not, so a low
+# value buys no brute-force resistance. It does lock out an operator whose agent
+# holds several keys, because ssh offers them in agent order until one is
+# accepted — verified here, the deerlab key is the fourth offered, so a limit of
+# 3 would have made both hosts console-only. PerSourcePenalties below is the
+# actual brute-force control.
+base_ssh_max_auth_tries: 6
+base_ssh_login_grace_time: 30
+
+base_ssh_kex_algorithms:
+  - mlkem768x25519-sha256
+  - sntrup761x25519-sha512
+  - sntrup761x25519-sha512@openssh.com
+  - curve25519-sha256
+  - curve25519-sha256@libssh.org
+
+base_ssh_ciphers:
+  - chacha20-poly1305@openssh.com
+  - aes256-gcm@openssh.com
+  - aes128-gcm@openssh.com
+  - aes256-ctr
+
+base_ssh_macs:
+  - hmac-sha2-512-etm@openssh.com
+  - hmac-sha2-256-etm@openssh.com
+
+base_ssh_host_key_algorithms:
+  - ssh-ed25519-cert-v01@openssh.com
+  - ssh-ed25519
+  - rsa-sha2-512-cert-v01@openssh.com
+  - rsa-sha2-512
+  - rsa-sha2-256

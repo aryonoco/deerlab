@@ -5,3 +5,4 @@
   hosts: podman_hosts
   roles:
     - role: base_os
+    - role: base_ssh
