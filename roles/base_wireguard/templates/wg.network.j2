@@ -1,0 +1,13 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Match]
+Name={{ base_wireguard_interface }}
+
+[Network]
+Address={{ base_wireguard_ipv4 }}/{{ base_wireguard_ipv4_prefix.split('/')[1] }}
+Address={{ base_wireguard_ipv6 }}/{{ base_wireguard_ipv6_prefix.split('/')[1] }}
+
+[Link]
+MTUBytes={{ base_wireguard_mtu }}
+RequiredForOnline=routable

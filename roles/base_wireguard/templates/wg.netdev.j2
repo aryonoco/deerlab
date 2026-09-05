@@ -1,0 +1,24 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[NetDev]
+Name={{ base_wireguard_interface }}
+Kind=wireguard
+Description=deerlab tunnel
+
+[WireGuard]
+PrivateKeyFile=/etc/systemd/network/{{ base_wireguard_interface }}.key
+ListenPort={{ base_wireguard_port }}
+{% for peer in base_wireguard_peers %}
+
+[WireGuardPeer]
+# {{ peer.name }}
+PublicKey={{ peer.public_key }}
+PresharedKeyFile=/etc/systemd/network/{{ base_wireguard_interface }}.psk
+AllowedIPs={{ peer.ipv4 }}/32
+AllowedIPs={{ peer.ipv6 }}/128
+{% if peer.endpoint | length > 0 %}
+Endpoint={{ peer.endpoint }}
+PersistentKeepalive={{ base_wireguard_keepalive }}
+{% endif %}
+{% endfor %}

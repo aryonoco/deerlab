@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_wireguard_interface: wg0
+base_wireguard_port: "{{ deerlab_wg_port }}"
+base_wireguard_ipv4_prefix: "{{ deerlab_wg_ipv4_prefix }}"
+base_wireguard_ipv6_prefix: "{{ deerlab_wg_ipv6_prefix }}"
+base_wireguard_public_endpoint: ""
+base_wireguard_mtu: 1420
+base_wireguard_keepalive: 25

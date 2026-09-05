@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Kernel WireGuard tunnel via systemd-networkd
+    description: >
+      One wg0 interface per host peered with every other host in the
+      podman_hosts group. Keys come from SOPS and are written as files
+      readable by systemd-network. A host with a public endpoint is the
+      responder; the others initiate with a persistent keepalive.
+    options:
+      base_wireguard_interface:
+        type: str
+        default: wg0
+      base_wireguard_port:
+        type: int
+        required: true
+      base_wireguard_private_key:
+        type: str
+        required: true
+        description: This host's private key, from SOPS.
+      base_wireguard_public_key:
+        type: str
+        required: true
+      base_wireguard_preshared_key:
+        type: str
+        required: true
+        description: Shared by all peers, from SOPS.
+      base_wireguard_ipv4:
+        type: str
+        required: true
+        description: This host's tunnel IPv4 address without prefix length.
+      base_wireguard_ipv6:
+        type: str
+        required: true
+      base_wireguard_ipv4_prefix:
+        type: str
+        required: true
+        description: Tunnel IPv4 network in CIDR form.
+      base_wireguard_ipv6_prefix:
+        type: str
+        required: true
+      base_wireguard_public_endpoint:
+        type: str
+        default: ""
+        description: host:port other peers connect to. Set only on the edge.
+      base_wireguard_mtu:
+        type: int
+        default: 1420
+      base_wireguard_keepalive:
+        type: int
+        default: 25

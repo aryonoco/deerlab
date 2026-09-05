@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_wireguard_private_key | length > 0
+      - base_wireguard_private_key != 'CHANGE-ME'
+      - base_wireguard_preshared_key | length > 0
+      - base_wireguard_preshared_key != 'CHANGE-ME'
+      - base_wireguard_public_key | length > 0
+      - base_wireguard_ipv4 | length > 0
+      - base_wireguard_ipv6 | length > 0
+    fail_msg: base_wireguard needs this host's keys and tunnel addresses
+    quiet: true
+
+- name: Build the peer list from the other hosts
+  ansible.builtin.set_fact:
+    base_wireguard_peers: >-
+      {{ base_wireguard_peers | default([]) + [{
+           'name': item,
+           'public_key': hostvars[item]['base_wireguard_public_key'],
+           'ipv4': hostvars[item]['base_wireguard_ipv4'],
+           'ipv6': hostvars[item]['base_wireguard_ipv6'],
+           'endpoint': hostvars[item]['base_wireguard_public_endpoint'] | default('')
+         }] }}
+  loop: "{{ groups['podman_hosts'] | difference([inventory_hostname]) }}"
+
+- name: Write the private key
+  ansible.builtin.copy:
+    content: "{{ base_wireguard_private_key }}\n"
+    dest: "/etc/systemd/network/{{ base_wireguard_interface }}.key"
+    owner: root
+    group: systemd-network
+    mode: "0640"
+  no_log: true
+  notify: Reconfigure wg
+
+- name: Write the preshared key
+  ansible.builtin.copy:
+    content: "{{ base_wireguard_preshared_key }}\n"
+    dest: "/etc/systemd/network/{{ base_wireguard_interface }}.psk"
+    owner: root
+    group: systemd-network
+    mode: "0640"
+  no_log: true
+  notify: Reconfigure wg
+
+- name: Define the WireGuard netdev
+  ansible.builtin.template:
+    src: wg.netdev.j2
+    dest: "/etc/systemd/network/50-{{ base_wireguard_interface }}.netdev"
+    owner: root
+    group: systemd-network
+    mode: "0640"
+  notify: Reconfigure wg
+
+- name: Define the WireGuard network
+  ansible.builtin.template:
+    src: wg.network.j2
+    dest: "/etc/systemd/network/50-{{ base_wireguard_interface }}.network"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reconfigure wg
+
+- name: Enable systemd-networkd
+  ansible.builtin.systemd_service:
+    name: systemd-networkd
+    enabled: true
+    state: started
+
+- name: Wait for the tunnel interface at boot
+  ansible.builtin.systemd_service:
+    name: "systemd-networkd-wait-online@{{ base_wireguard_interface }}.service"
+    enabled: true
+
+- name: Name the peers in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '\s{{ item.name }}\.wg(\s|$)'
+    line: "{{ item.ipv4 }} {{ item.name }}.wg"
+  loop: "{{ base_wireguard_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Flush handlers so the tunnel is up before the firewall runs
+  ansible.builtin.meta: flush_handlers
