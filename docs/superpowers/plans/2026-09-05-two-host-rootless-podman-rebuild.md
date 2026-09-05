@@ -2805,6 +2805,10 @@ argument_specs:
       base_firewall_wg_port:
         type: int
         required: true
+      base_firewall_wg_interface:
+        type: str
+        default: wg0
+        description: Tunnel interface that backend access is scoped to.
       base_firewall_peer_ipv4:
         type: str
         default: ""
@@ -2846,6 +2850,10 @@ Expected: FAIL, `base_firewall` has no tasks yet.
 base_firewall_services: "{{ podman_services }}"
 base_firewall_ssh_port: 22
 base_firewall_wg_port: "{{ deerlab_wg_port }}"
+# The interface backend access is scoped to. Named here rather than written
+# into the template, so it cannot drift from the interface base_wireguard
+# actually creates.
+base_firewall_wg_interface: wg0
 base_firewall_peer_ipv4: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv4'] | default('') }}"
 base_firewall_peer_ipv6: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv6'] | default('') }}"
 
@@ -2886,16 +2894,22 @@ base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
       - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
     fail_msg: base_firewall_role must be edge or services, and a services host needs the edge's tunnel address
 
+# Split by protocol. A publish entry may carry a /udp suffix, and collapsing
+# both into one list would emit a tcp accept for a udp service: the rendered
+# ruleset would look correct, nft --check would pass, and the port would simply
+# be unreachable at runtime.
 - name: Collect the backend ports published on this host
   ansible.builtin.set_fact:
-    base_firewall_backend_ports: >-
-      {{ base_firewall_services.values()
-         | map(attribute='publish')
-         | flatten
+    base_firewall_backend_tcp_ports: >-
+      {{ base_firewall_services.values() | map(attribute='publish') | flatten
+         | reject('search', '/udp$')
          | map('regex_replace', '^([0-9]+):.*$', '\1')
-         | map('int')
-         | unique
-         | sort }}
+         | map('int') | unique | sort }}
+    base_firewall_backend_udp_ports: >-
+      {{ base_firewall_services.values() | map(attribute='publish') | flatten
+         | select('search', '/udp$')
+         | map('regex_replace', '^([0-9]+):.*$', '\1')
+         | map('int') | unique | sort }}
 
 - name: Write the ruleset
   ansible.builtin.template:
@@ -2945,12 +2959,16 @@ table inet deerlab {
 {% if svc.egress == 'any' %}
     accept
 {% elif svc.egress == 'web' %}
-    ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
-    ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
+{# The resolver accepts come first on purpose. drop is terminal, so if a #}
+{# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
+{# resolver, a link-local metadata address - a drop placed above would make #}
+{# its own accept unreachable and silently break DNS for the whole class. #}
 {% for resolver in base_firewall_resolvers %}
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} udp dport 53 accept
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} tcp dport 53 accept
 {% endfor %}
+    ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
+    ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
     tcp dport { 80, 443 } accept
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
@@ -2973,11 +2991,15 @@ table inet deerlab {
     tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } accept
     udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } accept
     udp dport {{ base_firewall_wg_port }} accept
-{% elif base_firewall_backend_ports | length > 0 %}
-    iifname "wg0" ip saddr {{ base_firewall_peer_ipv4 }} tcp dport { {{ base_firewall_backend_ports | join(', ') }} } ct state new accept
+{% else %}
+{% for proto, ports in [('tcp', base_firewall_backend_tcp_ports), ('udp', base_firewall_backend_udp_ports)] %}
+{% if ports | length > 0 %}
+    iifname "{{ base_firewall_wg_interface }}" ip saddr {{ base_firewall_peer_ipv4 }} {{ proto }} dport { {{ ports | join(', ') }} } ct state new accept
 {% if base_firewall_peer_ipv6 | length > 0 %}
-    iifname "wg0" ip6 saddr {{ base_firewall_peer_ipv6 }} tcp dport { {{ base_firewall_backend_ports | join(', ') }} } ct state new accept
+    iifname "{{ base_firewall_wg_interface }}" ip6 saddr {{ base_firewall_peer_ipv6 }} {{ proto }} dport { {{ ports | join(', ') }} } ct state new accept
 {% endif %}
+{% endif %}
+{% endfor %}
 {% endif %}
     limit rate 5/minute log prefix "nft-in-drop " level info
   }
