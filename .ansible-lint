@@ -13,6 +13,7 @@ enable_list:
   - no-log-password
   - no-same-owner
   - no-prompting
+  - role-argument-spec
 
 use_default_rules: true
 offline: false
@@ -22,7 +23,5 @@ exclude_paths:
   - .git/
   - .venv/
   - collections/
-  # SOPS-encrypted files have machine-generated metadata with its own
-  # indentation style — sops --encrypt always regenerates it.
   - "*.sops.yaml"
-  - "*.sops.json"
+  - secrets/

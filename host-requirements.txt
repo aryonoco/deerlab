@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+# Installed into /opt/deerlab/venv on each host by roles/base_pull.
+ansible==14.3.1
+passlib==1.7.4
