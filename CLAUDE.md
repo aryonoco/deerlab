@@ -3,7 +3,8 @@
 
 # deerlab
 
-Homelab IaC for Proxmox VE 9 — Ansible + OpenTofu.
+Two Debian 13 VPSs configured entirely by Ansible. Design:
+`docs/superpowers/specs/2026-09-05-two-host-rootless-podman-design.md`.
 
 ## Commits
 
@@ -12,35 +13,36 @@ Homelab IaC for Proxmox VE 9 — Ansible + OpenTofu.
 
 ## CRITICAL
 
-- This project uses OpenTofu. Always use `tofu` commands, never `terraform`
+- Ansible is the only executor. There is no OpenTofu, no Proxmox and no hypervisor
 - Tool versions are managed by mise — `mise.toml` is the single source of truth
 - Run `just ci` before committing. Never bypass pre-commit hooks with `--no-verify`
 - Never hardcode credentials. All secrets use SOPS + age encryption
-- The `carlpett/sops` provider decrypts secrets natively in OpenTofu
-- The only tofu env var is `TF_VAR_state_passphrase` (extracted from SOPS at runtime)
+- Targets run Podman 5.4.2. Quadlet files may only use keys that exist in 5.4.2
+- Never run Podman as root, and never put systemd sandboxing directives in a Quadlet `[Service]` section
+- Never `systemctl stop nftables` on a host; it flushes every rule
 
 ## Key Commands
 
 - `just ci` — run entire CI pipeline locally
 - `just fmt` — format all code
-- `just lint-all` — run TFLint
-- `just tofu-plan` — run tofu plan (auto-extracts passphrase from SOPS)
-- `just tofu-apply` — run tofu apply (auto-extracts passphrase from SOPS)
-- `just ansible-lint` — lint Ansible playbooks and roles
-- `just secrets-edit` — edit SOPS-encrypted Ansible secrets
-- `just tfvars-edit` — edit SOPS-encrypted tofu variables
+- `just plan HOST` — check and diff against a real host
+- `just apply HOST` — push to a host; bootstrap and break-glass only
+- `just bootstrap HOST` — first run against a fresh image, as root
+- `just merge BRANCH` — fast-forward main so commit signatures survive
+- `just secrets-edit FILE` — edit a SOPS-encrypted file
+- `just secrets-rekey` — re-encrypt after changing recipients
 
 ## Code Quality
 
 - All linter rules are enforced as errors — fix them, don't suppress them
-- TFLint for OpenTofu, ShellCheck for shell scripts, ansible-lint for Ansible
+- ShellCheck for shell scripts, ansible-lint for Ansible
 - markdownlint for Markdown, yamllint for YAML
 - Test idempotency: running a playbook twice must produce zero changes on the second run
 
 ## Ansible
 
 - Always use FQCN for modules (e.g., `ansible.builtin.template`, not `template`)
-- Prefix all role variables with the role name (e.g., `proxmox_hardening_ssh_port`)
+- Prefix all role variables with the role name (e.g., `base_ssh_admin_user`)
 - Define defaults in `defaults/main.yml`. Document variables in `meta/argument_specs.yml`
 - Use `changed_when` and `failed_when` on every `command`/`shell` task
 - Use `no_log: true` on tasks that handle secrets (passwords, tokens, keys)
@@ -48,17 +50,6 @@ Homelab IaC for Proxmox VE 9 — Ansible + OpenTofu.
 - Prefer native modules over `command`/`shell`. Only use shell when no module exists
 - Playbooks are thin — a list of roles with `hosts:`, no inline tasks
 - Data belongs in inventory (`group_vars/`, `host_vars/`), logic belongs in roles
-
-## OpenTofu
-
-- Use `for_each` with maps for distinct resources. Use `count` only for identical resources
-- Use `ephemeral "sops_file"` for credentials that must never appear in state (API tokens, SSH users, passwords)
-- Use `data "sops_file"` for infrastructure config that must be tracked in state (container definitions, firewall rules) — wrap with `nonsensitive()` since these are config, not credentials
-- Use `lifecycle { prevent_destroy = true }` on resources that must not be accidentally deleted
-- Use `moved` blocks for refactoring resource names — never destroy-and-recreate for a rename
-- Never use provisioners. All post-provisioning config belongs in Ansible
-- Pin provider versions in `versions.tf`. Use `bpg/proxmox` provider (not telmate)
-- Run `tofu fmt` and `tofu validate` before planning
 
 ## Development Environment
 
@@ -73,48 +64,25 @@ Homelab IaC for Proxmox VE 9 — Ansible + OpenTofu.
 
 - All secrets use SOPS with age encryption (public key in `.sops.yaml`)
 - Encrypted files (`*.sops.yaml`, `*.sops.json`) are committed with values encrypted
-- OpenTofu state is encrypted at rest using PBKDF2+AES-GCM (committed)
-
-### Secrets in OpenTofu
-
-Provider config (API token, endpoint, SSH user) and variable overrides
-(containers, etc.) are decrypted natively by the `carlpett/sops` provider
-using ephemeral resources.
-
-The only env var needed is `TF_VAR_state_passphrase`, because the `encryption`
-block must decrypt state before any provider or ephemeral resource runs.
-
-### SOPS in OpenTofu — three patterns
-
-1. **`ephemeral "sops_file"`** — provider credentials (API token, SSH user, endpoint).
-   Decrypted at runtime only, never written to state. Use for anything that
-   authenticates or connects.
-2. **`data "sops_file"`** — infrastructure config (container specs, firewall rules).
-   Stored in state so OpenTofu can detect drift. These are encrypted at rest in
-   the SOPS file and again in the encrypted state file, but they are not
-   transient credentials — they define desired state.
-3. **`TF_VAR_state_passphrase` (env var)** — the state encryption passphrase.
-   The `encryption` block in `versions.tf` must decrypt state before any
-   provider or ephemeral resource can initialise, so this value cannot come
-   from a SOPS data source. It is extracted from SOPS by `just tofu-env`
-   and exported as an environment variable before `tofu init` runs.
 
 ## Structure
 
-```
-inventory/          # what to manage (hosts, vars, secrets)
-playbooks/          # when to run (Ansible orchestration order)
-roles/              # how to configure (Ansible roles — SSH into host)
-tofu/               # what to provision (OpenTofu — Proxmox API)
-docs/               # design documents and analysis
+```text
+inventory/          # what to manage (hosts, service definitions, secrets)
+playbooks/          # when to run (site.yml imports deps, base, edge, services)
+roles/              # how to configure (base_*, podman_*, backup)
+docs/               # design spec, implementation plan
+secrets/            # operator-only credentials, outside the inventory
 ```
 
 ## Architecture
 
-- **Tofu owns "what exists"** — resource lifecycle via the Proxmox API
-- **Ansible owns "how it's configured"** — OS/service config via SSH
-- Ansible runs in 4 stages: install → bootstrap → hardening → ACME certificates
-- ACME cert must complete before OpenTofu runs with `insecure=false`
+- Two Debian 13 VPSs. An edge host runs only Caddy; a services host runs every
+  application as a rootless Podman Quadlet under its own system user
+- The hosts are linked by kernel WireGuard. The services host has no public
+  listener except SSH
+- Delivery is pull-based: each host runs `ansible-pull` on a timer against a
+  signed `release` branch. `just apply` is for bootstrap and break-glass only
 - One role = one concern. Split early, merge never
-- Data in inventory, logic in roles. Roles should be generic
-- **Principle of least privilege**: deploy LXC containers and rootless Podman/Quadlet services with minimum privileges and capabilities. If a service fails, investigate the required capabilities and add them one at a time — only the minimum needed to make the service run, never more
+- Data in inventory, logic in roles. A new service is an inventory change
+- **Principle of least privilege**: deploy rootless Podman/Quadlet services with minimum privileges and capabilities. If a service fails, investigate the required capabilities and add them one at a time — only the minimum needed to make the service run, never more
