@@ -161,11 +161,10 @@
           "editor.formatOnSave": true
         },
 
-        "ansible.python.interpreterPath": "/home/vscode/.local/share/uv/tools/ansible/bin/python3",
         "ansible.validation.enabled": true,
         "ansible.validation.lint.enabled": true,
-        "ansible.validation.lint.path": "/home/vscode/.local/bin/ansible-lint",
-        "ansible.ansible.path": "/home/vscode/.local/bin/ansible",
+        "ansible.validation.lint.path": "/home/vscode/.local/share/mise/shims/ansible-lint",
+        "ansible.ansible.path": "/home/vscode/.local/share/mise/shims/ansible",
 
         "gitlens.currentLine.enabled": true,
         "gitlens.codeLens.enabled": true,

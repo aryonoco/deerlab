@@ -15,11 +15,7 @@ echo ""
 echo "=== deerlab Environment ==="
 echo ""
 
-ver_opentofu=$(get_version tofu version)
-ver_opentofu="${ver_opentofu#OpenTofu }"
-ver_tflint=$(get_version tflint --version)
 ver_trivy=$(get_version trivy --version)
-ver_tfdocs=$(get_version terraform-docs --version)
 ver_ghcli=$(get_version gh --version)
 ver_node=$(get_version node --version)
 ver_mdlint=$(get_version markdownlint-cli2 --version)
@@ -27,10 +23,7 @@ ver_sops=$(get_version sops --version)
 ver_ansible=$(get_version ansible --version)
 
 echo "Tools:"
-echo "  OpenTofu:       ${ver_opentofu}"
-echo "  TFLint:         ${ver_tflint}"
 echo "  Trivy:          ${ver_trivy}"
-echo "  terraform-docs: ${ver_tfdocs}"
 echo "  GitHub CLI:     ${ver_ghcli}"
 echo "  Node.js:        ${ver_node}"
 echo "  markdownlint:   ${ver_mdlint}"
@@ -55,10 +48,7 @@ fi
 
 echo ""
 echo "=== Quick Commands ==="
-echo "  infrahelp  - Show quick reference for all commands"
-echo "  infoctx    - Show current Tofu/Git context"
-echo "  tofucheck  - Format, validate, lint, and security scan"
-echo "  tofuready  - Run init, validate, and plan (with SOPS passphrase)"
-echo "  tfscan     - Run Trivy security scan"
-echo "  tofudocs   - Generate OpenTofu documentation"
+echo "  just ci        - run every CI check locally"
+echo "  just plan HOST - check and diff a host without changing it"
+echo "  just apply HOST - push the playbook to a host (bootstrap only)"
 echo ""
