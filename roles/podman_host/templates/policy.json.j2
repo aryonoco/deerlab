@@ -1,0 +1,16 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+{
+  "default": [{"type": "reject"}],
+  "transports": {
+    "docker": {
+{% for registry in podman_host_registries %}
+      "{{ registry }}": [{"type": "insecureAcceptAnything"}]{{ "," if not loop.last }}
+{% endfor %}
+    },
+    "containers-storage": {"": [{"type": "insecureAcceptAnything"}]},
+    "docker-archive": {"": [{"type": "insecureAcceptAnything"}]},
+    "oci-archive": {"": [{"type": "insecureAcceptAnything"}]},
+    "dir": {"": [{"type": "insecureAcceptAnything"}]}
+  }
+}

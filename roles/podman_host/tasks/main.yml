@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - podman_host_registries | length > 0
+    fail_msg: podman_host_registries must list at least one registry
+    quiet: true
+
+- name: Install Podman and the rootless prerequisites Debian only recommends
+  ansible.builtin.apt:
+    name: "{{ podman_host_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Remove the legacy helpers so nothing falls back to them
+  ansible.builtin.apt:
+    name: "{{ podman_host_packages_absent }}"
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Assert the Podman release the design targets
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['packages']['podman'][0]['version'] is match('^5\.4\.')
+    fail_msg: "podman is {{ ansible_facts['packages']['podman'][0]['version'] }}, the Quadlet keys in this repo assume 5.4.x"
+
+- name: Check the passt version carries the AppArmor fix
+  ansible.builtin.command:
+    argv:
+      - dpkg
+      - --compare-versions
+      - "{{ ansible_facts['packages']['passt'][0]['version'] }}"
+      - ge
+      - "{{ podman_host_min_passt_version }}"
+  changed_when: false
+
+- name: Reject unlisted registries system-wide
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: /etc/containers/policy.json
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+
+- name: Disable short image names
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      unqualified-search-registries = []
+      short-name-mode = "enforcing"
+    dest: /etc/containers/registries.conf.d/10-deerlab.conf
+    owner: root
+    group: root
+    mode: "0644"

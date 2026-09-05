@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Rootless Podman host prerequisites
+    description: >
+      Installs Podman and everything Debian only recommends for rootless
+      operation, removes the legacy network and storage helpers, writes a
+      default-reject image policy that allows only listed registries, and
+      asserts the versions the design was written against.
+    options:
+      podman_host_packages:
+        type: list
+        elements: str
+      podman_host_packages_absent:
+        type: list
+        elements: str
+      podman_host_registries:
+        type: list
+        elements: str
+        required: true
+        description: Registries images may be pulled from.
+      podman_host_min_passt_version:
+        type: str
+        description: Debian version string of passt with the AppArmor fix.
