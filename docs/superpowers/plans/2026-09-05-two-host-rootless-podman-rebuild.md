@@ -48,8 +48,6 @@ firewall.
 
 ---
 
----
-
 ## File Structure
 
 Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, `roles/lxc_*`, and the Proxmox playbooks is deleted in Task 2.
