@@ -2,4 +2,52 @@
 # Copyright (c) 2026 Aryan Ameri
 
 base_firewall_role: services
-podman_services: {}
+
+podman_services:
+  wallabag:
+    uid: 2001
+    # The image runs as root inside and rewrites its application tree on
+    # every start, so it cannot be read-only and needs the capabilities
+    # below. Each is an accepted exception recorded in the spec.
+    image: docker.io/wallabag/wallabag:2.6.14@sha256:4a527e027e0d59e87c14225ef11e005af3d4890374202ad319ce5e63dfc66709
+    publish:
+      - "8080:80"
+    volumes:
+      - { name: data, mount: /var/www/wallabag/data }
+      - { name: images, mount: /var/www/wallabag/web/assets/images }
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,noexec,size=64m"
+      - "/run:rw,nosuid,nodev,size=16m"
+    env:
+      SYMFONY__ENV__DOMAIN_NAME: "https://wallabag.{{ deerlab_domain }}"
+      SYMFONY__ENV__SERVER_NAME: wallabag
+      SYMFONY__ENV__FOSUSER_REGISTRATION: "false"
+      SYMFONY__ENV__DATABASE_DRIVER: pdo_sqlite
+      POPULATE_DATABASE: "True"
+      PHP_MEMORY_LIMIT: 256M
+      TZ: Etc/UTC
+    secrets:
+      - { name: symfony-secret, value: "{{ wallabag_symfony_secret }}", type: env, target: SYMFONY__ENV__SECRET }
+    capabilities:
+      - CAP_CHOWN
+      - CAP_SETUID
+      - CAP_SETGID
+      - CAP_NET_BIND_SERVICE
+      - CAP_DAC_OVERRIDE
+      - CAP_FOWNER
+    read_only: false
+    no_new_privileges: true
+    health:
+      cmd: curl --fail --silent http://localhost/api/info
+      interval: 30s
+      start_period: 180s
+    limits:
+      memory: 768M
+      cpu: "100%"
+      tasks: 512
+      pids: 256
+    start_timeout: 900
+    egress: web
+    backup:
+      sqlite: { volume: data, path: db/wallabag.sqlite }
+      volumes: [data, images]
