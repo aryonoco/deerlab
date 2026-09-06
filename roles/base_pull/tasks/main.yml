@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_pull_repo_url | length > 0
+      - base_pull_allowed_signers | length > 0
+      - base_pull_deadman_url | length > 0
+      - '"CHANGE-ME" not in base_pull_deadman_url'
+    fail_msg: base_pull needs the repository URL, allowed signers, and a dead-man URL
+    quiet: true
+
+- name: Install age and the Python tooling
+  ansible.builtin.apt:
+    name:
+      - age
+      - git
+      - python3-venv
+      # ansible.builtin.pip needs this on the system interpreter to manage
+      # a virtualenv, even though the packages it installs land inside it.
+      - python3-packaging
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Install sops
+  ansible.builtin.include_role:
+    name: community.sops.install
+  vars:
+    sops_version: "{{ base_pull_sops_version }}"
+    sops_source: github
+
+# Only the pull working directory. /etc/deerlab belongs to base_os and must
+# stay 0755: at 0700 a service user could not traverse into its own credential
+# file, so the user-scope notifier would fail to start.
+- name: Create the pull working directory
+  ansible.builtin.file:
+    path: "{{ base_pull_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Copy the pinned Python requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../host-requirements.txt"
+    dest: /etc/deerlab/host-requirements.txt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Ansible into its virtual environment
+  ansible.builtin.pip:
+    requirements: /etc/deerlab/host-requirements.txt
+    virtualenv: "{{ base_pull_venv }}"
+    virtualenv_command: python3 -m venv
+
+- name: Generate the host's age key
+  ansible.builtin.command:
+    cmd: "age-keygen -o {{ base_pull_age_key_file }}"
+    creates: "{{ base_pull_age_key_file }}"
+
+- name: Restrict the age key
+  ansible.builtin.file:
+    path: "{{ base_pull_age_key_file }}"
+    owner: root
+    group: root
+    mode: "0400"
+
+- name: Read the host's age public key
+  ansible.builtin.command:
+    cmd: "age-keygen -y {{ base_pull_age_key_file }}"
+  register: base_pull_age_public
+  changed_when: false
+
+- name: Show the age public key to register in .sops.yaml
+  ansible.builtin.debug:
+    msg: "base_pull age public key for {{ inventory_hostname }}: {{ base_pull_age_public.stdout }}"
+
+- name: Write the allowed signers
+  ansible.builtin.copy:
+    content: "{{ base_pull_allowed_signers | join('\n') }}\n"
+    dest: /etc/deerlab/allowed_signers
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure git to verify SSH signatures
+  community.general.git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  loop:
+    - { name: gpg.format, value: ssh }
+    - { name: gpg.ssh.allowedSignersFile, value: /etc/deerlab/allowed_signers }
+    - { name: safe.directory, value: "{{ base_pull_dir }}/checkout" }
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Write the dead-man curl configuration
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      url = "{{ base_pull_deadman_url }}"
+    dest: /etc/deerlab/deadman-pull.conf
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Install the pull service
+  ansible.builtin.template:
+    src: deerlab-pull.service.j2
+    dest: /etc/systemd/system/deerlab-pull.service
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/bin/systemd-analyze verify %s:deerlab-pull.service"
+  notify: Reload systemd for base_pull
+
+- name: Install the pull timer
+  ansible.builtin.template:
+    src: deerlab-pull.timer.j2
+    dest: /etc/systemd/system/deerlab-pull.timer
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/bin/systemd-analyze verify %s:deerlab-pull.timer"
+  notify: Reload systemd for base_pull
+
+- name: Flush handlers before enabling the timer
+  ansible.builtin.meta: flush_handlers
+
+# | bool first: a CLI -e base_pull_enabled=false is a non-empty string, which
+# ternary would otherwise treat as truthy and start the timer anyway. The
+# module's own "enabled" argument does not need this because systemd_service
+# declares it as type: bool and coerces the string itself.
+- name: Enable the pull timer
+  ansible.builtin.systemd_service:
+    name: deerlab-pull.timer
+    enabled: "{{ base_pull_enabled }}"
+    state: "{{ base_pull_enabled | bool | ternary('started', 'stopped') }}"

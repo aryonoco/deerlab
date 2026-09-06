@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_pull_repo_url: "{{ deerlab_repo_url }}"
+base_pull_branch: release
+base_pull_dir: /var/lib/deerlab
+base_pull_venv: /opt/deerlab/venv
+base_pull_interval: "*:0/30"
+base_pull_allowed_signers: "{{ deerlab_allowed_signers }}"
+base_pull_deadman_url: "{{ deerlab_deadman_urls['pull'][inventory_hostname] }}"
+base_pull_sops_version: "3.13.3"
+base_pull_age_key_file: /etc/deerlab/age.key
+base_pull_enabled: true

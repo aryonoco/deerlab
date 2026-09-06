@@ -1,0 +1,17 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Unit]
+Description=deerlab configuration pull
+Wants=network-online.target
+After=network-online.target
+OnFailure=notify-failure@%n.service
+
+[Service]
+Type=oneshot
+Environment=SOPS_AGE_KEY_FILE={{ base_pull_age_key_file }}
+Environment=ANSIBLE_NOCOLOR=1
+WorkingDirectory={{ base_pull_dir }}
+LoadCredential=deadman.conf:/etc/deerlab/deadman-pull.conf
+ExecStart={{ base_pull_venv }}/bin/ansible-pull --url {{ base_pull_repo_url }} --checkout {{ base_pull_branch }} --directory {{ base_pull_dir }}/checkout --verify-commit --clean --connection local --inventory inventory/hosts.yml --limit {{ inventory_hostname }} playbooks/site.yml
+ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/deadman.conf --data "pull ok"

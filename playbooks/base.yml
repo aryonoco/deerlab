@@ -9,3 +9,4 @@
     - role: base_wireguard
     - role: base_firewall
     - role: base_notify
+    - role: base_pull

@@ -1,0 +1,10 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Timer]
+OnCalendar={{ base_pull_interval }}
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
