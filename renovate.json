@@ -3,7 +3,7 @@
   "extends": ["config:recommended", "docker:pinDigests"],
   "timezone": "Australia/Sydney",
   "schedule": ["before 6am on monday"],
-  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "github-actions", "pip_requirements", "pre-commit"],
+  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "github-actions", "pip_requirements"],
   "customManagers": [
     {
       "customType": "regex",

@@ -6,12 +6,11 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Install all tools and pre-commit hooks
+# Install all tools
 setup:
     mise trust --yes mise.toml
     mise install --yes
     ansible-galaxy collection install -r requirements.yml
-    pre-commit install
     @echo "Setup complete"
 
 # Run all CI checks locally
@@ -113,10 +112,6 @@ check-merge-conflicts:
         exit 1
     fi
     echo "No merge conflict markers found"
-
-# Run pre-commit on all files
-pre-commit:
-    pre-commit run --all-files
 
 # Format YAML
 fmt:

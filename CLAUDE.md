@@ -20,7 +20,7 @@ working reference.
 
 - Ansible is the only executor. There is no OpenTofu, no Proxmox and no hypervisor
 - Tool versions are managed by mise — `mise.toml` is the single source of truth
-- Run `just ci` before committing. Never bypass pre-commit hooks with `--no-verify`
+- Run `just ci` before committing. It is the only gate; there are no git hooks
 - Never hardcode credentials. All secrets use SOPS + age encryption
 - **This repository is public.** Encrypt everything useful to an attacker, not
   just credentials: addresses, hostnames, accounts, keys, endpoints, ports,
