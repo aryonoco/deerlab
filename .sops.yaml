@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-# Recipients: the operator key, then one key per host added at bootstrap
-# (Task 11). Run `just secrets-rekey` after editing this list.
+# Recipients: the operator key, then one key per host added by the
+# base_pull role. Run `just secrets-rekey` after editing this list.
 creation_rules:
   - path_regex: '[^/]+\.sops\.yaml$'
-    age: "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm"
+    age: "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm,age1dxhkt6syw8mmfzzzgf9dtjkvt5j7au36nnsmv4vvuejdwmpv9ftssv9vkq"
