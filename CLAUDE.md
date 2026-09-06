@@ -3,8 +3,13 @@
 
 # deerlab
 
-Two Debian 13 VPSs configured entirely by Ansible. Design:
-`docs/superpowers/specs/2026-09-05-two-host-rootless-podman-design.md`.
+Aryan's personal homelab: two Debian 13 VPSs configured entirely by Ansible.
+
+The design and the implementation plan are in `.superpowers/specs/` and
+`.superpowers/plans/`. They are deliberately untracked — this repository is
+public and they describe the estate in detail — so read them from the working
+copy. The spec is the authority for every decision here; this file is the
+working reference.
 
 ## Commits
 
@@ -85,8 +90,8 @@ Two Debian 13 VPSs configured entirely by Ansible. Design:
 inventory/          # what to manage (hosts, service definitions, secrets)
 playbooks/          # when to run (site.yml imports deps, base, edge, services)
 roles/              # how to configure (base_*, podman_*, backup)
-docs/               # design spec, implementation plan
 secrets/            # operator-only credentials, outside the inventory
+.superpowers/       # spec, plan and progress ledger — gitignored, local only
 ```
 
 ## Architecture
