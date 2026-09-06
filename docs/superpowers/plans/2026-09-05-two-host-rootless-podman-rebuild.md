@@ -777,12 +777,17 @@ idempotency host:
     fi
     echo "Idempotent"
 
-# Fast-forward main to a green branch and push, preserving your commit signatures
+# Fast-forward main to a green branch and push, refusing a head the hosts would reject
 merge branch:
     gh pr checks {{ branch }} --required --watch
     git switch main
     git pull --ff-only origin main
     git merge --ff-only {{ branch }}
+    # The same check ansible-pull --verify-commit runs against the release head.
+    # Commits created through the GitHub API, which is every Renovate commit,
+    # carry GitHub's GPG web-flow signature rather than a key in allowed_signers.
+    # Recreate them under your own key first: git rebase --force-rebase -S main
+    git verify-commit HEAD
     git push origin main
 
 # Edit a SOPS-encrypted file
