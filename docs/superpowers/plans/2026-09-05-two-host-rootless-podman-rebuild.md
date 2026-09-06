@@ -39,7 +39,7 @@ prerequisite.
 | --- | --- |
 | 5 | A Pushover application token and user key exist; an Uptime Kuma instance is deployed with four push monitors; a root password hash has been generated. Commit signing is configured in Step 4 of the task itself. |
 | 11 | The Pushover credentials are live, so the delivery test can be seen on the operator's device. |
-| 12 | `main` has been merged to `release` and the head of `release` is signed by the `Deerlab` key. |
+| 12 | The `release` branch exists, its head is the same commit as `main`, and that commit is SSH-signed by a key in `deerlab_allowed_signers`. |
 | 18 | `A` and `AAAA` records for `wallabag.<domain>` point at `<edge public IPv4>`. Caddy requests a certificate on first start and a failed HTTP-01 challenge consumes Let's Encrypt rate limit. |
 | 20 | The S3 bucket exists and per-service access keys have been created and put in the SOPS files. |
 
@@ -974,7 +974,22 @@ image digests in inventory all get pull requests."
 
 - [ ] **Step 7: One-time GitHub configuration**
 
-In the repository settings on GitHub: create a ruleset on `main` requiring signed commits, linear history, and the `Lint and validate` status check. Create a ruleset on `release` blocking force pushes and requiring signed commits. Install the Renovate GitHub App on the repository. Create the `release` branch once from `main`:
+The repository has a single operator, so it carries no rulesets and no branch
+protection. Server-side rules would only obstruct the person they are meant to
+protect, and they would police the wrong property: GitHub treats any commit
+signed by a registered key as verified, including the GPG web-flow signature it
+puts on commits an app creates. Signature enforcement belongs where it does real
+work — on the hosts, where `ansible-pull --verify-commit` refuses a `release`
+head that is not signed by a key in `deerlab_allowed_signers`.
+
+Install the Renovate GitHub App on the repository. Renovate commits through the
+GitHub API, so its commits carry GitHub's GPG web-flow signature rather than the
+operator's SSH key. Rebase a Renovate branch onto `main` before merging it — the
+rebase recreates the commits under the operator's signature. Landing one with a
+plain fast-forward puts a commit on `release` that every host will reject, and
+the first symptom is the pull dead-man monitors going red.
+
+Create the `release` branch once from `main`:
 
 ```bash
 git push origin main:refs/heads/release

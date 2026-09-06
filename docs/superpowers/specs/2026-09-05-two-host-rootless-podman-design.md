@@ -476,12 +476,23 @@ signers file by `base_pull`.
 
 ### 7.3 Promotion
 
-Branch protection on `main` requires signed commits, passing status checks and
-linear history. Because signature verification on the host must see the
-operator's signature on the branch head, merges are fast-forwards performed from
-the operator's machine with `just merge <branch>` once CI is green; GitHub's own
-merge buttons rewrite or re-sign commits. A workflow then fast-forwards `release` to
-`main`. Only that workflow may push `release`.
+The repository has one operator, so promotion rests on local discipline rather
+than server-side branch rules: GitHub enforces nothing about `main` or
+`release`. Rules there would obstruct the only person they could protect, and
+they would enforce the wrong thing anyway — GitHub counts a commit as verified
+if any registered key signed it, while the host demands a key from the
+allowed-signers list. The gate that matters is therefore on the host:
+`ansible-pull --verify-commit` refuses a `release` head whose signature is not
+from a key in that file, so an unverifiable commit stops delivery no matter what
+GitHub accepted.
+
+Merges are fast-forwards performed from the operator's machine with
+`just merge <branch>` once CI is green; GitHub's own merge buttons rewrite or
+re-sign commits. Commits created through the GitHub API by an app — Renovate
+included — carry GitHub's GPG web-flow signature instead of the operator's SSH
+key, and the host rejects those. A bot branch is rebased onto `main` before it is
+merged so its commits are recreated under the operator's signature. A workflow
+then fast-forwards `release` to `main`. Only that workflow pushes `release`.
 
 ### 7.4 Plan visibility
 
