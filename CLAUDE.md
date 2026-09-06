@@ -17,6 +17,11 @@ Two Debian 13 VPSs configured entirely by Ansible. Design:
 - Tool versions are managed by mise — `mise.toml` is the single source of truth
 - Run `just ci` before committing. Never bypass pre-commit hooks with `--no-verify`
 - Never hardcode credentials. All secrets use SOPS + age encryption
+- **This repository is public.** Encrypt everything useful to an attacker, not
+  just credentials: addresses, hostnames, accounts, keys, endpoints, ports,
+  bucket names and tunnel topology all belong in SOPS. Plaintext is for values
+  that are already public knowledge or meaningless alone. When adding a variable,
+  the default is to encrypt it — justify plaintext, never the reverse
 - Targets run Podman 5.4.2. Quadlet files may only use keys that exist in 5.4.2
 - Never run Podman as root, and never put systemd sandboxing directives in a Quadlet `[Service]` section
 - Never `systemctl stop nftables` on a host; it flushes every rule
@@ -64,6 +69,15 @@ Two Debian 13 VPSs configured entirely by Ansible. Design:
 
 - All secrets use SOPS with age encryption (public key in `.sops.yaml`)
 - Encrypted files (`*.sops.yaml`, `*.sops.json`) are committed with values encrypted
+- The repository is public, so ciphertext is world-readable and permanently
+  archived by third parties. An age key leak would be retroactive and total:
+  never commit a value you would not accept being decrypted later
+- Encrypt identifiers, not just credentials. A reader of this repository must not
+  be able to learn where the hosts are, what they are called, who logs into them
+  or how they are connected
+- Plaintext exceptions must earn it. `base_wireguard_public_key` is plaintext
+  because it is derived from the private key, is handed to the peer by design,
+  and keeping it clear stops each host having to decrypt the other's host_vars
 
 ## Structure
 
