@@ -39,9 +39,10 @@
     owner: root
     group: root
     mode: "0644"
+    validate: "/usr/bin/systemd-analyze verify %s:notify-failure@.service"
   vars:
     base_notify_credential_path: /etc/deerlab/pushover.conf
-  notify: Reload systemd
+  notify: Reload systemd for base_notify
 
 - name: Install the user-scope notifier
   ansible.builtin.template:
@@ -50,9 +51,10 @@
     owner: root
     group: root
     mode: "0644"
+    validate: "/usr/bin/systemd-analyze verify %s:notify-failure@.service"
   vars:
     base_notify_credential_path: /etc/deerlab/pushover/%u.conf
-  notify: Reload systemd
+  notify: Reload systemd for base_notify
 
 - name: Install the reboot-required reminder
   ansible.builtin.copy:
@@ -70,7 +72,8 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Reload systemd
+    validate: "/usr/bin/systemd-analyze verify %s:deerlab-reboot-required.service"
+  notify: Reload systemd for base_notify
 
 - name: Schedule the reboot-required reminder daily
   ansible.builtin.copy:
@@ -87,7 +90,8 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Reload systemd
+    validate: "/usr/bin/systemd-analyze verify %s:deerlab-reboot-required.timer"
+  notify: Reload systemd for base_notify
 
 - name: Create the drop-in directories for the host units
   ansible.builtin.file:
@@ -98,6 +102,9 @@
     mode: "0755"
   loop: "{{ base_notify_onfailure_units }}"
 
+# Deliberately no validate: here. This writes a drop-in fragment, not a
+# standalone unit, and systemd-analyze verify only knows how to load and
+# check whole units — it has nothing to load a bare [Unit] fragment against.
 - name: Attach the notifier to host units
   ansible.builtin.copy:
     content: |
@@ -109,7 +116,7 @@
     group: root
     mode: "0644"
   loop: "{{ base_notify_onfailure_units }}"
-  notify: Reload systemd
+  notify: Reload systemd for base_notify
 
 - name: Flush handlers before enabling the timer
   ansible.builtin.meta: flush_handlers
