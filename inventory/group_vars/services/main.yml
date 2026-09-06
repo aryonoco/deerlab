@@ -7,8 +7,7 @@ podman_services:
   wallabag:
     uid: 2001
     # The image runs as root inside and rewrites its application tree on
-    # every start, so it cannot be read-only and needs the capabilities
-    # below. Each is an accepted exception recorded in the spec.
+    # every start, so it cannot be read-only.
     image: docker.io/wallabag/wallabag:2.6.14@sha256:4a527e027e0d59e87c14225ef11e005af3d4890374202ad319ce5e63dfc66709
     publish:
       - "8080:80"
@@ -28,13 +27,27 @@ podman_services:
       TZ: Etc/UTC
     secrets:
       - { name: symfony-secret, value: "{{ wallabag_symfony_secret }}", type: env, target: SYMFONY__ENV__SECRET }
+    # Trimmed empirically, one capability at a time, then reproved against a
+    # volume destroyed and recreated from empty. Each of the five below made
+    # the unit fail to start when removed:
+    # CAP_CHOWN: nginx failed to chown its own tmp directory inside the
+    #   container's writable layer (not a mounted volume, so this is rebuilt
+    #   on every start regardless of volume state) with "Operation not
+    #   permitted".
+    # CAP_SETUID / CAP_SETGID: the entrypoint's `su` to the application user
+    #   failed with "Operation not permitted" before the application started.
+    # CAP_NET_BIND_SERVICE: nginx could not bind() the low port it publishes;
+    #   failed with "Permission denied".
+    # CAP_DAC_OVERRIDE: the entrypoint could not write its config file;
+    #   failed with "Permission denied".
+    # CAP_FOWNER was removed: the health check, the login page and a fresh
+    # deployment against an empty volume all passed without it.
     capabilities:
       - CAP_CHOWN
       - CAP_SETUID
       - CAP_SETGID
       - CAP_NET_BIND_SERVICE
       - CAP_DAC_OVERRIDE
-      - CAP_FOWNER
     read_only: false
     no_new_privileges: true
     health:
