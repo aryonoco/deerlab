@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Pushover failure notifications
+    description: >
+      A templated systemd unit in system and user scope that posts to the
+      Pushover message API with curl, a daily reboot-required reminder,
+      and OnFailure drop-ins for the host units that matter. Delivery
+      depends on neither the edge nor the monitoring host, so an outage of
+      either still reaches the operator.
+    options:
+      base_notify_url:
+        type: str
+        required: true
+        description: Pushover message endpoint.
+      base_notify_token:
+        type: str
+        required: true
+        description: Pushover application token for deerlab.
+      base_notify_user:
+        type: str
+        required: true
+        description: Pushover user key the messages are delivered to.
+      base_notify_onfailure_units:
+        type: list
+        elements: str
+        description: System units that get an OnFailure drop-in.

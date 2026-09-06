@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_notify_url | length > 0
+      - base_notify_token | length > 0
+      - base_notify_token != 'CHANGE-ME'
+      - base_notify_user | length > 0
+      - base_notify_user != 'CHANGE-ME'
+    fail_msg: base_notify needs the Pushover endpoint, application token and user key
+    quiet: true
+
+# /etc/deerlab itself is created by base_os at 0755 and its mode is not set
+# here. Two roles setting different modes on one directory would flap on every
+# run and fail the idempotency check.
+- name: Create the notifier configuration directory
+  ansible.builtin.file:
+    path: /etc/deerlab/pushover
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the curl configuration for the system notifier
+  ansible.builtin.template:
+    src: pushover.conf.j2
+    dest: /etc/deerlab/pushover.conf
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Install the system-scope notifier
+  ansible.builtin.template:
+    src: notify-failure@.service.j2
+    dest: /etc/systemd/system/notify-failure@.service
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    base_notify_credential_path: /etc/deerlab/pushover.conf
+  notify: Reload systemd
+
+- name: Install the user-scope notifier
+  ansible.builtin.template:
+    src: notify-failure@.service.j2
+    dest: /etc/systemd/user/notify-failure@.service
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    base_notify_credential_path: /etc/deerlab/pushover/%u.conf
+  notify: Reload systemd
+
+- name: Install the reboot-required reminder
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Unit]
+      Description=Notify that a reboot is required
+      ConditionPathExists=/run/reboot-required
+
+      [Service]
+      Type=oneshot
+      LoadCredential=pushover.conf:/etc/deerlab/pushover.conf
+      ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/pushover.conf --data "message=Reboot required on %H"
+    dest: /etc/systemd/system/deerlab-reboot-required.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Schedule the reboot-required reminder daily
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Timer]
+      OnCalendar=daily
+      RandomizedDelaySec=1h
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+    dest: /etc/systemd/system/deerlab-reboot-required.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Create the drop-in directories for the host units
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ base_notify_onfailure_units }}"
+
+- name: Attach the notifier to host units
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Unit]
+      OnFailure=notify-failure@%n.service
+    dest: "/etc/systemd/system/{{ item }}.d/10-deerlab-notify.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ base_notify_onfailure_units }}"
+  notify: Reload systemd
+
+- name: Flush handlers before enabling the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the reboot-required timer
+  ansible.builtin.systemd_service:
+    name: deerlab-reboot-required.timer
+    enabled: true
+    state: started

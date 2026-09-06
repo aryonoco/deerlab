@@ -1,0 +1,10 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+# curl merges repeated data entries with &, so this is one form POST and
+# the unit only has to append the message field.
+url = "{{ deerlab_pushover_url }}"
+data = "token={{ deerlab_pushover_token }}"
+data = "user={{ deerlab_pushover_user }}"
+data = "title=deerlab {{ inventory_hostname }}"
+data = "priority=1"

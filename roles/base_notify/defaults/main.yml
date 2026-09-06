@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+base_notify_url: "{{ deerlab_pushover_url }}"
+base_notify_token: "{{ deerlab_pushover_token }}"
+base_notify_user: "{{ deerlab_pushover_user }}"
+base_notify_onfailure_units:
+  - nftables.service
+  - systemd-networkd.service
