@@ -24,8 +24,8 @@
   notify: Restart ssh
 
 # sshd reads sshd_config.d in lexical order and the FIRST value for a keyword
-# wins, so a file sorting ahead of ours silently overrides it. svc1's provider
-# ships /etc/ssh/sshd_config.d/01-hosthatch.conf with `PermitRootLogin yes`,
+# wins, so a file sorting ahead of ours silently overrides it. One host's
+# provider image ships its own `01-` drop-in setting `PermitRootLogin yes`,
 # which beat a 50- drop-in and left root login enabled while sshd -T looked
 # fine. Two defences: this project owns the directory outright and removes
 # anything it did not write, and our file sorts first so it still wins if
