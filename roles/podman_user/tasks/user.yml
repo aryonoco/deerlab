@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Create the service account for {{ podman_user_item.key }}
+  ansible.builtin.user:
+    name: "{{ podman_user_item.key }}"
+    uid: "{{ podman_user_item.value.uid }}"
+    system: true
+    create_home: true
+    home: "/var/lib/{{ podman_user_item.key }}"
+    shell: /usr/sbin/nologin
+    password: "!"
+    password_lock: true
+
+- name: Restrict the home directory of {{ podman_user_item.key }}
+  ansible.builtin.file:
+    path: "/var/lib/{{ podman_user_item.key }}"
+    state: directory
+    owner: "{{ podman_user_item.key }}"
+    group: "{{ podman_user_item.key }}"
+    mode: "0700"
+
+- name: Create the config directory of {{ podman_user_item.key }}
+  ansible.builtin.file:
+    path: "/var/lib/{{ podman_user_item.key }}/config"
+    state: directory
+    owner: "{{ podman_user_item.key }}"
+    group: "{{ podman_user_item.key }}"
+    mode: "0750"
+
+- name: Enable lingering for {{ podman_user_item.key }}
+  ansible.builtin.command:
+    cmd: "loginctl enable-linger {{ podman_user_item.key }}"
+    creates: "/var/lib/systemd/linger/{{ podman_user_item.key }}"
+
+- name: Give a private Pushover credential to {{ podman_user_item.key }}
+  ansible.builtin.template:
+    src: ../../base_notify/templates/pushover.conf.j2
+    dest: "/etc/deerlab/pushover/{{ podman_user_item.key }}.conf"
+    owner: root
+    group: "{{ podman_user_item.key }}"
+    mode: "0640"
+  no_log: true
+
+- name: Create the drop-in directories for {{ podman_user_item.key }}
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "/etc/systemd/system/user@{{ podman_user_item.value.uid }}.service.d"
+    - "/etc/systemd/system/user-{{ podman_user_item.value.uid }}.slice.d"
+
+- name: Order the user manager after the tunnel for {{ podman_user_item.key }}
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Unit]
+      Wants=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
+      After=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
+    dest: "/etc/systemd/system/user@{{ podman_user_item.value.uid }}.service.d/10-wait-network.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: podman_user_wait_dropin
+
+- name: Cap the slice resources of {{ podman_user_item.key }}
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [Slice]
+      MemoryMax={{ podman_user_item.value.limits.memory }}
+      CPUQuota={{ podman_user_item.value.limits.cpu }}
+      TasksMax={{ podman_user_item.value.limits.tasks }}
+      {% if podman_user_item.value.egress == 'none' %}
+      IPAddressDeny=any
+      IPAddressAllow=localhost
+      {% for prefix in podman_user_wg_prefixes %}
+      IPAddressAllow={{ prefix }}
+      {% endfor %}
+      {% endif %}
+    dest: "/etc/systemd/system/user-{{ podman_user_item.value.uid }}.slice.d/50-deerlab.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: podman_user_slice_dropin
+
+- name: Record whether a drop-in changed for {{ podman_user_item.key }}
+  ansible.builtin.set_fact:
+    podman_user_dropins_changed: >-
+      {{ podman_user_dropins_changed | default(false)
+         or podman_user_wait_dropin.changed
+         or podman_user_slice_dropin.changed }}

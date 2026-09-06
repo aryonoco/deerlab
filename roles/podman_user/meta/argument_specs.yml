@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: One locked-down system user per service
+    description: >
+      Creates the service accounts with explicit UIDs, allocates
+      non-overlapping subordinate ID ranges as whole templated files,
+      enables lingering, orders each user manager after the tunnel,
+      applies resource ceilings on the per-user slice, and gives each
+      user its own copy of the Pushover credential.
+    options:
+      podman_user_services:
+        type: dict
+        required: true
+        description: >
+          The podman_services dictionary. Keys are service names. Each
+          value needs uid (int, 2000 or higher), egress (any, web or
+          none) and limits with memory, cpu and tasks.
+      podman_user_uid_base:
+        type: int
+        default: 2000
+        description: Lowest permitted service UID; the subordinate range index is uid minus this.
+      podman_user_subid_base:
+        type: int
+        default: 100000
+      podman_user_subid_count:
+        type: int
+        default: 65536
+      podman_user_wg_interface:
+        type: str
+        default: wg0
+      podman_user_wg_prefixes:
+        type: list
+        elements: str
+        description: Tunnel prefixes allowed for egress-class none services.

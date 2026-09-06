@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Migrate podman storage
+  ansible.builtin.command:
+    cmd: podman system migrate
+  become: true
+  become_user: "{{ item.key }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ item.value.uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ item.value.uid }}/bus"
+  changed_when: true
+  failed_when: false
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"

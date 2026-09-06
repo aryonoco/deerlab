@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate the service definitions
+  ansible.builtin.assert:
+    that:
+      - item.value.uid is defined
+      - item.value.uid | int >= podman_user_uid_base
+      - item.value.egress in ['any', 'web', 'none']
+      - item.value.limits.memory is defined
+      - item.value.limits.cpu is defined
+      - item.value.limits.tasks is defined
+    fail_msg: "service {{ item.key }} needs uid >= {{ podman_user_uid_base }}, an egress class, and memory, cpu and tasks limits"
+    quiet: true
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Reject duplicate UIDs
+  ansible.builtin.assert:
+    that:
+      - podman_user_services.values() | map(attribute='uid') | list | unique | length == podman_user_services | length
+    fail_msg: two services share a UID
+    quiet: true
+
+- name: Write the subordinate UID ranges
+  ansible.builtin.template:
+    src: subid.j2
+    dest: /etc/subuid
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Migrate podman storage
+
+- name: Write the subordinate GID ranges
+  ansible.builtin.template:
+    src: subid.j2
+    dest: /etc/subgid
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Migrate podman storage
+
+- name: Configure each service user
+  ansible.builtin.include_tasks: user.yml
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    loop_var: podman_user_item
+    label: "{{ podman_user_item.key }}"
+
+# systemd_service with only daemon_reload always reports changed, which would
+# fail the idempotency gate in Task 22. Gate it on the drop-ins actually moving.
+- name: Reload systemd for the drop-ins  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: podman_user_dropins_changed | default(false)
+
+- name: Start each user manager
+  ansible.builtin.systemd_service:
+    name: "user@{{ item.value.uid }}.service"
+    state: started
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Wait for each user's D-Bus socket
+  ansible.builtin.wait_for:
+    path: "/run/user/{{ item.value.uid }}/bus"
+    timeout: 30
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Flush handlers so a storage migration never runs after services have started
+  ansible.builtin.meta: flush_handlers

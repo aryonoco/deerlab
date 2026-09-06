@@ -5,3 +5,4 @@
   hosts: services
   roles:
     - role: podman_host
+    - role: podman_user

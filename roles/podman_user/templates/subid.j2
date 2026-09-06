@@ -1,0 +1,5 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+{% for name, svc in podman_user_services | dictsort %}
+{{ name }}:{{ podman_user_subid_base + (svc.uid | int - podman_user_uid_base) * podman_user_subid_count }}:{{ podman_user_subid_count }}
+{% endfor %}
