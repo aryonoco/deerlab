@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The WireGuard public key is not a secret: it is derived from the private key,
+# it is published to the peer by design, and knowing it grants nothing. Holding
+# it in the clear also keeps the peer list buildable without one host decrypting
+# the other's file. Everything else about this host — its address, its tunnel
+# addresses and its private key — is in secrets.sops.yaml.
+base_wireguard_public_key: "X3JbebJfaiZeuJ+G+D6ghipjhKqIkQQUlpOPJiknsBE="

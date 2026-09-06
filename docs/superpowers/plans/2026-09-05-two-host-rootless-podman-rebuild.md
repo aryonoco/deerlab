@@ -1126,12 +1126,16 @@ base_firewall_role: services
 podman_services: {}
 ```
 
-There is no `inventory/host_vars/<host>/main.yml`. Everything a host needs that
-is specific to it — its public address, its tunnel addresses, its WireGuard key
-pair and, on the edge, its public endpoint — identifies the estate, so all of it
-goes in `inventory/host_vars/<host>/secrets.sops.yaml` in Step 2. `ansible_host`
-works from there: `community.sops.sops` is enabled as a vars plugin in
-`ansible.cfg` and runs early enough that the connection plugin sees the value.
+`inventory/host_vars/<host>/main.yml` holds exactly one value: that host's
+`base_wireguard_public_key`. A public key is derived from the private key and is
+handed to the peer by design, so encrypting it protects nothing, and keeping it
+in the clear means neither host has to decrypt the other's file to build its peer
+list. Everything else specific to a host identifies the estate — its public
+address, its tunnel addresses, its private key and, on the edge, its public
+endpoint — so it goes in `inventory/host_vars/<host>/secrets.sops.yaml` in
+Step 2. `ansible_host` works from there: `community.sops.sops` is enabled as a
+vars plugin in `ansible.cfg` and runs early enough that the connection plugin
+sees the value.
 
 The public addresses are the provider-assigned IPv4 addresses of the two VPSs
 that already exist; ask the operator for them, and do not record them anywhere
@@ -1189,9 +1193,17 @@ ansible_host: CHANGE-ME
 base_wireguard_ipv4: CHANGE-ME
 base_wireguard_ipv6: CHANGE-ME
 base_wireguard_private_key: CHANGE-ME
-base_wireguard_public_key: CHANGE-ME
 EOF
   mise x -- sops --encrypt --in-place "inventory/host_vars/$h/secrets.sops.yaml"
+  cat > "inventory/host_vars/$h/main.yml" <<'EOF'
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Not encrypted: a WireGuard public key is derived from the private key and is
+# handed to the peer by design, so hiding it protects nothing. Keeping it in the
+# clear also means neither host decrypts the other's file to build its peer list.
+base_wireguard_public_key: REPLACED-IN-TASK-9
+EOF
 done
 # Only the edge answers; the services host initiates. host:port, literal IP.
 mise x -- sops set inventory/host_vars/edge1/secrets.sops.yaml \
