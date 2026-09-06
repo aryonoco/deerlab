@@ -23,6 +23,10 @@
     fail_msg: two services share a UID
     quiet: true
 
+# Writing the whole file replaces whatever it held before, including any
+# subordinate range this role does not manage — such as the one Debian's
+# useradd auto-allocates to a regular account. That is intended: only
+# service users run rootless Podman, so only service users need one here.
 - name: Write the subordinate UID ranges
   ansible.builtin.template:
     src: subid.j2
@@ -50,7 +54,7 @@
 
 # systemd_service with only daemon_reload always reports changed, which would
 # fail the idempotency gate in Task 22. Gate it on the drop-ins actually moving.
-- name: Reload systemd for the drop-ins  # noqa: no-handler
+- name: Reload systemd for the drop-ins
   ansible.builtin.systemd_service:
     daemon_reload: true
   when: podman_user_dropins_changed | default(false)
