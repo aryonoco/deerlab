@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-# Public data shared by every host. Secrets live in secrets.sops.yaml.
+# Public data shared by every host. This repository is public, so anything that
+# would help a stranger reach, impersonate or map the estate lives in
+# secrets.sops.yaml instead — addresses, accounts, keys and the tunnel's
+# internal prefixes included. What is left here is either already public
+# knowledge or meaningless on its own.
 
 deerlab_timezone: Etc/UTC
 
@@ -11,27 +15,13 @@ deerlab_timezone: Etc/UTC
 # here means one string works in both, and there is only one place to change it.
 deerlab_managed: "Managed by deerlab Ansible. Edit the repository, not this file."
 
-# The administrative account the roles create on each host. Deliberately
-# separate from ansible_user, which only says who Ansible connects as:
-# `just bootstrap` overrides ansible_user to root, and if the roles read
-# that they would make root the admin and then lock every account out.
-deerlab_admin_user: deerlab
+# Who Ansible connects as. Deliberately separate from deerlab_admin_user, which
+# names the administrative account the roles create: `just bootstrap` overrides
+# ansible_user to root, and if the roles read that they would make root the
+# admin and then lock every account out. deerlab_admin_user itself, the keys
+# that may log in as it and the keys that may sign a release commit are all in
+# secrets.sops.yaml.
 ansible_user: "{{ deerlab_admin_user }}"
-
-# SSH public keys allowed to log in as the admin user. This is the Deerlab
-# key: it authenticates SSH logins to the hosts and has no bearing on commit
-# signing, which uses a different key below.
-deerlab_admin_ssh_keys:
-  - "ssh-ed25519 <Deerlab SSH public key> Deerlab"
-
-# Keys allowed to sign commits on the release branch, in allowed_signers
-# format: the operator's personal agent keys across their machines, not the
-# Deerlab SSH login key above — do not conflate the two. The Deerlab key
-# authenticates SSH logins to the hosts and signs nothing.
-deerlab_allowed_signers:
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 1>"
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 2>"
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 3>"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 
@@ -40,8 +30,9 @@ deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 # base_notify and podman_user render the same curl configuration from it.
 deerlab_pushover_url: https://api.pushover.net/1/messages.json
 
-deerlab_wg_port: <WireGuard port>
-deerlab_wg_ipv4_prefix: <tunnel IPv4 prefix>
-deerlab_wg_ipv6_prefix: <tunnel IPv6 prefix>
+# deerlab_wg_port, deerlab_wg_ipv4_prefix and deerlab_wg_ipv6_prefix are in
+# secrets.sops.yaml. They are RFC 1918 and ULA ranges rather than reachable
+# addresses, but they still describe the topology, and hiding them costs
+# nothing.
 
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.

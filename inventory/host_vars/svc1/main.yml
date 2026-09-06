@@ -1,7 +1,0 @@
-# SPDX-License-Identifier: 0BSD
-# Copyright (c) 2026 Aryan Ameri
-
-ansible_host: <services public IPv4>
-base_wireguard_ipv4: <services tunnel IPv4>
-base_wireguard_ipv6: "<services tunnel IPv6>"
-base_wireguard_public_key: "<services WireGuard public key>"

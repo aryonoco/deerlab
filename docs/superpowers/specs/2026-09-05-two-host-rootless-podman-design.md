@@ -66,7 +66,7 @@ OpenTofu design described in `docs/networking-and-uid-mapping.md` and
 
 | Host | Group | Public inbound | Runs |
 | --- | --- | --- | --- |
-| edge | `edge`, `podman_hosts` | tcp 22, 80, 443; udp 443, <WireGuard port> | sshd, Caddy, WireGuard responder |
+| edge | `edge`, `podman_hosts` | tcp 22, 80, 443; udp 443 and `deerlab_wg_port` | sshd, Caddy, WireGuard responder |
 | services | `services`, `podman_hosts` | tcp 22 | sshd, application services |
 
 Both hosts are dual-stack on the public side. The services host has no public
@@ -84,8 +84,9 @@ WireGuard port: it initiates the tunnel and keeps it alive.
 - Tunnel addressing: an IPv4 /24 and a random ULA /64, one address per host.
   `AllowedIPs` on each peer is exactly the other host's /32 and /128. Never a
   wider prefix; the kernel binds a key to its allowed source addresses.
-- The edge sets `ListenPort=<WireGuard port>` and no endpoint for the services peer. The
-  services host sets `Endpoint=<edge public ip>:<WireGuard port>`, an explicit `ListenPort`,
+- The edge sets `ListenPort` to `deerlab_wg_port` and no endpoint for the services
+  peer. The services host sets `Endpoint=<edge public IPv4>:<WireGuard port>`, an
+  explicit `ListenPort`,
   and `PersistentKeepalive=25`. This keeps a symmetric conntrack entry open, so the
   edge reaches the services host with no inbound rule, and the tunnel recovers on
   its own after an edge outage of any length.
@@ -108,7 +109,7 @@ Input, both hosts: default drop, established and related accepted first, invalid
 dropped, loopback accepted, ICMP and ICMPv6 types needed for path MTU discovery
 and neighbour discovery accepted, SSH rate-limited to new connections.
 
-Input, edge: tcp 80 and 443, udp 443, udp <WireGuard port>.
+Input, edge: tcp 80 and 443, udp 443, and udp on `deerlab_wg_port`.
 
 Input, services: backend ports accepted only when `iifname "wg0"` and the source
 is the edge's tunnel address. Nothing else.

@@ -25,7 +25,7 @@
 - Generated files carry `{{ deerlab_managed }}`, never `{{ ansible_managed }}`. The builtin is supplied by the `template` action plugin only and is undefined inside `copy: content:`, where it fails argument resolution.
 - REUSE headers on every new file: tasks, handlers and templates are `CPAL-1.0` (`# SPDX-License-Identifier: CPAL-1.0` / `# Copyright (c) 2026 Aryan Ameri`; in Jinja templates wrap them as `{# ... #}`), defaults, meta, inventory and config are `0BSD`, docs are `CC-BY-4.0` in HTML comments.
 - Commit messages read as if a human wrote them. No AI attribution lines. Run `just ci` before every commit. Never `--no-verify`.
-- Inventory host names are `edge1` and `svc1`. Tunnel addresses: edge `<edge tunnel IPv4>` / `<edge tunnel IPv6>`, services `<services tunnel IPv4>` / `<services tunnel IPv6>`. WireGuard port `<WireGuard port>`. Service UIDs start at `2000`; subordinate ranges are `100000 + (uid - 2000) * 65536`, width `65536`.
+- Inventory host names are `edge1` and `svc1`. Every address they use is encrypted: the public ones are `ansible_host` in `inventory/host_vars/<host>/secrets.sops.yaml`, the tunnel ones `base_wireguard_ipv4` and `base_wireguard_ipv6` in the same file, and the port is `deerlab_wg_port` in `inventory/group_vars/all/secrets.sops.yaml`. Read them from there; never paste one into a file, a commit message or an issue. Service UIDs start at `2000`; subordinate ranges are `100000 + (uid - 2000) * 65536`, width `65536`.
 - Deviations from the spec, agreed here: the repository is public, so hosts clone over anonymous HTTPS and no deploy key exists on any host, while signature verification of the `release` head still applies. There is no separate `bootstrap.yml`; the push path is `site.yml` run as root once, and the only extra bootstrap action is registering the host's age public key as a SOPS recipient. There are no thin `caddy` and `wallabag` roles: the service definition gained a `config_files` list that the generic role writes into the service user's home and restarts on, which covers the Caddyfile and leaves nothing service-specific for a role to do.
 
 ## Operator Gates
@@ -40,12 +40,12 @@ prerequisite.
 | 5 | A Pushover application token and user key exist; an Uptime Kuma instance is deployed with four push monitors; a root password hash has been generated. Commit signing is configured in Step 4 of the task itself. |
 | 11 | The Pushover credentials are live, so the delivery test can be seen on the operator's device. |
 | 12 | The `release` branch exists, its head is the same commit as `main`, and that commit is SSH-signed by a key in `deerlab_allowed_signers`. |
-| 18 | `A` and `AAAA` records for `wallabag.<domain>` point at `<edge public IPv4>`. Caddy requests a certificate on first start and a failed HTTP-01 challenge consumes Let's Encrypt rate limit. |
+| 18 | `A` and `AAAA` records for `wallabag.<domain>` point at the edge's public addresses (`ansible_host` in `inventory/host_vars/edge1/secrets.sops.yaml`). Caddy requests a certificate on first start and a failed HTTP-01 challenge consumes Let's Encrypt rate limit. |
 | 20 | The S3 bucket exists and per-service access keys have been created and put in the SOPS files. |
 
-Both VPSs are already provisioned: edge `<edge public IPv4>`, services `<services public IPv4>`,
-stock Debian 13, root login by the operator's `Deerlab` SSH key, no provider
-firewall.
+Both VPSs are already provisioned: stock Debian 13, root login by the operator's
+`Deerlab` SSH key, no provider firewall. Their public addresses are the
+`ansible_host` value in each host's `inventory/host_vars/<host>/secrets.sops.yaml`.
 
 ## Operator Machine
 
@@ -97,14 +97,13 @@ Created or rewritten by this plan. Everything under `tofu/`, `roles/proxmox_*`, 
 | `.github/workflows/promote.yml` | Fast-forwards `release` to `main` when CI on `main` succeeds |
 | `renovate.json` | Dependency automation with digest pinning |
 | `inventory/hosts.yml` | Groups `edge`, `services`, `podman_hosts`; hosts `edge1`, `svc1` |
-| `inventory/group_vars/all/main.yml` | Non-secret shared data: admin keys, allowed signers, tunnel prefixes, port |
-| `inventory/group_vars/all/secrets.sops.yaml` | Domain, Pushover credentials, dead-man URLs, root hash, WireGuard PSK, S3 |
+| `inventory/group_vars/all/main.yml` | Shared data that identifies nothing: timezone, managed-file header, repo URL, Pushover endpoint |
+| `inventory/group_vars/all/secrets.sops.yaml` | Admin account and its SSH keys, allowed signers, WireGuard port, PSK and tunnel prefixes, domain, Pushover credentials, dead-man URLs, root hash, S3 |
 | `inventory/group_vars/podman_hosts/main.yml` | Registry list shared by service users |
 | `inventory/group_vars/edge/main.yml` | Firewall role, Caddy service definition, Caddyfile data |
 | `inventory/group_vars/services/main.yml` | Firewall role, Wallabag service definition |
 | `inventory/group_vars/services/secrets.sops.yaml` | Wallabag Symfony secret, restic passwords, per-service S3 keys |
-| `inventory/host_vars/<host>/main.yml` | `ansible_host`, tunnel addresses, WireGuard public key, public endpoint |
-| `inventory/host_vars/<host>/secrets.sops.yaml` | WireGuard private key |
+| `inventory/host_vars/<host>/secrets.sops.yaml` | `ansible_host`, tunnel addresses, WireGuard key pair, public endpoint |
 | `playbooks/site.yml` | Imports `deps.yml`, `base.yml`, `edge.yml`, `services.yml` |
 | `playbooks/deps.yml` | Installs collections into the checkout before any role runs |
 | `playbooks/base.yml` | `base_os`, `base_ssh`, `base_wireguard`, `base_firewall`, `base_notify`, `base_pull` on all hosts |
@@ -1057,23 +1056,13 @@ deerlab_timezone: Etc/UTC
 # here means one string works in both, and there is only one place to change it.
 deerlab_managed: "Managed by deerlab Ansible. Edit the repository, not this file."
 
-# The administrative account the roles create on each host. Deliberately
-# separate from ansible_user, which only says who Ansible connects as:
-# `just bootstrap` overrides ansible_user to root, and if the roles read
-# that they would make root the admin and then lock every account out.
-deerlab_admin_user: deerlab
+# Who Ansible connects as. Deliberately separate from deerlab_admin_user, which
+# names the administrative account the roles create: `just bootstrap` overrides
+# ansible_user to root, and if the roles read that they would make root the
+# admin and then lock every account out. deerlab_admin_user itself, the keys
+# that may log in as it and the keys that may sign a release commit are all in
+# secrets.sops.yaml.
 ansible_user: "{{ deerlab_admin_user }}"
-
-# SSH public keys allowed to log in as the admin user.
-deerlab_admin_ssh_keys:
-  - "ssh-ed25519 <Deerlab SSH public key> Deerlab"
-
-# Keys allowed to sign commits on the release branch, in allowed_signers format.
-# One per machine the operator commits from; any of them may sign a release head.
-deerlab_allowed_signers:
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 1>"
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 2>"
-  - "github@aryan.ameri.coffee ssh-ed25519 <operator signing key 3>"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 
@@ -1082,22 +1071,28 @@ deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 # render the same curl configuration from it.
 deerlab_pushover_url: https://api.pushover.net/1/messages.json
 
-deerlab_wg_port: <WireGuard port>
-deerlab_wg_ipv4_prefix: <tunnel IPv4 prefix>
-deerlab_wg_ipv6_prefix: <tunnel IPv6 prefix>
+# deerlab_wg_port, deerlab_wg_ipv4_prefix and deerlab_wg_ipv6_prefix are in
+# secrets.sops.yaml. They are RFC 1918 and ULA ranges rather than reachable
+# addresses, but they still describe the topology, and hiding them costs
+# nothing.
 
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
 ```
 
-These are two different keys with two different jobs, and conflating them
-breaks either login or delivery. `deerlab_admin_ssh_keys` is the `Deerlab` key,
-which lives only in the ssh-agent and authenticates the admin login on both
-hosts. `deerlab_allowed_signers` holds the operator's GitHub signing keys, one per
+`deerlab_admin_ssh_keys` and `deerlab_allowed_signers` are two different key
+sets with two different jobs, and conflating them breaks either login or
+delivery. `deerlab_admin_ssh_keys` is the `Deerlab` key, which lives only in the
+ssh-agent and authenticates the admin login on both hosts.
+`deerlab_allowed_signers` holds the operator's GitHub signing keys, one per
 machine they commit from, and that list is what the hosts check with
 `ansible-pull --verify-commit` before applying anything — so whichever machine
 signs a release head, its key must be in it. The `Deerlab` key is deliberately
-absent from that list: it authenticates a login and signs nothing. All of these
-are public keys: inventory data, not secrets.
+absent from that list: it authenticates a login and signs nothing.
+
+Both lists are public keys and neither is a credential, but both are in
+`secrets.sops.yaml` rather than here. This repository is public, and a public
+key names the account and the machines that hold its private half. Step 2
+creates them.
 
 `inventory/group_vars/podman_hosts/main.yml`:
 
@@ -1131,35 +1126,16 @@ base_firewall_role: services
 podman_services: {}
 ```
 
-`inventory/host_vars/edge1/main.yml`:
+There is no `inventory/host_vars/<host>/main.yml`. Everything a host needs that
+is specific to it — its public address, its tunnel addresses, its WireGuard key
+pair and, on the edge, its public endpoint — identifies the estate, so all of it
+goes in `inventory/host_vars/<host>/secrets.sops.yaml` in Step 2. `ansible_host`
+works from there: `community.sops.sops` is enabled as a vars plugin in
+`ansible.cfg` and runs early enough that the connection plugin sees the value.
 
-```yaml
-# SPDX-License-Identifier: 0BSD
-# Copyright (c) 2026 Aryan Ameri
-
-ansible_host: <edge public IPv4>
-base_wireguard_ipv4: <edge tunnel IPv4>
-base_wireguard_ipv6: "<edge tunnel IPv6>"
-base_wireguard_public_key: "REPLACED-IN-TASK-9"
-# Public address and port the services host connects to. Literal IP, not a name.
-base_wireguard_public_endpoint: "<edge public IPv4>:<WireGuard port>"
-```
-
-`inventory/host_vars/svc1/main.yml`:
-
-```yaml
-# SPDX-License-Identifier: 0BSD
-# Copyright (c) 2026 Aryan Ameri
-
-ansible_host: <services public IPv4>
-base_wireguard_ipv4: <services tunnel IPv4>
-base_wireguard_ipv6: "<services tunnel IPv6>"
-base_wireguard_public_key: "REPLACED-IN-TASK-9"
-```
-
-The addresses are the provider-assigned public IPv4 addresses of the two VPSs
-that already exist: `<edge public IPv4>` is the edge, `<services public IPv4>` the services
-host. Task 9 replaces the WireGuard public keys.
+The public addresses are the provider-assigned IPv4 addresses of the two VPSs
+that already exist; ask the operator for them, and do not record them anywhere
+outside the encrypted files. Task 9 replaces the WireGuard key pairs.
 
 - [ ] **Step 2: Create the encrypted files**
 
@@ -1175,8 +1151,16 @@ Leave them as placeholders here and generate no real secrets in this task.
 ```bash
 mkdir -p inventory/group_vars/all inventory/group_vars/services inventory/host_vars/edge1 inventory/host_vars/svc1 secrets
 cat > inventory/group_vars/all/secrets.sops.yaml <<'EOF'
-deerlab_domain: <domain>
+deerlab_domain: CHANGE-ME
 deerlab_acme_email: CHANGE-ME
+deerlab_admin_user: deerlab
+deerlab_admin_ssh_keys:
+  - CHANGE-ME
+deerlab_allowed_signers:
+  - CHANGE-ME
+deerlab_wg_port: CHANGE-ME
+deerlab_wg_ipv4_prefix: CHANGE-ME
+deerlab_wg_ipv6_prefix: CHANGE-ME
 deerlab_pushover_token: CHANGE-ME
 deerlab_pushover_user: CHANGE-ME
 deerlab_root_password_hash: CHANGE-ME
@@ -1200,9 +1184,18 @@ backup_wallabag_s3_secret_key: CHANGE-ME
 EOF
 mise x -- sops --encrypt --in-place inventory/group_vars/services/secrets.sops.yaml
 for h in edge1 svc1; do
-  printf 'base_wireguard_private_key: CHANGE-ME\n' > "inventory/host_vars/$h/secrets.sops.yaml"
+  cat > "inventory/host_vars/$h/secrets.sops.yaml" <<'EOF'
+ansible_host: CHANGE-ME
+base_wireguard_ipv4: CHANGE-ME
+base_wireguard_ipv6: CHANGE-ME
+base_wireguard_private_key: CHANGE-ME
+base_wireguard_public_key: CHANGE-ME
+EOF
   mise x -- sops --encrypt --in-place "inventory/host_vars/$h/secrets.sops.yaml"
 done
+# Only the edge answers; the services host initiates. host:port, literal IP.
+mise x -- sops set inventory/host_vars/edge1/secrets.sops.yaml \
+  '["base_wireguard_public_endpoint"]' '"CHANGE-ME"'
 cat > secrets/backup-admin.sops.yaml <<'EOF'
 AWS_ACCESS_KEY_ID: CHANGE-ME
 AWS_SECRET_ACCESS_KEY: CHANGE-ME
@@ -1220,9 +1213,23 @@ Expected: a line of the form `deerlab_domain: ENC[AES256_GCM,data:...]`. If any
 file is still plaintext, its encrypt step failed and must be rerun before it is
 committed.
 
+Confirm the inventory still resolves once nothing is in the clear, because
+`ansible_host` and `ansible_user` are read before a play starts:
+
+```bash
+mise x -- ansible-inventory --host svc1
+```
+
+Expected: JSON containing `ansible_host`. If it is absent, the SOPS vars plugin
+is not enabled in `ansible.cfg` and no play will ever connect.
+
 **The operator fills the real values, not this task.** Later, with the vault
 unlocked, run `just secrets-edit <file>` for each and replace the placeholders.
-The pieces that can be generated locally:
+The values the operator supplies from outside this repository are
+`deerlab_domain`, `deerlab_acme_email`, both hosts' `ansible_host`, the tunnel
+addresses and prefixes, the WireGuard port, the admin SSH key and the
+commit-signing keys. The
+pieces that can be generated locally:
 
 ```bash
 wg genpsk                                  # base_wireguard_preshared_key
@@ -1394,15 +1401,15 @@ from the start."
 
 - [ ] **Step 1: Confirm the VPS**
 
-The services VPS already exists at `<services public IPv4>`, running stock Debian 13
-with the `Deerlab` public key installed for root. No provider firewall is
+The services VPS already exists, running stock Debian 13 with the `Deerlab`
+public key installed for root. No provider firewall is
 enabled; the host firewall written in Task 10 is the only control.
 
 - [ ] **Step 2: Confirm the recorded address**
 
-`ansible_host` in `inventory/host_vars/svc1/main.yml` is already `<services public IPv4>`
-from Task 5. Check it matches the host you intend to rebuild before running
-anything against it.
+`ansible_host` in `inventory/host_vars/svc1/secrets.sops.yaml` was set in
+Task 5. Read it with `mise x -- ansible-inventory --host svc1` and check it
+matches the host you intend to rebuild before running anything against it.
 
 - [ ] **Step 3: Trust the host key and verify reachability**
 
@@ -2747,7 +2754,7 @@ just apply svc1
 mise x -- ansible svc1 -m ansible.builtin.shell -a 'networkctl status wg0 | head -12; wg show wg0 | sed "s/private key.*/private key: hidden/"; getent hosts edge1.wg; ls -l /etc/systemd/network/'
 ```
 
-Expected: `wg0` is `configured` with `<services tunnel IPv4>/24` and the ULA address, `wg show` lists one peer with `endpoint: <edge ip>:<WireGuard port>` and `persistent keepalive: every 25 seconds`, `getent hosts edge1.wg` prints `<edge tunnel IPv4>`, and the key files are `-rw-r----- root systemd-network`. No handshake yet; the edge does not exist until Task 18.
+Expected: `wg0` is `configured` with the `base_wireguard_ipv4` and `base_wireguard_ipv6` recorded for `svc1`, `wg show` lists one peer with `endpoint: <edge public IPv4>:<WireGuard port>` and `persistent keepalive: every 25 seconds`, `getent hosts edge1.wg` prints the edge's tunnel IPv4, and the key files are `-rw-r----- root systemd-network`. No handshake yet; the edge does not exist until Task 18.
 
 Check `eth0` too, and stop if it is wrong: `networkctl list` must still show it
 `configured` and `ip -brief addr` must still show the public IPv4 and IPv6. If
@@ -4635,7 +4642,7 @@ asserts the systemd cgroup manager."
 **Interfaces:**
 
 - Consumes: `wallabag_symfony_secret`, `deerlab_domain`.
-- Produces: the `wallabag` service on `svc1`, listening on host port 8080 for the edge. Task 18's Caddyfile targets `http://<services tunnel IPv4>:8080`.
+- Produces: the `wallabag` service on `svc1`, listening on host port 8080 for the edge. Task 18's Caddyfile targets the services host's tunnel IPv4 on port 8080.
 
 - [ ] **Step 1: Define the service**
 
@@ -4796,10 +4803,10 @@ git commit -m "Trim Wallabag to the capabilities it proved to need"
 
 - [ ] **Step 1: Confirm the VPS and the DNS records**
 
-The edge VPS already exists at `<edge public IPv4>`, stock Debian 13 with the
-`Deerlab` key installed for root. `ansible_host` and
-`base_wireguard_public_endpoint` in `inventory/host_vars/edge1/main.yml` were set
-to it in Task 5.
+The edge VPS already exists, stock Debian 13 with the `Deerlab` key installed
+for root. `ansible_host` and `base_wireguard_public_endpoint` in
+`inventory/host_vars/edge1/secrets.sops.yaml` were set to it in Task 5; read
+them with `mise x -- ansible-inventory --host edge1`.
 
 Before running anything in this task, confirm with the operator that `A` and
 `AAAA` records for `wallabag.<domain>` point at the edge's public addresses.
@@ -5454,10 +5461,11 @@ break-glass only.
 ## Bootstrapping a host
 
 1. Create the VPS from the stock Debian 13 image with your key on root.
-2. Set `ansible_host` (and `base_wireguard_public_endpoint` on the edge)
-   in `inventory/host_vars/<host>/main.yml`. Generate WireGuard keys with
-   `wg genkey` and `wg pubkey`; the public key goes in the same file, the
-   private key in `inventory/host_vars/<host>/secrets.sops.yaml`.
+2. Set `ansible_host`, the tunnel addresses and, on the edge,
+   `base_wireguard_public_endpoint` in
+   `inventory/host_vars/<host>/secrets.sops.yaml`. Generate WireGuard keys
+   with `wg genkey` and `wg pubkey` and put both halves in that same file.
+   Use `mise x -- sops set` so no plaintext key reaches the disk.
 3. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`.
    Root login is closed at the end of that run.
 4. Copy the `base_pull age public key` from the output into `.sops.yaml`,
@@ -5473,7 +5481,8 @@ break-glass only.
    `inventory/group_vars/services/secrets.sops.yaml`; reference them from
    the definition with `{{ }}`.
 2. Add a site block to `caddy_caddyfile` in `inventory/group_vars/edge/main.yml`
-   pointing at `http://<services tunnel IPv4>:<port>` and create the DNS records.
+   pointing at `http://<services tunnel IPv4>:<port>` — the value of
+   `base_wireguard_ipv4` for `svc1` — and create the DNS records.
 3. Create an Uptime Kuma push monitor for the backup and add its URL to
    `deerlab_deadman_urls.backup`, with a heartbeat interval covering the
    schedule plus its jitter. Create S3 credentials scoped to the service's
