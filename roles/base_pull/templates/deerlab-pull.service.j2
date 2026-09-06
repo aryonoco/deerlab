@@ -11,6 +11,10 @@ OnFailure=notify-failure@%n.service
 Type=oneshot
 Environment=SOPS_AGE_KEY_FILE={{ base_pull_age_key_file }}
 Environment=ANSIBLE_NOCOLOR=1
+# System-scope units get no $HOME by default, so git cannot find the
+# global config this role writes (allowedSignersFile included) and
+# --verify-commit fails as if nothing were configured at all.
+Environment=HOME=/root
 WorkingDirectory={{ base_pull_dir }}
 LoadCredential=deadman.conf:/etc/deerlab/deadman-pull.conf
 ExecStart={{ base_pull_venv }}/bin/ansible-pull --url {{ base_pull_repo_url }} --checkout {{ base_pull_branch }} --directory {{ base_pull_dir }}/checkout --verify-commit --clean --connection local --inventory inventory/hosts.yml --limit {{ inventory_hostname }} playbooks/site.yml
