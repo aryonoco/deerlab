@@ -96,6 +96,14 @@
   loop_control:
     label: "{{ item.key }}"
 
+- name: Block modules that will never be legitimately loaded
+  ansible.builtin.template:
+    src: modprobe-blocklist.conf.j2
+    dest: /etc/modprobe.d/90-deerlab-blocklist.conf
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Check that GRUB is the boot loader
   ansible.builtin.stat:
     path: /etc/default/grub

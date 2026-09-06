@@ -45,6 +45,10 @@ argument_specs:
       base_os_kernel_cmdline:
         type: str
         description: Extra parameters appended to GRUB_CMDLINE_LINUX_DEFAULT.
+      base_os_blocked_modules:
+        type: list
+        elements: str
+        description: Kernel modules blacklisted and blocked from explicit modprobe.
       base_os_journald_max_use:
         type: str
         default: 512M

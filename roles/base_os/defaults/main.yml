@@ -25,7 +25,49 @@ base_os_packages_absent:
   - fail2ban
   - systemd-timesyncd
 
-base_os_kernel_cmdline: "lockdown=integrity systemd.ssh_auto=no"
+# init_on_alloc, randomize_kstack_offset and vsyscall=none are deliberately
+# absent: Debian already compiles them on by default, verified in
+# /boot/config-$(uname -r), so passing them would be noise. These three are not
+# on by default. init_on_free costs a few percent and buys mitigation of
+# use-after-free information leaks; debugfs=off removes a large kernel
+# introspection surface and costs only bpftrace and bcc, which are not used here.
+base_os_kernel_cmdline: "lockdown=integrity systemd.ssh_auto=no slab_nomerge page_alloc.shuffle=1 init_on_free=1 debugfs=off"
+
+# Rare network protocols, legacy filesystems and buses that do not exist on a
+# virtual machine. Each has carried privilege escalation bugs and none is
+# reachable by anything deployed here. Both directives are needed: `blacklist`
+# stops alias-based autoload, `install ... /bin/false` stops an explicit modprobe.
+base_os_blocked_modules:
+  - dccp
+  - sctp
+  - rds
+  - tipc
+  - n-hdlc
+  - ax25
+  - netrom
+  - x25
+  - rose
+  - decnet
+  - econet
+  - af_802154
+  - ipx
+  - appletalk
+  - psnap
+  - p8023
+  - p8022
+  - can
+  - atm
+  - cramfs
+  - freevxfs
+  - jffs2
+  - hfs
+  - hfsplus
+  - udf
+  - usb-storage
+  - firewire-core
+  - firewire-ohci
+  - bluetooth
+  - thunderbolt
 
 base_os_sysctl:
   # Rootless Podman needs this. Assert it explicitly so nothing can flip it.
@@ -41,6 +83,11 @@ base_os_sysctl:
   kernel.kexec_load_disabled: 1
   kernel.unprivileged_bpf_disabled: 2
   kernel.perf_event_paranoid: 3
+  # io_uring has been the most productive local privilege escalation surface in
+  # recent kernels, and it is a class neither the user namespace nor the seccomp
+  # profile addresses. Nothing here needs it: podman, conmon, crun and pasta all
+  # use epoll. 2 disables it outright rather than restricting it to a group.
+  kernel.io_uring_disabled: 2
   net.core.bpf_jit_harden: 2
   # Filesystem
   fs.protected_hardlinks: 1
