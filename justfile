@@ -162,7 +162,7 @@ secrets-edit file:
 secrets-rekey:
     #!/usr/bin/env bash
     set -euo pipefail
-    git ls-files '*.sops.yaml' | while IFS= read -r f; do
+    git ls-files '*.sops.yaml' ':!/.sops.yaml' | while IFS= read -r f; do
         echo "updatekeys $f"
         sops updatekeys --yes "$f"
     done
