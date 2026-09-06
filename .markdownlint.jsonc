@@ -1,6 +1,0 @@
-// SPDX-License-Identifier: 0BSD
-// Copyright (c) 2026 Aryan Ameri
-{
-  // Line length is impractical for table-heavy reference documentation
-  "MD013": false
-}

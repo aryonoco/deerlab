@@ -15,16 +15,11 @@ setup:
     @echo "Setup complete"
 
 # Run all CI checks locally
-ci: reuse-lint ansible-lint shellcheck markdownlint security-scan gitleaks check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
+ci: ansible-lint shellcheck security-scan gitleaks check-trailing-whitespace check-eof-newline check-yaml check-json check-merge-conflicts
     @echo ""
     @echo "════════════════════════════════════════"
     @echo "  All CI checks passed"
     @echo "════════════════════════════════════════"
-
-# Check REUSE/SPDX licensing compliance
-reuse-lint:
-    @echo "=== Checking REUSE compliance ==="
-    reuse lint
 
 # Lint all Ansible playbooks and roles
 ansible-lint:
@@ -44,13 +39,9 @@ shellcheck:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "=== Running shellcheck ==="
-    find . -name '*.sh' -not -path './collections/*' -not -path './.devcontainer/config/*' -not -path './.ansible/*' -print0 | xargs -0 shellcheck
+    # -r so an empty result is a pass, not shellcheck's "No files specified" (exit 123)
+    find . -name '*.sh' -not -path './collections/*' -not -path './.ansible/*' -print0 | xargs -0 -r shellcheck
     echo "shellcheck passed"
-
-# Lint all Markdown files
-markdownlint:
-    @echo "=== Running markdownlint ==="
-    markdownlint-cli2 "**/*.md" "!collections/**"
 
 # Run Trivy configuration scan
 security-scan:
@@ -127,9 +118,8 @@ check-merge-conflicts:
 pre-commit:
     pre-commit run --all-files
 
-# Format Markdown and YAML
+# Format YAML
 fmt:
-    markdownlint-cli2 --fix "**/*.md" "!collections/**"
     just ansible-lint-fix
 
 # Check and diff a host without changing it

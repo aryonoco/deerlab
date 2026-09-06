@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-# Single source of truth for every tool the repo needs. CI, the devcontainer
-# and `just setup` all run `mise install` and nothing else.
+# Single source of truth for every tool the repo needs. CI and `just setup`
+# both run `mise install` and nothing else.
 
 [tools]
-node = "lts"
 uv = "0.12.9"
 just = "1.58.0"
 pre-commit = "4.6.2"
-markdownlint-cli2 = "0.23.2"
 shellcheck = "0.11.0"
 trivy = "0.74.0"
 gitleaks = "8.30.1"
@@ -19,4 +17,3 @@ restic = "0.19.1"
 "pipx:ansible" = { version = "14.3.1", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib" }
 "pipx:ansible-lint" = { version = "26.8.0", uvx_args = "--with passlib" }
 "pipx:yamllint" = "1.38.0"
-"pipx:reuse" = "6.2.0"

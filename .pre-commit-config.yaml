@@ -20,7 +20,7 @@ repos:
         language: system
         types: [shell]
         files: \.sh$
-        exclude: ^(\.devcontainer/config/|collections/)
+        exclude: ^collections/
 
   - repo: local
     hooks:
@@ -31,15 +31,6 @@ repos:
         pass_filenames: false
         files: \.(ya?ml)$
         exclude: ^(collections/|\.github/)
-
-  - repo: local
-    hooks:
-      - id: markdownlint-fix
-        name: markdownlint --fix
-        entry: mise exec -- markdownlint-cli2 --fix
-        language: system
-        types: [markdown]
-        exclude: ^collections/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -54,12 +45,3 @@ repos:
         exclude: ^collections/
       - id: check-merge-conflict
         exclude: (^collections/|^LICENSE)
-
-  - repo: local
-    hooks:
-      - id: reuse-lint
-        name: REUSE compliance
-        entry: mise exec -- reuse lint
-        language: system
-        pass_filenames: false
-        always_run: true

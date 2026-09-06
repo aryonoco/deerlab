@@ -46,7 +46,7 @@ working reference.
 
 - All linter rules are enforced as errors — fix them, don't suppress them
 - ShellCheck for shell scripts, ansible-lint for Ansible
-- markdownlint for Markdown, yamllint for YAML
+- yamllint for YAML
 - Test idempotency: running a playbook twice must produce zero changes on the second run
 
 ## Ansible
@@ -63,7 +63,7 @@ working reference.
 
 ## Development Environment
 
-- Work runs directly on the operator's macOS host, not in a container
+- Work runs directly on the operator's macOS host. There is no devcontainer
 - Tool versions come from `mise.toml`; run `just setup` to install them
 - The SOPS age identity is not on disk. It is fetched from Bitwarden at
   runtime through `SOPS_AGE_KEY_CMD`, which the login shell exports. A
