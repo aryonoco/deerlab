@@ -1,0 +1,68 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+# Podman 5.4.2 Quadlet. Only keys that exist in 5.4.2 belong here.
+[Unit]
+Description={{ podman_service_name }}
+OnFailure=notify-failure@%n.service
+
+[Container]
+ContainerName={{ podman_service_name }}
+Image={{ podman_service_spec.image }}
+Pull=never
+{% for port in podman_service_spec.publish %}
+PublishPort={{ port }}
+{% endfor %}
+{% if podman_service_spec.network is defined %}
+Network={{ podman_service_spec.network }}
+{% endif %}
+{% for volume in podman_service_spec.volumes | default([]) %}
+Volume={{ podman_service_name }}-{{ volume.name }}.volume:{{ volume.mount }}
+{% endfor %}
+{% for mount in podman_service_spec.mounts | default([]) %}
+Volume={{ mount.src }}:{{ mount.dst }}{{ ':ro' if mount.ro | default(true) else '' }}
+{% endfor %}
+{% for tmpfs in podman_service_spec.tmpfs | default([]) %}
+Tmpfs={{ tmpfs }}
+{% endfor %}
+{% for key, value in (podman_service_spec.env | default({})).items() %}
+Environment={{ key }}={{ value }}
+{% endfor %}
+{% for secret in podman_service_spec.secrets | default([]) %}
+{% if secret.type | default('mount') == 'env' %}
+Secret={{ podman_service_name }}-{{ secret.name }},type=env,target={{ secret.target }}
+{% else %}
+Secret={{ podman_service_name }}-{{ secret.name }},type=mount,target={{ secret.target | default('/run/secrets/' ~ secret.name) }},mode=0400
+{% endif %}
+{% endfor %}
+DropCapability=all
+{% if podman_service_spec.capabilities | default([]) | length > 0 %}
+AddCapability={{ podman_service_spec.capabilities | join(' ') }}
+{% endif %}
+NoNewPrivileges={{ 'true' if podman_service_spec.no_new_privileges | default(true) else 'false' }}
+ReadOnly={{ 'true' if podman_service_spec.read_only | default(true) else 'false' }}
+ReadOnlyTmpfs=true
+SeccompProfile=/usr/share/containers/seccomp.json
+Mask=/proc/acpi:/proc/kcore:/proc/keys:/proc/timer_list:/proc/sched_debug:/proc/latency_stats:/sys/firmware
+PidsLimit={{ podman_service_spec.limits.pids }}
+{% if podman_service_spec.userns is defined %}
+UserNS={{ podman_service_spec.userns }}
+{% endif %}
+HealthCmd={{ podman_service_spec.health.cmd }}
+HealthInterval={{ podman_service_spec.health.interval | default('30s') }}
+HealthStartPeriod={{ podman_service_spec.health.start_period | default('60s') }}
+HealthRetries=3
+HealthOnFailure=kill
+Notify=healthy
+StopTimeout=30
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec={{ podman_service_spec.start_timeout | default(300) }}
+MemoryMax={{ podman_service_spec.limits.memory }}
+CPUQuota={{ podman_service_spec.limits.cpu }}
+TasksMax={{ podman_service_spec.limits.tasks }}
+
+[Install]
+WantedBy=default.target

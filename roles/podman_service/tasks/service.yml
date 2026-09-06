@@ -1,0 +1,148 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Set the facts for {{ podman_service_item.key }}
+  ansible.builtin.set_fact:
+    podman_service_name: "{{ podman_service_item.key }}"
+    podman_service_spec: "{{ podman_service_item.value }}"
+    podman_service_uid: "{{ podman_service_item.value.uid }}"
+    podman_service_home: "/var/lib/{{ podman_service_item.key }}"
+    podman_service_unit_dir: "{{ podman_service_unit_root }}/{{ podman_service_item.value.uid }}"
+    podman_service_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ podman_service_item.value.uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_service_item.value.uid }}/bus"
+
+- name: Write the config files of {{ podman_service_name }}
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ podman_service_home }}/{{ item.path }}"
+    owner: "{{ podman_service_name }}"
+    group: "{{ podman_service_name }}"
+    mode: "{{ item.mode | default('0640') }}"
+  loop: "{{ podman_service_spec.config_files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: podman_service_config_files
+
+- name: Create the secrets of {{ podman_service_name }}
+  containers.podman.podman_secret:
+    name: "{{ podman_service_name }}-{{ item.name }}"
+    data: "{{ item.value }}"
+    state: present
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_spec.secrets | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  register: podman_service_secrets
+
+- name: Check for the image of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman image exists {{ podman_service_spec.image }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_image_exists
+  changed_when: false
+  failed_when: podman_service_image_exists.rc not in [0, 1]
+
+- name: Pull the image of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman pull --quiet {{ podman_service_spec.image }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  when: podman_service_image_exists.rc == 1
+  changed_when: true
+
+- name: Create the unit directory of {{ podman_service_name }}
+  ansible.builtin.file:
+    path: "{{ podman_service_unit_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the volume units of {{ podman_service_name }}
+  ansible.builtin.template:
+    src: volume.j2
+    dest: "{{ podman_service_unit_dir }}/{{ podman_service_name }}-{{ item.name }}.volume"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ podman_service_spec.volumes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: podman_service_volume_units
+
+- name: Write the container unit of {{ podman_service_name }}
+  ansible.builtin.template:
+    src: container.j2
+    dest: "{{ podman_service_unit_dir }}/{{ podman_service_name }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: podman_service_container_unit
+
+- name: Decide on a restart of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_restart: >-
+      {{ podman_service_container_unit.changed
+         or (podman_service_volume_units.changed | default(false))
+         or (podman_service_config_files.changed | default(false))
+         or (podman_service_secrets.changed | default(false)) }}
+
+- name: Reload the user manager of {{ podman_service_name }}  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  when: podman_service_restart | bool
+
+- name: Verify the generated unit of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "systemd-analyze --user --generators=true verify {{ podman_service_name }}.service"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  changed_when: false
+
+- name: Restart after a change to {{ podman_service_name }}  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_name }}.service"
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  when: podman_service_restart | bool
+
+- name: Ensure the running state of {{ podman_service_name }}
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_name }}.service"
+    state: started
+    scope: user
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+
+- name: Read the Podman runtime facts of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: podman info --format json
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_info
+  changed_when: false
+
+- name: Assert the systemd cgroup manager and native overlay for {{ podman_service_name }}
+  ansible.builtin.assert:
+    that:
+      - (podman_service_info.stdout | from_json).host.cgroupManager == 'systemd'
+      - (podman_service_info.stdout | from_json).store.graphDriverName == 'overlay'
+    fail_msg: "{{ podman_service_name }} fell back to cgroupfs or a non-overlay driver; check DBUS_SESSION_BUS_ADDRESS and dbus-user-session"
+    quiet: true

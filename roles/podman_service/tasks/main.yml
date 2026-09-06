@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate the service definitions
+  ansible.builtin.assert:
+    that:
+      - item.value.image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$')
+      - item.value.publish is defined
+      - item.value.health.cmd is defined
+      - item.value.limits.pids is defined
+      - (item.value.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
+    fail_msg: "service {{ item.key }} needs a fully qualified digest-pinned image, publish, health.cmd, limits.pids, and no CHANGE-ME secrets"
+    quiet: true
+  loop: "{{ podman_service_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Deploy each service
+  ansible.builtin.include_tasks: service.yml
+  loop: "{{ podman_service_services | dict2items }}"
+  loop_control:
+    loop_var: podman_service_item
+    label: "{{ podman_service_item.key }}"
