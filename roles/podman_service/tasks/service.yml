@@ -148,6 +148,8 @@
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
 
+# A pure read: it changes nothing, so it may run under check mode too, and the
+# assertion below needs its output to have something to parse during a dry run.
 - name: Read the Podman runtime facts of {{ podman_service_name }}
   ansible.builtin.command:
     cmd: podman info --format json
@@ -156,7 +158,11 @@
   environment: "{{ podman_service_env }}"
   register: podman_service_info
   changed_when: false
+  check_mode: false
 
+# Defensive, not a working fresh-host path: this only stops the assertion from
+# parsing an empty string if the probe above is ever skipped. On a configured
+# host the conditions below still apply in full.
 - name: Assert the systemd cgroup manager and native overlay for {{ podman_service_name }}
   ansible.builtin.assert:
     that:
@@ -164,3 +170,4 @@
       - (podman_service_info.stdout | from_json).store.graphDriverName == 'overlay'
     fail_msg: "{{ podman_service_name }} fell back to cgroupfs or a non-overlay driver; check DBUS_SESSION_BUS_ADDRESS and dbus-user-session"
     quiet: true
+  when: podman_service_info.stdout | default('') | length > 0
