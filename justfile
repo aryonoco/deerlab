@@ -122,12 +122,14 @@ plan host:
     ansible-playbook playbooks/site.yml --limit {{ host }} --check --diff
 
 # Push the playbook to a host as the admin user (development and break-glass only)
-apply host:
-    ansible-playbook playbooks/site.yml --limit {{ host }}
+apply host *ARGS:
+    ansible-playbook playbooks/site.yml --limit {{ host }} {{ ARGS }}
 
-# First run against a freshly imaged host, connecting as root
-bootstrap host:
-    ansible-playbook playbooks/site.yml --limit {{ host }} --extra-vars ansible_user=root
+# First run against a freshly imaged host, connecting as root. The timer stays
+# off: a host being bootstrapped is not yet a recipient of the encrypted
+# inventory, so its first unattended run could only fail to decrypt.
+bootstrap host *ARGS:
+    ansible-playbook playbooks/site.yml --limit {{ host }} --extra-vars ansible_user=root --extra-vars base_pull_enabled=false {{ ARGS }}
 
 # Run the playbook twice and fail if the second run changed anything
 idempotency host:
