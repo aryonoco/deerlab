@@ -35,7 +35,7 @@ caddy_caddyfile: |
           format json
       }
       reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8080 {
-          health_uri /api/info
+          health_uri /login
           health_interval 15s
           health_timeout 5s
           health_status 200
