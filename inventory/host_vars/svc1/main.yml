@@ -7,3 +7,10 @@
 # the other's file. Everything else about this host — its address, its tunnel
 # addresses and its private key — is in secrets.sops.yaml.
 base_wireguard_public_key: "K0IwugKaMJ+y0tTMeCnND/fBIs8xQxFgkZIYYi4T9CI="
+
+# Derived rather than stored: base_wireguard builds each peer's Endpoint= from
+# this, and deriving it from ansible_host means changing the host's address in
+# one encrypted place moves the tunnel with it. The edge needs this to initiate
+# after a reboot; without it the edge loses the endpoint it learned and the
+# tunnel waits out REJECT_AFTER_TIME.
+base_wireguard_public_endpoint: "{{ ansible_host }}:{{ deerlab_wg_port }}"

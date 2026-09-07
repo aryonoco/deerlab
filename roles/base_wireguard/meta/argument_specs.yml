@@ -44,7 +44,13 @@ argument_specs:
       base_wireguard_public_endpoint:
         type: str
         default: ""
-        description: host:port other peers connect to. Set only on the edge.
+        description: >-
+          This host's host:port that peers use to reach it. Setting it gives
+          every peer a configured address for this host rather than one only
+          learned from traffic, which is what lets a peer initiate toward this
+          host again after the peer's own session resets (a reboot, say) and
+          its learned view is gone. A host that omits it can only be reached
+          once its own side of the tunnel initiates first.
       base_wireguard_mtu:
         type: int
         default: 1420

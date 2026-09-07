@@ -36,6 +36,12 @@ argument_specs:
       base_firewall_peer_ipv6:
         type: str
         default: ""
+      base_firewall_peer_public_v4:
+        type: str
+        default: ""
+        description: >-
+          The peer's public address the tunnel port is accepted from,
+          required on a services host so the peer can initiate the tunnel.
       base_firewall_edge_tcp_redirects:
         type: dict
         description: Public port to Caddy's published port, TCP.

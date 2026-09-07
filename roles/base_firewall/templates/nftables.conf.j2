@@ -44,6 +44,9 @@ table inet deerlab {
     udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } accept
     udp dport {{ base_firewall_wg_port }} accept
 {% else %}
+{% if base_firewall_peer_public_v4 | length > 0 %}
+    ip saddr {{ base_firewall_peer_public_v4 }} udp dport {{ base_firewall_wg_port }} ct state new accept
+{% endif %}
 {% for proto, ports in [('tcp', base_firewall_backend_tcp_ports), ('udp', base_firewall_backend_udp_ports)] %}
 {% if ports | length > 0 %}
     iifname "{{ base_firewall_wg_interface }}" ip saddr {{ base_firewall_peer_ipv4 }} {{ proto }} dport { {{ ports | join(', ') }} } ct state new accept

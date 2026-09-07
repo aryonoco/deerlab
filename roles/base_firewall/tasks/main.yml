@@ -7,7 +7,10 @@
       - base_firewall_role in ['edge', 'services']
       - base_firewall_services is mapping
       - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
-    fail_msg: base_firewall_role must be edge or services, and a services host needs the edge's tunnel address
+      - base_firewall_role == 'edge' or base_firewall_peer_public_v4 | length > 0
+    fail_msg: >-
+      base_firewall_role must be edge or services, and a services host needs
+      the edge's tunnel address and public address
 
 # Split by protocol. A publish entry may carry a /udp suffix, and collapsing
 # both into one list would emit a tcp accept for a udp service: the rendered
