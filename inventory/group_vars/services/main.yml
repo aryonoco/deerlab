@@ -51,7 +51,7 @@ podman_services:
     read_only: false
     no_new_privileges: true
     health:
-      cmd: curl --fail --silent http://localhost/api/info
+      cmd: curl --fail --silent --output /dev/null http://localhost/login
       interval: 30s
       start_period: 180s
     limits:
