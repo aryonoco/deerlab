@@ -4,5 +4,13 @@
 # Recipients: the operator key, then one key per host added by the
 # base_pull role. Run `just secrets-rekey` after editing this list.
 creation_rules:
+  # Operator-only, and first so it wins. Nothing on a host reads this
+  # directory; the credentials it holds can erase a repository's history, so a
+  # host key on them would mean a compromise of either host also destroys the
+  # path back. The inventory rule below is deliberately still shared: a group
+  # or host vars file that one host cannot decrypt makes the whole inventory
+  # unparseable for it.
+  - path_regex: '(^|/)secrets/.*\.sops\.yaml$'
+    age: "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm"
   - path_regex: '[^/]+\.sops\.yaml$'
     age: "age10ef6lafmvtk8myhsl28a79zz3463f6xupf8vxx5uduyptmtxmunq4v8nvm,age1dxhkt6syw8mmfzzzgf9dtjkvt5j7au36nnsmv4vvuejdwmpv9ftssv9vkq,age1n3ze7nymx9tk78r78mukpxjjuhhaxh2wqz2tpem9ymcgngr94f5qg434hl"

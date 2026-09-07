@@ -169,22 +169,40 @@ secrets-rekey:
         sops updatekeys --yes "$f"
     done
 
+# Print the inventory file holding a service's restic password. sops encrypts
+# values and not key names, so the key name is readable in the committed
+# ciphertext and the group need not be guessed: guessing it is how a restore
+# drill ends up pointed at an empty repository and passes without restoring
+# anything. Exactly one match, or nothing.
+[private]
+restic-secrets-file service:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t matches < <(grep -l 'backup_{{ service }}_restic_password' inventory/group_vars/*/secrets.sops.yaml)
+    if [[ ${#matches[@]} -ne 1 ]]; then
+        echo "ERROR: expected exactly one inventory file to hold the restic password of {{ service }}, found ${#matches[@]}" >&2
+        exit 1
+    fi
+    echo "${matches[0]}"
+
 # Apply retention to a service's restic repository from the operator's full-access credentials
 backup-prune service:
     #!/usr/bin/env bash
     set -euo pipefail
+    secrets="$(just restic-secrets-file {{ service }})"
     export RESTIC_REPOSITORY="$(sops -d --extract '["backup_s3_bucket"]' inventory/group_vars/all/secrets.sops.yaml)/{{ service }}"
-    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' inventory/group_vars/services/secrets.sops.yaml"
+    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' $secrets"
     sops exec-env secrets/backup-admin.sops.yaml 'restic forget --keep-within 30d --keep-within-weekly 3m --keep-within-monthly 1y --prune'
 
 # Restore the latest snapshot of a service to a scratch directory and integrity-check it
 restore-drill service:
     #!/usr/bin/env bash
     set -euo pipefail
+    secrets="$(just restic-secrets-file {{ service }})"
     target="/tmp/deerlab-restore-{{ service }}"
     rm -rf "$target"
     export RESTIC_REPOSITORY="$(sops -d --extract '["backup_s3_bucket"]' inventory/group_vars/all/secrets.sops.yaml)/{{ service }}"
-    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' inventory/group_vars/services/secrets.sops.yaml"
+    export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' $secrets"
     sops exec-env secrets/backup-admin.sops.yaml "restic restore latest --target $target"
     find "$target" -name '*.sqlite' -print -exec sqlite3 {} 'PRAGMA integrity_check' \;
     echo "Restored to $target"

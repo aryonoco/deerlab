@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+backup_services: "{{ podman_services }}"
+backup_schedule: "*-*-* 03:00:00"
+backup_deadman_urls: "{{ deerlab_deadman_urls['backup'] }}"
+backup_dir: /etc/deerlab/backup
+backup_unit_dir: /etc/systemd/user
+
+# Type=oneshot disables the start timeout by default, so without this a run
+# that hangs on the network never fails and never notifies: the dead-man check
+# would be the only thing that ever noticed, a day late. Generous enough that
+# only a stuck run trips it.
+backup_timeout: 1h
+
+# backup_s3_bucket has no default on purpose. It identifies where the estate
+# keeps its data, so it lives encrypted in the inventory and the role reads it
+# as a required option; a default here would be a plaintext copy of it.

@@ -1,0 +1,33 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Unit]
+Description=Back up {{ backup_name }} with restic
+OnFailure=notify-failure@%n.service
+
+[Service]
+Type=oneshot
+# Type=oneshot has no start timeout by default. Without one a run wedged on the
+# network would sit there holding a repository lock until the next reboot.
+TimeoutStartSec={{ backup_timeout }}
+UMask=0077
+EnvironmentFile={{ backup_dir }}/{{ backup_name }}.env
+Environment=RESTIC_PASSWORD_FILE=%d/restic.password
+LoadCredential=restic.password:{{ backup_dir }}/{{ backup_name }}.password
+LoadCredential=deadman.conf:{{ backup_dir }}/{{ backup_name }}-deadman.conf
+# The usual sandboxing is deliberately absent. podman unshare enters a user
+# namespace through the setuid newuidmap helper, so NoNewPrivileges,
+# RestrictSUIDSGID and every namespace directive that would make systemd build
+# the sandbox in an unprivileged user namespace first all stop it from running
+# at all. What is left is the least privilege this job can actually hold: an
+# unprivileged service user whose egress the firewall already confines.
+{% if backup_spec.sqlite is defined %}
+# Online SQLite backup inside the user namespace so subordinate-owned files are readable.
+ExecStart=/usr/bin/podman unshare /usr/bin/sqlite3 {{ backup_volume_root }}/{{ backup_name }}-{{ backup_spec.sqlite.volume }}/_data/{{ backup_spec.sqlite.path }} ".backup %h/backup/staging/{{ backup_spec.sqlite.path | basename }}"
+# A copy that cannot be read back is worse than no copy, because it still pings
+# the dead-man. sqlite3 exits 0 on a corrupt database, so the result is tested.
+ExecStart=/usr/bin/sh -c 'test "$(/usr/bin/sqlite3 %h/backup/staging/{{ backup_spec.sqlite.path | basename }} "PRAGMA integrity_check")" = ok'
+{% endif %}
+ExecStart=/usr/bin/podman unshare /usr/bin/restic backup --quiet --exclude-caches %h/backup/staging{% for volume in backup_spec.volumes | default([]) %} {{ backup_volume_root }}/{{ backup_name }}-{{ volume }}/_data{% endfor %}
+
+ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/deadman.conf --data "backup ok"

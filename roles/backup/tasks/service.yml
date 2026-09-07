@@ -1,0 +1,172 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# backup_env carries the repository credentials and is only ever handed to
+# restic. backup_user_env is the same pair of user-manager variables without
+# them, so the systemd and verification tasks below reach the right manager
+# without a secret riding along on every one of them.
+- name: Set the facts for {{ backup_item.key }}
+  ansible.builtin.set_fact:
+    backup_name: "{{ backup_item.key }}"
+    backup_uid: "{{ backup_item.value.uid }}"
+    backup_spec: "{{ backup_item.value.backup }}"
+    backup_home: "/var/lib/{{ backup_item.key }}"
+    backup_volume_root: "/var/lib/{{ backup_item.key }}/.local/share/containers/storage/volumes"
+    backup_restic_password: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_restic_password') }}"
+    backup_s3_access_key: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_access_key') }}"
+    backup_s3_secret_key: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_secret_key') }}"
+    backup_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ backup_item.value.uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ backup_item.value.uid }}/bus"
+    backup_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ backup_item.value.uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ backup_item.value.uid }}/bus"
+      RESTIC_REPOSITORY: "{{ backup_s3_bucket }}/{{ backup_item.key }}"
+      RESTIC_PASSWORD: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_restic_password') }}"
+      AWS_ACCESS_KEY_ID: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_access_key') }}"
+      AWS_SECRET_ACCESS_KEY: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_secret_key') }}"
+  no_log: true
+
+- name: Refuse placeholder credentials for {{ backup_name }}
+  ansible.builtin.assert:
+    that:
+      - backup_restic_password | length > 0
+      - backup_restic_password != 'CHANGE-ME'
+      - backup_s3_access_key | length > 0
+      - backup_s3_access_key != 'CHANGE-ME'
+      - backup_s3_secret_key | length > 0
+      - backup_s3_secret_key != 'CHANGE-ME'
+      - backup_deadman_urls[backup_name] is defined
+    fail_msg: "backup credentials or dead-man URL for {{ backup_name }} are not set"
+    quiet: true
+
+- name: Write the restic environment of {{ backup_name }}
+  ansible.builtin.copy:
+    content: |
+      RESTIC_REPOSITORY={{ backup_s3_bucket }}/{{ backup_name }}
+      RESTIC_CACHE_DIR={{ backup_home }}/.cache/restic
+      AWS_ACCESS_KEY_ID={{ backup_s3_access_key }}
+      AWS_SECRET_ACCESS_KEY={{ backup_s3_secret_key }}
+    dest: "{{ backup_dir }}/{{ backup_name }}.env"
+    owner: root
+    group: "{{ backup_name }}"
+    mode: "0640"
+  no_log: true
+
+# Encrypted systemd credentials do not work in user units on this systemd, so
+# the repository password is a root-written file the user manager loads with
+# LoadCredential and the service user can read only through its own group.
+- name: Write the repository password of {{ backup_name }}
+  ansible.builtin.copy:
+    content: "{{ backup_restic_password }}\n"
+    dest: "{{ backup_dir }}/{{ backup_name }}.password"
+    owner: root
+    group: "{{ backup_name }}"
+    mode: "0640"
+  no_log: true
+
+- name: Write the dead-man configuration of {{ backup_name }}
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      url = "{{ backup_deadman_urls[backup_name] }}"
+    dest: "{{ backup_dir }}/{{ backup_name }}-deadman.conf"
+    owner: root
+    group: "{{ backup_name }}"
+    mode: "0640"
+  no_log: true
+
+# Created with the service user's own ownership and 0700 so that the SQLite
+# copy, which is the one consistent artefact in the whole snapshot, is not
+# readable by anything else on the host. The intermediate backup directory
+# inherits the same attributes.
+- name: Create the staging directory of {{ backup_name }}
+  ansible.builtin.file:
+    path: "{{ backup_home }}/backup/staging"
+    state: directory
+    owner: "{{ backup_name }}"
+    group: "{{ backup_name }}"
+    mode: "0700"
+
+# no_log because Ansible's diff is on globally and this is the file that spells
+# out where the repository lives and which paths go into it. Its changed flag
+# still drives the reload below.
+- name: Install the backup unit of {{ backup_name }}
+  ansible.builtin.template:
+    src: backup.service.j2
+    dest: "{{ backup_unit_dir }}/deerlab-backup-{{ backup_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: backup_unit
+  no_log: true
+
+- name: Install the backup timer of {{ backup_name }}
+  ansible.builtin.template:
+    src: backup.timer.j2
+    dest: "{{ backup_unit_dir }}/deerlab-backup-{{ backup_name }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  register: backup_timer
+
+# A plain `when: x.changed` is what a handler is for, and ansible-lint says so.
+# There is no handler here because the reload has to happen inside this loop,
+# before this service's timer is enabled, not once at the end of the play.
+- name: Decide on a reload for {{ backup_name }}
+  ansible.builtin.set_fact:
+    backup_reload: "{{ backup_unit.changed or backup_timer.changed }}"
+
+- name: Reload the user manager of {{ backup_name }}
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ backup_name }}"
+  environment: "{{ backup_user_env }}"
+  when: backup_reload | bool
+
+# A system-scope `validate:` cannot check these: they are user units, and the
+# user manager is the only thing that resolves %h and the user-scope notifier
+# they hand failures to.
+- name: Verify the generated units of {{ backup_name }}
+  ansible.builtin.command:
+    cmd: "systemd-analyze --user --generators=true verify deerlab-backup-{{ backup_name }}.service deerlab-backup-{{ backup_name }}.timer"
+  become: true
+  become_user: "{{ backup_name }}"
+  environment: "{{ backup_user_env }}"
+  changed_when: false
+
+# A pure read against the object store, so it may run in a dry run too and give
+# the initialisation below something to decide on.
+- name: Check for the repository of {{ backup_name }}
+  ansible.builtin.command:
+    cmd: restic cat config
+  become: true
+  become_user: "{{ backup_name }}"
+  environment: "{{ backup_env }}"
+  register: backup_repo_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Initialise the repository of {{ backup_name }}
+  ansible.builtin.command:
+    cmd: restic init
+  become: true
+  become_user: "{{ backup_name }}"
+  environment: "{{ backup_env }}"
+  when: backup_repo_check.rc | default(0) != 0
+  changed_when: true
+  no_log: true
+
+- name: Enable the backup timer of {{ backup_name }}
+  ansible.builtin.systemd_service:
+    name: "deerlab-backup-{{ backup_name }}.timer"
+    enabled: true
+    state: started
+    scope: user
+  become: true
+  become_user: "{{ backup_name }}"
+  environment: "{{ backup_user_env }}"

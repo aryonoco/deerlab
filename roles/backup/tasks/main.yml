@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - backup_s3_bucket | length > 0
+      - backup_s3_bucket is match('^s3:https://')
+      - backup_schedule | length > 0
+      - backup_timeout | length > 0
+    fail_msg: backup_s3_bucket must be an s3:https:// restic repository prefix, and the schedule and timeout must be set
+    quiet: true
+
+# /etc/deerlab belongs to base_os and stays 0755 so a service user can traverse
+# it. This directory is the same: the files inside are what carry the
+# restriction, each one root-owned and readable only by its own service group.
+- name: Create the backup configuration directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure backups for each service that asks for them
+  ansible.builtin.include_tasks: service.yml
+  loop: "{{ backup_services | dict2items | selectattr('value.backup', 'defined') | list }}"
+  loop_control:
+    loop_var: backup_item
+    label: "{{ backup_item.key }}"

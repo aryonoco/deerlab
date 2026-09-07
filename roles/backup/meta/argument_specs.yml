@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Per-service restic backups
+    description: >
+      For each service whose definition has a backup key: a user-scope
+      timer and unit that dumps SQLite with the online backup API inside
+      the user namespace, integrity-checks the copy, runs restic over the
+      staging directory and the listed volumes, and pings a dead-man URL.
+      One repository per service, under its own credentials.
+    options:
+      backup_services:
+        type: dict
+        required: true
+        description: >
+          The podman_services dictionary. Only entries with a backup key
+          are configured. That key takes an optional sqlite mapping of
+          volume and path, the path being relative to that volume's root,
+          and an optional volumes list naming the volumes to archive.
+      backup_s3_bucket:
+        type: str
+        required: true
+        description: restic repository prefix, for example s3:https://host/bucket.
+      backup_schedule:
+        type: str
+        default: "*-*-* 03:00:00"
+        description: OnCalendar expression for the per-service timer.
+      backup_deadman_urls:
+        type: dict
+        required: true
+        description: Service name to dead-man URL.
+      backup_dir:
+        type: path
+        default: /etc/deerlab/backup
+        description: Where the root-owned credential and environment files are written.
+      backup_unit_dir:
+        type: path
+        default: /etc/systemd/user
+        description: Where the user-scope unit and timer are installed.
+      backup_timeout:
+        type: str
+        default: 1h
+        description: TimeoutStartSec for the oneshot unit, which is otherwise unlimited.

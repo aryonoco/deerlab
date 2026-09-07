@@ -384,6 +384,10 @@ temp/
 *_bak
 backup/
 backups/
+# roles/backup is a role, not a backup artefact. The pattern above matches any
+# directory of that name at any depth, so without this the whole role would be
+# untracked and every host would pull a configuration that does not contain it.
+!/roles/backup/
 
 .cache/
 *.cache

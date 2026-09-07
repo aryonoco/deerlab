@@ -1,0 +1,13 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Unit]
+Description=Daily restic backup of {{ backup_name }}
+
+[Timer]
+OnCalendar={{ backup_schedule }}
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
