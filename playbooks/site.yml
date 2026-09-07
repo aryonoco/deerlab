@@ -7,5 +7,8 @@
 - name: Configure every host
   ansible.builtin.import_playbook: base.yml
 
+- name: Configure the edge host
+  ansible.builtin.import_playbook: edge.yml
+
 - name: Configure the services host
   ansible.builtin.import_playbook: services.yml
