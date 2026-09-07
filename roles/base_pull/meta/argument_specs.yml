@@ -46,3 +46,9 @@ argument_specs:
         type: bool
         default: true
         description: Whether the timer is enabled and started.
+      base_pull_timeout:
+        type: str
+        default: 20m
+        description: >
+          systemd TimeoutStartSec for the pull unit, so a wedged run fails
+          and alerts instead of hanging forever and blocking later pulls.

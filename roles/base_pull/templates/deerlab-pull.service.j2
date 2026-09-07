@@ -9,6 +9,7 @@ OnFailure=notify-failure@%n.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec={{ base_pull_timeout }}
 Environment=SOPS_AGE_KEY_FILE={{ base_pull_age_key_file }}
 Environment=ANSIBLE_NOCOLOR=1
 # System-scope units get no $HOME by default, so git cannot find the

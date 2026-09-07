@@ -11,3 +11,8 @@ base_pull_deadman_url: "{{ deerlab_deadman_urls['pull'][inventory_hostname] }}"
 base_pull_sops_version: "3.13.3"
 base_pull_age_key_file: /etc/deerlab/age.key
 base_pull_enabled: true
+# Type=oneshot has no start timeout by default. A pull that wedges would
+# otherwise hang forever: it never fails, so OnFailure never fires, and it
+# holds the unit active so no later pull can start. Well under the timer
+# interval, so a stuck run is reaped before the next one is due.
+base_pull_timeout: 20m
