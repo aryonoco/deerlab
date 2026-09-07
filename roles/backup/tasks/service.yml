@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: CPAL-1.0
 # Copyright (c) 2026 Aryan Ameri
 
-# backup_env carries the repository credentials and is only ever handed to
-# restic. backup_user_env is the same pair of user-manager variables without
-# them, so the systemd and verification tasks below reach the right manager
-# without a secret riding along on every one of them.
+# No fact here holds a credential in a form Ansible will ever put on a command
+# line. The three secrets below are only ever written into root-owned files by
+# the copy tasks, which pass module arguments over the connection rather than
+# as arguments to a process. backup_user_env carries the two user-manager
+# variables, which are paths and identify nothing.
 - name: Set the facts for {{ backup_item.key }}
   ansible.builtin.set_fact:
     backup_name: "{{ backup_item.key }}"
@@ -18,13 +19,6 @@
     backup_user_env:
       XDG_RUNTIME_DIR: "/run/user/{{ backup_item.value.uid }}"
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ backup_item.value.uid }}/bus"
-    backup_env:
-      XDG_RUNTIME_DIR: "/run/user/{{ backup_item.value.uid }}"
-      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ backup_item.value.uid }}/bus"
-      RESTIC_REPOSITORY: "{{ backup_s3_bucket }}/{{ backup_item.key }}"
-      RESTIC_PASSWORD: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_restic_password') }}"
-      AWS_ACCESS_KEY_ID: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_access_key') }}"
-      AWS_SECRET_ACCESS_KEY: "{{ lookup('ansible.builtin.vars', 'backup_' ~ backup_item.key ~ '_s3_secret_key') }}"
   no_log: true
 
 - name: Refuse placeholder credentials for {{ backup_name }}
@@ -136,29 +130,65 @@
   environment: "{{ backup_user_env }}"
   changed_when: false
 
-# A pure read against the object store, so it may run in a dry run too and give
-# the initialisation below something to decide on.
-- name: Check for the repository of {{ backup_name }}
-  ansible.builtin.command:
-    cmd: restic cat config
-  become: true
-  become_user: "{{ backup_name }}"
-  environment: "{{ backup_env }}"
-  register: backup_repo_check
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  no_log: true
+# Bootstrap runs once and leaves a marker, rather than probing the object store
+# on every unattended pull for the rest of the host's life. The marker also
+# stops a deleted repository being silently recreated: without it the next pull
+# would initialise a fresh empty one, the backup would succeed and the dead-man
+# would go green over no history at all. With it the backup fails loudly, which
+# is the alarm you want. Delete the marker to deliberately re-bootstrap.
+- name: Check for a bootstrap marker for {{ backup_name }}
+  ansible.builtin.stat:
+    path: "{{ backup_dir }}/{{ backup_name }}.initialised"
+  register: backup_repo_marker
 
-- name: Initialise the repository of {{ backup_name }}
-  ansible.builtin.command:
-    cmd: restic init
-  become: true
-  become_user: "{{ backup_name }}"
-  environment: "{{ backup_env }}"
-  when: backup_repo_check.rc | default(0) != 0
-  changed_when: true
-  no_log: true
+- name: Ensure there is a repository for {{ backup_name }}
+  when: not backup_repo_marker.stat.exists
+  block:
+    # These two go through systemd-run rather than Ansible's environment
+    # keyword. That keyword is delivered as a textual KEY=value prefix on the
+    # command string, so every value lands in the argv of the sh, the sudo and
+    # the interpreter that carry the task. /proc/<pid>/cmdline is mode 0444, so
+    # any local account on the host can read it, including one service user
+    # reading another's; only /proc/<pid>/environ is protected, at 0400. Here
+    # systemd parses the very same EnvironmentFile the backup unit uses, and
+    # Ansible passes nothing but paths. no_log stays, but now only to keep the
+    # repository location out of Ansible's own output.
+    - name: Check for the repository of {{ backup_name }}
+      ansible.builtin.command:
+        cmd: >-
+          systemd-run --machine={{ backup_name }}@ --user --quiet --pipe --wait --collect
+          --property=EnvironmentFile={{ backup_dir }}/{{ backup_name }}.env
+          --setenv=RESTIC_PASSWORD_FILE={{ backup_dir }}/{{ backup_name }}.password
+          /usr/bin/restic cat config
+      become: true
+      register: backup_repo_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Initialise the repository of {{ backup_name }}
+      ansible.builtin.command:
+        cmd: >-
+          systemd-run --machine={{ backup_name }}@ --user --quiet --pipe --wait --collect
+          --property=EnvironmentFile={{ backup_dir }}/{{ backup_name }}.env
+          --setenv=RESTIC_PASSWORD_FILE={{ backup_dir }}/{{ backup_name }}.password
+          /usr/bin/restic init
+      become: true
+      when: backup_repo_check.rc | default(1) != 0
+      changed_when: true
+      no_log: true
+
+    - name: Record the initialised repository of {{ backup_name }}
+      ansible.builtin.copy:
+        content: |
+          # {{ deerlab_managed }}
+          # Remove this file to make the next run probe the object store again
+          # and initialise the repository if it has gone.
+        dest: "{{ backup_dir }}/{{ backup_name }}.initialised"
+        owner: root
+        group: root
+        mode: "0644"
 
 - name: Enable the backup timer of {{ backup_name }}
   ansible.builtin.systemd_service:
