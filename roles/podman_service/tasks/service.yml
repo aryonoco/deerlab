@@ -12,6 +12,24 @@
       XDG_RUNTIME_DIR: "/run/user/{{ podman_service_item.value.uid }}"
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_service_item.value.uid }}/bus"
 
+# ansible.builtin.copy will not create an intermediate directory, and a
+# config file's path may nest (config/Caddyfile). The bind mount in the same
+# service definition points at that directory, so a missing one is a start
+# failure rather than a cosmetic gap. Skipped when the path is a bare
+# filename: dirname is then empty and the target would be the home directory,
+# which podman_user owns and keeps at 0700.
+- name: Create the config directories of {{ podman_service_name }}
+  ansible.builtin.file:
+    path: "{{ podman_service_home }}/{{ item.path | dirname }}"
+    state: directory
+    owner: "{{ podman_service_name }}"
+    group: "{{ podman_service_name }}"
+    mode: "0750"
+  loop: "{{ podman_service_spec.config_files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | dirname }}"
+  when: item.path | dirname | length > 0
+
 - name: Write the config files of {{ podman_service_name }}
   ansible.builtin.copy:
     content: "{{ item.content }}"
