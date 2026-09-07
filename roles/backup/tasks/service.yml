@@ -88,9 +88,9 @@
     group: "{{ backup_name }}"
     mode: "0700"
 
-# no_log because Ansible's diff is on globally and this is the file that spells
-# out where the repository lives and which paths go into it. Its changed flag
-# still drives the reload below.
+# Deliberately not no_log. The repository location reaches the environment file
+# above, which is; nothing secret reaches the unit, and the unit is the file
+# whose diff is worth reading when a backup starts behaving differently.
 - name: Install the backup unit of {{ backup_name }}
   ansible.builtin.template:
     src: backup.service.j2
@@ -99,7 +99,6 @@
     group: root
     mode: "0644"
   register: backup_unit
-  no_log: true
 
 - name: Install the backup timer of {{ backup_name }}
   ansible.builtin.template:
