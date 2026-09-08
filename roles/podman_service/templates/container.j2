@@ -5,6 +5,16 @@
 [Unit]
 Description={{ podman_service_container_name }}
 OnFailure=notify-failure@%n.service
+{% if podman_service_parent_unit | length > 0 %}
+{# Names the GENERATED unit, not the .container file. Quadlet only learned to #}
+{# resolve a .container in a dependency directive in 5.5; the targets run     #}
+{# 5.4.2. After= orders migrations, which the primary container runs, before  #}
+{# this one starts. PartOf= makes one `systemctl stop <service>` take both    #}
+{# down, so a restore cannot stop half the service and rewrite the volume     #}
+{# underneath a live writer.                                                  #}
+After={{ podman_service_parent_unit }}
+PartOf={{ podman_service_parent_unit }}
+{% endif %}
 
 [Container]
 ContainerName={{ podman_service_container_name }}

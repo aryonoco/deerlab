@@ -5,16 +5,13 @@
   ansible.builtin.set_fact:
     podman_service_name: "{{ podman_service_item.key }}"
     podman_service_spec: "{{ podman_service_item.value }}"
-    podman_service_container_name: "{{ podman_service_item.key }}"
-    podman_service_container_spec: "{{ podman_service_item.value }}"
-    podman_service_container_limits: "{{ podman_service_limits[podman_service_item.key].containers[podman_service_item.key] }}"
-    podman_service_parent_unit: ""
     podman_service_uid: "{{ podman_service_item.value.uid }}"
     podman_service_home: "/var/lib/{{ podman_service_item.key }}"
     podman_service_unit_dir: "{{ podman_service_unit_root }}/{{ podman_service_item.value.uid }}"
     podman_service_env:
       XDG_RUNTIME_DIR: "/run/user/{{ podman_service_item.value.uid }}"
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_service_item.value.uid }}/bus"
+    podman_service_units: []
 
 # ansible.builtin.copy will not create an intermediate directory, and a
 # config file's path may nest (config/Caddyfile). The bind mount in the same
@@ -105,19 +102,45 @@
     label: "{{ item.name }}"
   register: podman_service_volume_units
 
-- name: Write the container unit of {{ podman_service_name }}
-  ansible.builtin.template:
-    src: container.j2
-    dest: "{{ podman_service_unit_dir }}/{{ podman_service_name }}.container"
-    owner: root
-    group: root
-    mode: "0644"
-  register: podman_service_container_unit
+- name: Write the primary container unit of {{ podman_service_name }}
+  ansible.builtin.include_tasks: container.yml
+  vars:
+    podman_service_container_name: "{{ podman_service_name }}"
+    podman_service_container_spec: "{{ podman_service_spec }}"
+    podman_service_container_limits: "{{ podman_service_limits[podman_service_name].containers[podman_service_name] }}"
+    podman_service_parent_unit: ""
+
+# A sidecar is not a second service: it shares the user, UID, subordinate range,
+# slice, egress chain and backup repository, and differs only in what it runs.
+# It inherits the parent's spec and overrides what it declares. publish,
+# secrets, health, backup, uid, egress and sidecars are never inherited -
+# two containers cannot publish the same host port, and a queue consumer has no
+# endpoint to health-check. env is merged rather than replaced, with the
+# sidecar winning, because a worker needs the parent's application settings as
+# well as its own.
+- name: Write the sidecar container units of {{ podman_service_name }}
+  ansible.builtin.include_tasks: container.yml
+  loop: "{{ podman_service_spec.sidecars | default({}) | dict2items }}"
+  loop_control:
+    loop_var: podman_service_sidecar
+    label: "{{ podman_service_sidecar.key }}"
+  vars:
+    podman_service_container_name: "{{ podman_service_name }}-{{ podman_service_sidecar.key }}"
+    podman_service_container_limits: "{{ podman_service_limits[podman_service_name].containers[podman_service_name ~ '-' ~ podman_service_sidecar.key] }}"
+    podman_service_parent_unit: "{{ podman_service_name }}.service"
+    podman_service_container_spec: >-
+      {{ podman_service_spec | dict2items
+         | rejectattr('key', 'in', ['publish', 'secrets', 'health', 'sidecars', 'backup', 'uid', 'egress'])
+         | items2dict
+         | combine({'env': (podman_service_spec.env | default({}))
+                           | combine(podman_service_sidecar.value.env | default({}))})
+         | combine(podman_service_sidecar.value | dict2items
+                   | rejectattr('key', 'equalto', 'env') | items2dict) }}
 
 - name: Decide on a restart of {{ podman_service_name }}
   ansible.builtin.set_fact:
     podman_service_restart: >-
-      {{ podman_service_container_unit.changed
+      {{ (podman_service_units | rejectattr('sidecar') | selectattr('changed') | list | length > 0)
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
          or (podman_service_secrets.changed | default(false)) }}
@@ -131,14 +154,19 @@
   environment: "{{ podman_service_env }}"
   when: podman_service_restart | bool
 
-- name: Verify the generated unit of {{ podman_service_name }}
+- name: Verify the generated units of {{ podman_service_name }}
   ansible.builtin.command:
-    cmd: "systemd-analyze --user --generators=true verify {{ podman_service_name }}.service"
+    cmd: >-
+      systemd-analyze --user --generators=true verify
+      {{ podman_service_units | map(attribute='name') | map('regex_replace', '$', '.service') | join(' ') }}
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
   changed_when: false
 
+# Restarting the primary restarts its sidecars too, because they are PartOf= it.
+# So restart the primary whenever anything shared moved, and a sidecar on its
+# own only when the primary is not already being restarted.
 - name: Restart after a change to {{ podman_service_name }}
   ansible.builtin.systemd_service:
     name: "{{ podman_service_name }}.service"
@@ -149,14 +177,30 @@
   environment: "{{ podman_service_env }}"
   when: podman_service_restart | bool
 
+- name: Restart the changed sidecars of {{ podman_service_name }}
+  ansible.builtin.systemd_service:
+    name: "{{ item.name }}.service"
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_units | selectattr('sidecar') | selectattr('changed') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not (podman_service_restart | bool)
+
 - name: Ensure the running state of {{ podman_service_name }}
   ansible.builtin.systemd_service:
-    name: "{{ podman_service_name }}.service"
+    name: "{{ item.name }}.service"
     state: started
     scope: user
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_units }}"
+  loop_control:
+    label: "{{ item.name }}"
 
 # A pure read: it changes nothing, so it may run under check mode too, and the
 # assertion below needs its output to have something to parse during a dry run.

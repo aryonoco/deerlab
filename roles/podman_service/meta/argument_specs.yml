@@ -29,7 +29,15 @@ argument_specs:
           user (str or int, container-side UID), group (str or int),
           exec (str, overrides the image command), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
-          the container user, and health being optional.
+          the container user, health being optional, and
+          sidecars (dict of name to a partial spec, each rendering an
+          extra container unit under the same service user, volume and
+          slice, ordered After= and PartOf= the primary unit). A sidecar
+          inherits image, user, group, volumes, tmpfs, capabilities,
+          read_only, no_new_privileges, userns, network and exec, and
+          overrides any of them. env is merged with the sidecar winning.
+          publish, secrets, health, backup, uid and egress are never
+          inherited.
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users

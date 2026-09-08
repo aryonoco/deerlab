@@ -9,7 +9,9 @@
       - item.value.health.cmd is defined
       - podman_service_limits[item.key].containers[item.key].pids is defined
       - (item.value.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
-    fail_msg: "service {{ item.key }} needs a digest-pinned image, publish, health.cmd, a pids limit in deerlab_service_limits, and no CHANGE-ME secrets"
+    fail_msg: >-
+      service {{ item.key }} needs a fully qualified digest-pinned image, publish,
+      health.cmd, a pids limit in deerlab_service_limits, and no CHANGE-ME secrets
     quiet: true
   loop: "{{ podman_service_services | dict2items }}"
   loop_control:

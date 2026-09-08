@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Write the container unit of {{ podman_service_container_name }}
+  ansible.builtin.template:
+    src: container.j2
+    dest: "{{ podman_service_unit_dir }}/{{ podman_service_container_name }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: podman_service_unit_result
+
+# Accumulated rather than registered directly, because include_tasks in a loop
+# overwrites a registered variable on every iteration. The reload, verify and
+# restart steps downstream need every unit, not the last one.
+- name: Record the unit of {{ podman_service_container_name }}
+  ansible.builtin.set_fact:
+    podman_service_units: >-
+      {{ podman_service_units | default([])
+         + [{'name': podman_service_container_name,
+             'changed': podman_service_unit_result.changed,
+             'sidecar': podman_service_parent_unit | length > 0}] }}
