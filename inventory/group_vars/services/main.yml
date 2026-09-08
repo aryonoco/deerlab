@@ -58,3 +58,76 @@ podman_services:
     backup:
       sqlite: { volume: data, path: db/wallabag.sqlite }
       volumes: [data, images]
+
+  linkding:
+    uid: 2002
+    image: ghcr.io/sissbruecker/linkding:1.46.2-plus@sha256:041dfbe0a9bb655d8a4bcdf983cd4d1b10f3f9a5cbe60432169df1612efecbd5
+    # The image drops privilege internally: uwsgi.ini carries uid = www-data,
+    # which is 33 in the Debian image, and bootstrap.sh chowns the data
+    # directory to it. Starting as 33 makes that chown a permitted same-owner
+    # no-op and skips the privilege drop entirely, so nothing here needs CHOWN,
+    # DAC_OVERRIDE, SETUID or SETGID. Starting as root would need all four and
+    # a writable root filesystem besides.
+    user: 33
+    group: 33
+    publish:
+      - "8081:9090"
+    volumes:
+      # chown renders :U. The image ships data/tasks.sqlite3 owned root:root, so
+      # Podman's copy-up into a fresh volume lands root-owned and a uid-33
+      # container then fails with "mkdir: cannot create directory
+      # 'data/favicons': Permission denied". :U also self-heals after a volume
+      # is deleted and recreated, which is what a restore does.
+      - { name: data, mount: /etc/linkding/data, chown: true }
+    tmpfs:
+      # uwsgi.ini writes /tmp/linkding.pid and there is no writable path
+      # anywhere else with a read-only root, so the container exits 1 without
+      # this: "No usable temporary directory found".
+      - "/tmp:rw,nosuid,nodev,size=256m,uid=33,gid=33"
+    env:
+      # LD_DISABLE_BACKGROUND_TASKS is deliberately ABSENT and must stay absent.
+      # It reads as "do not start supervisord", which is what we want here, but
+      # it also gates task ENQUEUEING in whichever process evaluates it. Setting
+      # it would stop this container queueing any favicon, preview, metadata or
+      # snapshot work, and the worker would consume an empty queue forever.
+      # LD_SUPERVISOR_MANAGED must stay absent too: on that path bootstrap.sh
+      # execs supervisord, so its failure kills the container instead of being
+      # ignored.
+      #
+      # Consequence: this container logs "Error: Can't drop privilege as nonroot
+      # user" once per start, because bootstrap.sh tries to launch supervisord
+      # and supervisord refuses to run as non-root. It has no set -e and does
+      # not check the exit status, so it proceeds to exec uwsgi and everything
+      # works. The worker unit is what actually drains the queue.
+      #
+      # linkding sets no SECURE_PROXY_SSL_HEADER anywhere, so request.is_secure()
+      # is always false behind Caddy. This, not proto forwarding, is what stops
+      # a POST failing with "CSRF verification failed". The scheme is required.
+      LD_CSRF_TRUSTED_ORIGINS: "https://linkding.{{ deerlab_domain }}"
+      # The default provider is a Google gstatic endpoint, which would tell
+      # Google the domain of every bookmark from this host's address as it is
+      # saved.
+      LD_FAVICON_PROVIDER: "https://icons.duckduckgo.com/ip3/{domain}.ico"
+      LD_ENABLE_SNAPSHOTS: "True"
+      LD_SUPERUSER_NAME: "{{ linkding_superuser_name }}"
+      TZ: Etc/UTC
+    secrets:
+      # Create-only: once the user exists linkding logs "Skip creating initial
+      # superuser" and will NOT reset the password. Changing this value and
+      # promoting appears to succeed and changes nothing; a real password change
+      # goes through the UI or manage.py changepassword.
+      - { name: superuser-password, value: "{{ linkding_superuser_password }}", type: env, target: LD_SUPERUSER_PASSWORD }
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    health:
+      # /health calls connections["default"].ensure_connection(), so it proves
+      # the database is reachable rather than just that a socket is open.
+      # /login is a 301 to /login/ and proves nothing.
+      cmd: curl --fail --silent --output /dev/null http://localhost:9090/health
+      interval: 30s
+      start_period: 120s
+    egress: web
+    backup:
+      sqlite: { volume: data, path: db.sqlite3 }
+      volumes: [data]
