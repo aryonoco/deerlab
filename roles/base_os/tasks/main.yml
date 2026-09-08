@@ -168,6 +168,39 @@
     mode: "0644"
   notify: Restart journald
 
+- name: Configure zram swap
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      [zram0]
+      zram-size = {{ base_os_zram_size }}
+      compression-algorithm = {{ base_os_zram_algorithm }}
+    dest: /etc/systemd/zram-generator.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: base_os_zram_enabled | bool
+  register: base_os_zram_conf
+
+- name: Record whether the zram config changed
+  ansible.builtin.set_fact:
+    base_os_zram_conf_changed: "{{ base_os_zram_conf.changed | default(false) }}"
+
+# systemd-zram-generator is a generator, so the device is created during a
+# daemon-reload rather than by starting a unit. Reloading also re-runs it after
+# the size changes, which starting the swap unit alone would not.
+- name: Reload systemd for the zram generator
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: base_os_zram_conf_changed | bool
+
+- name: Enable the zram swap device
+  ansible.builtin.systemd_service:
+    name: systemd-zram-setup@zram0.service
+    state: started
+    enabled: true
+  when: base_os_zram_enabled | bool
+
 # Phase 7 — Updates
 
 - name: Enable periodic unattended upgrades

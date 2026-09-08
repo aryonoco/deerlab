@@ -18,12 +18,22 @@ base_os_packages:
   - python3-venv
   - restic
   - sqlite3
+  - systemd-zram-generator
   - unattended-upgrades
   - wireguard-tools
 
 base_os_packages_absent:
   - fail2ban
   - systemd-timesyncd
+
+# Neither host has disk swap, so before this a cgroup that reached its ceiling
+# was OOM-killed with no grace, and host-wide pressure was resolved by the
+# kernel killing something. zram compresses pages into RAM instead: microseconds
+# and some CPU rather than milliseconds of network-backed disk. It does not add
+# capacity, it buys time and turns a kill into a slowdown.
+base_os_zram_enabled: true
+base_os_zram_size: ram / 2
+base_os_zram_algorithm: zstd
 
 # init_on_alloc, randomize_kstack_offset and vsyscall=none are deliberately
 # absent: Debian already compiles them on by default, verified in
@@ -97,7 +107,12 @@ base_os_sysctl:
   fs.suid_dumpable: 0
   # Memory
   vm.mmap_min_addr: 65536
-  vm.swappiness: 10
+  # 10 was right while there was no swap at all: it told the kernel not to try.
+  # With zram the calculation inverts, because swapping is now a compression
+  # into RAM rather than a write to disk. 60 is the kernel's own default and
+  # lets zram engage under real pressure without the kernel reaching for it
+  # eagerly.
+  vm.swappiness: 60
   # Network
   net.ipv4.ip_forward: 0
   net.ipv6.conf.all.forwarding: 0
