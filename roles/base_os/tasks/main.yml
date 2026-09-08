@@ -49,13 +49,24 @@
     - /etc/default/grub.d
     - /etc/needrestart/conf.d
     - /etc/chrony/conf.d
-    # Watched by the audit rules below and created by roles that run later.
-    # auditctl aborts the whole ruleset on one missing watch path, so on a
-    # stock image the rules would fail to load and take auditd down with them.
-    # /etc/deerlab is 0755 on purpose: service users must traverse it to reach
-    # their own credential file under /etc/deerlab/pushover/.
+    # Watched by the audit rules below, and created here so no watch depends on
+    # something else having made its path first. auditctl rejects a watch whose
+    # parent directory is missing, and `auditctl -R` stops at the first
+    # rejected line, so every rule after it is lost - the closing `-e 1`
+    # included. Debian loads the rules from an ExecStartPost prefixed with '-',
+    # which swallows that, so auditd comes up green with a truncated ruleset
+    # and nothing pages. Measured on a host: a watch under a missing parent
+    # exits 255 and the rest of the file never loads, while one whose parent
+    # exists loads whether or not the leaf does. So /etc/containers/systemd
+    # survives only because Phase 1 installs podman, and /var/lib/systemd/linger
+    # only because /var/lib/systemd ships with systemd - linger itself is
+    # logind's, created on the first `loginctl enable-linger` in a later play.
+    # Neither is worth resting on. logind's mkdir_p tolerates the directory
+    # already existing. /etc/deerlab is 0755 on purpose: service users must
+    # traverse it to reach their own credential file under /etc/deerlab/pushover/.
     - /etc/deerlab
     - /etc/containers/systemd
+    - /var/lib/systemd/linger
 
 # Phase 3 — Accounts
 
