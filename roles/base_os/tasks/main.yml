@@ -194,12 +194,23 @@
     daemon_reload: true
   when: base_os_zram_conf_changed | bool
 
-- name: Enable the zram swap device
+# The target is the swap unit, not the setup service: systemd-zram-setup@zram0
+# has no [Install] section, the generator wires it in directly, and enabling it
+# fails even on a real apply. Starting dev-zram0.swap pulls the setup service in
+# through its own Requires=, which is the sequence upstream documents. Nothing
+# here is enabled either, because the generator re-derives both units from
+# zram-generator.conf on every boot; a stale enablement would just be another
+# thing to keep in sync. Under --check the generator has not run and the unit
+# provably cannot exist yet, so there is nothing for a dry run to compare
+# against — skip rather than fail, or every task after this one in the play
+# loses its dry-run gate too.
+- name: Start the zram swap device
   ansible.builtin.systemd_service:
-    name: systemd-zram-setup@zram0.service
+    name: dev-zram0.swap
     state: started
-    enabled: true
-  when: base_os_zram_enabled | bool
+  when:
+    - base_os_zram_enabled | bool
+    - not ansible_check_mode
 
 # Phase 7 — Updates
 
