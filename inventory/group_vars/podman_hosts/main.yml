@@ -7,3 +7,9 @@
 # root-owned file, which a service user cannot rewrite.
 podman_user_registries:
   - docker.io
+  # linkding is built by GitHub Actions and published here; the image's own
+  # org.opencontainers.image.source label points at the same org. Docker Hub
+  # serves an identical index digest, so this is a preference - but it widens
+  # what every service user on both hosts may pull from, which is why it is a
+  # deliberate line rather than a side effect of adding a service.
+  - ghcr.io
