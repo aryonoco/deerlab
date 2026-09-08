@@ -100,8 +100,9 @@ not exist.
 
 ## Services
 
-- One entry in `podman_services` per service: explicit UID from 2000, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, health command, limits, egress class and backup paths. Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, not the Quadlet's rendered `Image=` line, so an image assembled from variables will never be bumped
-- Everything else derives from that entry: the service user, its subordinate ID range, slice drop-in, firewall egress chain, Quadlet units, Podman secrets, backup unit and timer
+- One entry in `podman_services` per service: explicit UID from 2000, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, health command, egress class and backup paths. Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, not the Quadlet's rendered `Image=` line, so an image assembled from variables will never be bumped
+- Resource ceilings live in `inventory/group_vars/all/limits.yml`, not the service record: a per-container budget under `containers:` and a per-service slice budget that must be at least the sum of its containers
+- Everything else derives from the service record: the service user, its subordinate ID range, slice drop-in, firewall egress chain, Quadlet units, Podman secrets, backup unit and timer
 - **Least privilege, established empirically.** Drop all capabilities, set read-only root and no-new-privileges, then add back only what the image proves it needs, one at a time. Record in a comment beside the definition what failed and how when a capability is added, and re-test the list when the image changes
 - Subordinate ID ranges are arithmetic, not allocated. Changing a service's `uid`, or `podman_user_uid_base`/`podman_user_subid_base`/`podman_user_subid_count`, silently invalidates the file ownership recorded in every existing snapshot for that service
 
