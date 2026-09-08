@@ -15,6 +15,12 @@ OnFailure=notify-failure@%n.service
 After={{ podman_service_parent_unit }}
 PartOf={{ podman_service_parent_unit }}
 {% endif %}
+{# Without this, systemd's defaults (10s interval, burst 5) never trip: at    #}
+{# RestartSec=5 a unit manages about two restarts inside a 10s window, never  #}
+{# reaches the burst, and so never enters failed. OnFailure=notify-failure@   #}
+{# above only fires on that transition, so a crash loop would run forever    #}
+{# with no alert - the only alarm a container with no health check has.      #}
+StartLimitIntervalSec=300
 
 [Container]
 ContainerName={{ podman_service_container_name }}
