@@ -166,7 +166,16 @@ journalctl _SYSTEMD_USER_UNIT=<svc>.service _UID=<uid> --since "-10 min" -o cat
 # Anything run directly as the service user needs a working directory that user
 # can reach. Run it from /, or runuser dies on `cannot chdir`.
 cd / && runuser -u <svc> -- podman volume ls
+
+# Compressed swap. Both hosts run zram sized at half of RAM, zstd, and NO disk
+# swap. `swapon --show` shows the device; `zramctl` shows the compression
+# actually achieved. A host under memory pressure now slows down instead of
+# having a service OOM-killed - but zram buys time, not capacity.
+swapon --show
+zramctl
 ```
+
+- **`just plan` cannot prove zram is running.** `systemd-zram-generator` is a generator: the swap unit is materialised by a daemon-reload reading `/etc/systemd/zram-generator.conf`, and under `--check` the generator has not run, so the unit that would be started does not exist and the task is skipped by design — not a failure, and nothing is left disabled, because the generator re-derives the unit from that file on every boot regardless. `swapon --show` on the real host is the only way to tell whether zram is actually up; a clean dry run proves nothing about it
 
 - **`systemctl is-active --quiet deerlab-pull.service` is wrong and will mislead you.** A `Type=oneshot` unit that is *running* is `activating`, not `active`, so `is-active` exits non-zero and you conclude nothing is running while a pull is in flight. This exact mistake caused a service to be restarted underneath an operator mid-drill. Always `systemctl show deerlab-pull.service -p ActiveState --value`; `inactive` or `failed` means done
 - A healthy pull takes roughly 90 seconds, bounded by `TimeoutStartSec=20m`. The 0–300s randomised delay means two consecutive firings can land 25 minutes apart, not a clean 30
@@ -222,6 +231,9 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | Red backup dead-man **and** a Pushover alert | May mean "snapshot fine, repository unverifiable": `restic check` runs *after* the snapshot is committed and a check failure fails the unit, so `ExecStartPost` — the dead-man ping — is skipped. Read the journal before concluding the snapshot did not happen |
 | `just plan` reports one change on a converged host | The pip task, not drift. See [Delivery](#delivery) |
 | A host briefly ahead of `release` after `just apply` | Reverted by the next pull, restarting the affected unit once. Resolves when the commit is promoted |
+
+- **linkding's web container logs `Error: Can't drop privilege as nonroot user` once per start.** Upstream's supervisord declares `[supervisord] user=root` and refuses to run in a non-root container. `bootstrap.sh` has no `set -e`, does not check it, and `exec`s uwsgi anyway — so the web app serves and, more importantly, keeps *enqueueing* work. `linkding-worker.service` is what drains the queue
+- **Do NOT "fix" it by setting `LD_DISABLE_BACKGROUND_TASKS`.** That variable gates task *enqueueing*, not just supervisord: setting it stops favicons, previews, metadata refresh and snapshots being queued at all, and the worker then consumes an empty queue forever. The symptom is indistinguishable from the upstream defect the sidecar exists to avoid
 
 ### The health check does not prove the data is good
 
@@ -386,6 +398,10 @@ export XDG_RUNTIME_DIR=/run/user/<uid>
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus
 
 # 1. Stop the service. Ends `failed`, pages you. Expected.
+# For a service with a sidecar, stopping the primary stops the sidecar too
+# (PartOf=). Do NOT stop them separately and do NOT restore with the worker
+# still running: it writes to the same SQLite files inside the volume you are
+# about to replace.
 systemctl --user --machine=<svc>@ stop <svc>.service
 
 # 2. Remove the volumes. Quadlet runs the container with --rm, so stopping
@@ -395,6 +411,9 @@ cd / && runuser -u <svc> -- podman volume rm <svc>-<volume> ...
 # 3. Let the Quadlet .volume units recreate them empty. `restart`, not `start`:
 #    they are Type=oneshot RemainAfterExit=yes and are still "active" from the
 #    last boot, so `start` is a no-op.
+# A volume mounted with :U is chowned to the container user by Podman at every
+# start, so a recreated-empty volume repairs its own ownership. Nothing to chown
+# by hand.
 systemctl --user --machine=<svc>@ restart <svc>-<volume>-volume.service ...
 
 # 4. Restore each volume tree, inside the same user namespace the backup used.
@@ -489,10 +508,16 @@ systemctl --user --machine=<svc>@ start <svc>.service
 1. Add an entry to `podman_services` — `inventory/group_vars/services/main.yml` for the services host, `inventory/group_vars/edge/main.yml` for the edge — with the next UID from 2000 upward, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, a health command, limits, an egress class and a `backup:` block. Secrets go in the matching `secrets.sops.yaml`, referenced with `{{ }}`
    - Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, **not** the Quadlet's rendered `Image=` line, so an image assembled from variables is one Renovate will never bump
    - The record stays plaintext: the service key, image, ports, UID, capabilities, health command, limits and egress class are what review is *for*, and identify nothing on their own. Every field that resolves to or authenticates against something outside the repository is a `{{ }}` reference to an encrypted variable
+   - A service needing a second process — a queue consumer, a scheduler — gets a `sidecars:` entry, **not** a second `podman_services` entry. Two service users cannot share a named volume in rootless Podman, so a worker is the same service: same UID, same subordinate range, same slice, same egress chain, same backup repository, different command
+   - A sidecar inherits `image`, `user`, `group`, `volumes`, `tmpfs`, `capabilities`, `read_only`, `no_new_privileges`, `userns`, `network` and `exec`, and overrides any of them. `env` is merged, sidecar wins. `publish`, `secrets`, `health`, `backup`, `uid` and `egress` are never inherited
+   - The sidecar's unit is `After=` and `PartOf=` the primary's **generated** `.service`. So `systemctl stop <service>` stops both, and `systemctl start <service>` does **not** start the sidecar — `PartOf` propagates stop and restart only. Both units carry their own `WantedBy=default.target`, so a boot starts both in order
+   - Limits live in `inventory/group_vars/all/limits.yml`, not in the service record. Every container needs an entry under `containers:` keyed by its unit basename (`linkding`, `linkding-worker`), and the `slice:` budget must be at least their sum — `podman_user` asserts it and fails the play rather than silently throttling a container
 2. **Start from nothing and add back.** Drop all capabilities, set `read_only: true` and `no_new_privileges: true`, then add back only what the image proves it needs, one at a time, recording in a comment beside the definition what failed and how. That is how the current lists were arrived at, and why one capability that "looked required" is not in one of them
 3. Add a site block to `caddy_caddyfile` in `inventory/group_vars/edge/main.yml` pointing at `http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:<port>`, with an active health check whose URI actually reads the database, and create the DNS records
 4. Create a push monitor for the backup on the external uptime monitor and add its URL to `deerlab_deadman_urls.backup`, with a heartbeat interval covering the schedule *plus its jitter* (`RandomizedDelaySec=1800`). Create object-store credentials scoped to the service's own prefix, and add `backup_<service>_restic_password`, `backup_<service>_s3_access_key` and `backup_<service>_s3_secret_key` to the matching `secrets.sops.yaml`
+   - `roles/backup/tasks/service.yml` rejects an empty or `CHANGE-ME` dead-man URL outright, not merely a missing key. Do this step before applying, or the play fails instead of deploying a service that would otherwise page you nightly about a backup that actually worked
 5. `just plan svc1`, then merge. The service user, subordinate range, slice drop-in, firewall chain, Quadlet, secrets, backup unit and timer all derive from that one record
+   - **A brand-new service cannot be fully dry-run before its first apply.** Under `--check`, `podman_user` only *reports* that it would create the service account, so the first `podman_service` task carrying `become_user: <service>` fails with `sudo: unknown user <service>` and the play stops there. Nothing to fix: `containers.podman.podman_secret` declares no check-mode support, `check_mode: false` would make a dry run actually write, and a guard that probes for the account would be the bespoke check script this project rules out. So `just plan` verifies the new service's inventory asserts, its firewall chain and inbound rule, its subordinate ID ranges, its account and its slice and wait drop-ins — and stops there. The Quadlet units it never reaches are verified by the real apply instead, where `systemd-analyze --user --generators=true verify` runs against them. A dry run against the *other* host is unaffected, because its service account already exists
 
 - Proving a *new edge*: point `caddy_acme_ca` at the CA's staging directory URL first — staging's failure limits are far higher, so a wrong DNS record or an unreachable port 80 costs nothing. Empty selects the production CA
 
@@ -531,3 +556,5 @@ systemctl --user --machine=<svc>@ start <svc>.service
 - **The alerting path has never fired for a backup failure.** That `OnFailure=notify-failure@…` resolves in user scope is verified by `systemd-analyze --user verify`; delivery is inherited from a path proved elsewhere. A real backup failure has never been deliberately induced
 - **Retention has never actually deleted a snapshot.** Every repository is well inside `--keep-within 30d`, so `forget --prune` has only ever been a no-op beyond index maintenance. That the operator credential *can* delete is untested; that the per-service credentials can delete their own locks is tested
 - **Scale is unproven.** The repositories are hundreds of kilobytes. Nothing here says anything about restore duration, timeout headroom or hot-copy risk at gigabytes
+- **linkding's snapshots grow the repository without bound.** `data/assets/` gains an HTML copy of every bookmarked page, the `backup` role archives whole volumes with no exclude, and snapshots are **not** regenerable — unlike favicons, which the UI can refetch. The repositories were hundreds of kilobytes when the scale caveat above was written; this is the service that will falsify it first
+- **Snapshots are not yet proven to work under confinement.** The worker container ships at maximum confinement — all capabilities dropped, read-only root — and nobody has demonstrated headless Chromium running that way for this image. Favicons and preview images are expected to work; HTML snapshots are the unproven part. If snapshots stay queued, the fix is to add exactly one thing at a time and record beside the sidecar definition what failed and how, never to relax the web container, which is a separate container that nothing there touches
