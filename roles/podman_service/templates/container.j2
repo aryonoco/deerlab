@@ -3,32 +3,44 @@
 # {{ deerlab_managed }}
 # Podman 5.4.2 Quadlet. Only keys that exist in 5.4.2 belong here.
 [Unit]
-Description={{ podman_service_name }}
+Description={{ podman_service_container_name }}
 OnFailure=notify-failure@%n.service
 
 [Container]
-ContainerName={{ podman_service_name }}
-Image={{ podman_service_spec.image }}
+ContainerName={{ podman_service_container_name }}
+Image={{ podman_service_container_spec.image }}
 Pull=never
-{% for port in podman_service_spec.publish %}
+{% if podman_service_container_spec.user is defined %}
+User={{ podman_service_container_spec.user }}
+{% endif %}
+{% if podman_service_container_spec.group is defined %}
+Group={{ podman_service_container_spec.group }}
+{% endif %}
+{% for port in podman_service_container_spec.publish | default([]) %}
 PublishPort={{ port }}
 {% endfor %}
-{% if podman_service_spec.network is defined %}
-Network={{ podman_service_spec.network }}
+{% if podman_service_container_spec.network is defined %}
+Network={{ podman_service_container_spec.network }}
 {% endif %}
-{% for volume in podman_service_spec.volumes | default([]) %}
-Volume={{ podman_service_name }}-{{ volume.name }}.volume:{{ volume.mount }}
+{% for volume in podman_service_container_spec.volumes | default([]) %}
+{# :U makes Podman chown the volume's contents to the container user at every #}
+{# start. Needed when User= is set and the image ships content at the mount   #}
+{# point: Podman's copy-up into a fresh volume lands root-owned, and the      #}
+{# container then cannot write. Applied to the primary container only - a     #}
+{# sidecar is ordered After= it, so the chown has already happened, and doing #}
+{# it twice doubles a cost that grows with the file count.                    #}
+Volume={{ podman_service_name }}-{{ volume.name }}.volume:{{ volume.mount }}{{ ':U' if (volume.chown | default(false) and podman_service_parent_unit | length == 0) else '' }}
 {% endfor %}
-{% for mount in podman_service_spec.mounts | default([]) %}
+{% for mount in podman_service_container_spec.mounts | default([]) %}
 Volume={{ mount.src }}:{{ mount.dst }}{{ ':ro' if mount.ro | default(true) else '' }}
 {% endfor %}
-{% for tmpfs in podman_service_spec.tmpfs | default([]) %}
+{% for tmpfs in podman_service_container_spec.tmpfs | default([]) %}
 Tmpfs={{ tmpfs }}
 {% endfor %}
-{% for key, value in (podman_service_spec.env | default({})).items() %}
+{% for key, value in (podman_service_container_spec.env | default({})).items() %}
 Environment={{ key }}={{ value }}
 {% endfor %}
-{% for secret in podman_service_spec.secrets | default([]) %}
+{% for secret in podman_service_container_spec.secrets | default([]) %}
 {% if secret.type | default('mount') == 'env' %}
 Secret={{ podman_service_name }}-{{ secret.name }},type=env,target={{ secret.target }}
 {% else %}
@@ -36,33 +48,42 @@ Secret={{ podman_service_name }}-{{ secret.name }},type=mount,target={{ secret.t
 {% endif %}
 {% endfor %}
 DropCapability=all
-{% if podman_service_spec.capabilities | default([]) | length > 0 %}
-AddCapability={{ podman_service_spec.capabilities | join(' ') }}
+{% if podman_service_container_spec.capabilities | default([]) | length > 0 %}
+AddCapability={{ podman_service_container_spec.capabilities | join(' ') }}
 {% endif %}
-NoNewPrivileges={{ 'true' if podman_service_spec.no_new_privileges | default(true) else 'false' }}
-ReadOnly={{ 'true' if podman_service_spec.read_only | default(true) else 'false' }}
+NoNewPrivileges={{ 'true' if podman_service_container_spec.no_new_privileges | default(true) else 'false' }}
+ReadOnly={{ 'true' if podman_service_container_spec.read_only | default(true) else 'false' }}
 ReadOnlyTmpfs=true
 SeccompProfile=/usr/share/containers/seccomp.json
 Mask=/proc/acpi:/proc/kcore:/proc/keys:/proc/timer_list:/proc/sched_debug:/proc/latency_stats:/sys/firmware
-PidsLimit={{ podman_service_spec.limits.pids }}
-{% if podman_service_spec.userns is defined %}
-UserNS={{ podman_service_spec.userns }}
+{% if podman_service_container_spec.exec is defined %}
+Exec={{ podman_service_container_spec.exec }}
 {% endif %}
-HealthCmd={{ podman_service_spec.health.cmd }}
-HealthInterval={{ podman_service_spec.health.interval | default('30s') }}
-HealthStartPeriod={{ podman_service_spec.health.start_period | default('60s') }}
+PidsLimit={{ podman_service_container_spec.limits.pids }}
+{% if podman_service_container_spec.userns is defined %}
+UserNS={{ podman_service_container_spec.userns }}
+{% endif %}
+{% if podman_service_container_spec.health is defined %}
+HealthCmd={{ podman_service_container_spec.health.cmd }}
+HealthInterval={{ podman_service_container_spec.health.interval | default('30s') }}
+HealthStartPeriod={{ podman_service_container_spec.health.start_period | default('60s') }}
 HealthRetries=3
 HealthOnFailure=kill
+{# Notify=healthy makes systemd hold the unit in `activating` until the       #}
+{# container reports healthy. With no health check nothing ever reports, so   #}
+{# the unit would never reach `active` and the start would time out. The two  #}
+{# must appear and disappear together.                                        #}
 Notify=healthy
+{% endif %}
 StopTimeout=30
 
 [Service]
 Restart=always
 RestartSec=5
-TimeoutStartSec={{ podman_service_spec.start_timeout | default(300) }}
-MemoryMax={{ podman_service_spec.limits.memory }}
-CPUQuota={{ podman_service_spec.limits.cpu }}
-TasksMax={{ podman_service_spec.limits.tasks }}
+TimeoutStartSec={{ podman_service_container_spec.start_timeout | default(300) }}
+MemoryMax={{ podman_service_container_spec.limits.memory }}
+CPUQuota={{ podman_service_container_spec.limits.cpu }}
+TasksMax={{ podman_service_container_spec.limits.tasks }}
 
 [Install]
 WantedBy=default.target

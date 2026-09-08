@@ -26,7 +26,11 @@ argument_specs:
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
           limits ({memory, cpu, tasks, pids}), start_timeout (int),
-          egress (any|web|none), backup ({sqlite: {volume, path}, volumes}).
+          egress (any|web|none), backup ({sqlite: {volume, path}, volumes}),
+          user (str or int, container-side UID), group (str or int),
+          exec (str, overrides the image command), volumes entries taking
+          an optional chown boolean that makes Podman chown the volume to
+          the container user, and health being optional.
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users

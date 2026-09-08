@@ -5,6 +5,9 @@
   ansible.builtin.set_fact:
     podman_service_name: "{{ podman_service_item.key }}"
     podman_service_spec: "{{ podman_service_item.value }}"
+    podman_service_container_name: "{{ podman_service_item.key }}"
+    podman_service_container_spec: "{{ podman_service_item.value }}"
+    podman_service_parent_unit: ""
     podman_service_uid: "{{ podman_service_item.value.uid }}"
     podman_service_home: "/var/lib/{{ podman_service_item.key }}"
     podman_service_unit_dir: "{{ podman_service_unit_root }}/{{ podman_service_item.value.uid }}"
