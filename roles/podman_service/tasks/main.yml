@@ -24,15 +24,26 @@
   loop_control:
     label: "{{ item.key }}"
 
-# service.yml blocks a sidecar from INHERITING publish, secrets, health,
-# backup, uid, egress or sidecars from its parent - it does not stop a sidecar
-# from declaring one of those keys itself. base_firewall builds every host's
+# service.yml blocks a sidecar from INHERITING publish, secrets, backup, uid,
+# egress or sidecars from its parent - it does not stop a sidecar from
+# declaring one of those keys itself. base_firewall builds every host's
 # egress chains from map(attribute='publish') over the top-level
 # podman_services entries alone, so a sidecar's own PublishPort= would open a
 # port with no egress chain and no firewall rule ever written for it: a silent
 # bypass introduced by one misplaced key, not a startup failure. A sidecar
 # with no matching entry in deerlab_service_limits fails instead with a raw
 # Jinja error from deep inside service.yml; this gives that a clean fail_msg.
+#
+# health is deliberately absent from this list, even though the design
+# document is the binding authority and every other key here matches it
+# exactly. The design states a sidecar may declare its own health and
+# secrets, inheriting neither. secrets stays forbidden anyway: the
+# secret-creation loop in service.yml iterates the parent spec only, so a
+# sidecar's own secrets entry would render a Secret= reference to a Podman
+# secret that was never created, and the container would fail to start. A
+# future reader must not "restore" secrets here by reading the design
+# document alone - this narrowing is intentional and stays until the
+# secret-creation loop is taught to look at sidecars too.
 - name: Validate the sidecar definitions
   ansible.builtin.assert:
     that:
@@ -50,7 +61,6 @@
     podman_service_sidecar_parent_only_keys:
       - publish
       - secrets
-      - health
       - backup
       - uid
       - egress
