@@ -75,7 +75,7 @@ not exist.
 ## Delivery
 
 - Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, verifies the head commit's SSH signature, and applies `site.yml --limit <itself>`
-- The `Promote` workflow fast-forwards `release` to `main` after CI passes on `main`. It is the only thing that pushes `release`
+- The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only thing that pushes `release`
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 
 ## Code Quality

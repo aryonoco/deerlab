@@ -194,8 +194,9 @@ and applies `playbooks/site.yml --limit <itself>`.
    your machine** so your signature stays on the head commit, then runs
    `git verify-commit HEAD` — the same check the hosts run. GitHub's own merge
    buttons rewrite or re-sign commits and the hosts would reject the result.
-3. The `Promote` workflow fast-forwards `release` to `main` after CI passes on
-   `main`. It is the only thing that pushes `release`.
+3. The `Promote` workflow fast-forwards `release` to the commit CI passed on,
+   not to whatever `main` points at by the time it runs. It is the only thing
+   that pushes `release`.
 4. Within 30 minutes both hosts apply it. To make it sooner:
 
        mise x -- ansible <host> -b -m ansible.builtin.shell \
