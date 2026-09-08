@@ -67,11 +67,18 @@ table inet deerlab {
     type filter hook output priority filter; policy accept;
     ct state established,related accept
     ct state invalid drop
-    oifname "lo" accept
     meta skuid 0 accept
 {% for name, svc in base_firewall_services.items() %}
     meta skuid {{ svc.uid }} jump svc_{{ name }}
 {% endfor %}
+{# Below the per-UID jumps on purpose. Linux routes a packet addressed to any #}
+{# local address out lo - 127.0.0.0/8, the host's own public addresses and #}
+{# its own tunnel address alike - so an accept placed above the jumps exempts #}
+{# every egress class from its own rules, and a request-forgery bug in a #}
+{# confined service could reach sshd or anything a neighbour publishes on the #}
+{# wildcard address. The svc chains emit their resolver accepts before the #}
+{# private-range drops, so a loopback stub resolver keeps working from here. #}
+    oifname "lo" accept
   }
 {% if base_firewall_role == 'edge' %}
 
