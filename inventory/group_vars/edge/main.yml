@@ -43,6 +43,25 @@ caddy_caddyfile: |
       }
   }
 
+  linkding.{{ deerlab_domain }} {
+      log {
+          output stdout
+          format json
+      }
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8081 {
+          # /health calls ensure_connection(), so an unhealthy backend is one
+          # whose database is unreachable - not merely one whose socket closed.
+          health_uri /health
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          # Long enough to cover the services host restarting the backend.
+          # Without it an edge reboot serves "503 no upstreams available" until
+          # the first passive probe lands.
+          lb_try_duration 30s
+      }
+  }
+
 podman_services:
   caddy:
     uid: 2000
