@@ -40,5 +40,5 @@
     - systemd-logind
     - polkit
   notify:
-    - Reload systemd
+    - Reload systemd for base_os
     - Flag reboot required

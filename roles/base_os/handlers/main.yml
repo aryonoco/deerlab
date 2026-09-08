@@ -29,6 +29,6 @@
     cmd: service auditd restart
   changed_when: true
 
-- name: Reload systemd
+- name: Reload systemd for base_os
   ansible.builtin.systemd_service:
     daemon_reload: true
