@@ -60,9 +60,16 @@ Consequences to internalise:
 - A process that does not inherit `SOPS_AGE_KEY_CMD` cannot decrypt anything.
   If a command fails to find a key, export the variable *inline in front of the
   command* rather than writing a key file.
-- Never set `SOPS_AGE_KEY_FILE` or create `~/.config/sops/age/keys.txt`. `sops`
-  checks the file variable **before** the command variable, so a stray key file
-  silently retires the vault route and puts the identity back on disk.
+- **On the operator's machine**, never set `SOPS_AGE_KEY_FILE` or create
+  `~/.config/sops/age/keys.txt`. `sops` checks the file variable **before** the
+  command variable, so a stray key file silently retires the vault route and
+  puts the identity back on disk.
+- **On the hosts it is the opposite, by design.** There is no vault and no
+  interactive shell there, so `deerlab-pull.service` sets
+  `Environment=SOPS_AGE_KEY_FILE=/etc/deerlab/age.key` — a root-only 0400 file
+  generated on the host at bootstrap. Each host decrypts with its own key, which
+  is why every host must be a recipient in `.sops.yaml` before its first
+  unattended pull can succeed.
 - If a `sops`, `ansible` or `just` command **hangs** instead of failing, the
   vault is locked. Unlock it and retry. A hang is not a decryption error.
 - Losing the identity means losing the estate's configuration secrets
@@ -101,7 +108,7 @@ cannot reach the credential that could erase everything.
 | | edge host (`edge1`) | services host (`svc1`) |
 | --- | --- | --- |
 | Group | `edge`, `podman_hosts` | `services`, `podman_hosts` |
-| Public inbound | tcp 22, 80, 443; udp 443; udp WireGuard port | tcp 22; udp WireGuard port, **from the edge's public address only** |
+| Public inbound | tcp 22, 80, 443, **8080, 8443**; udp 443, **8443**; udp WireGuard port | tcp 22; udp WireGuard port, **from the edge's public address only** |
 | Runs | sshd, Caddy | sshd, application services |
 | Service users | `caddy`, uid 2000 | `wallabag`, uid 2001 |
 
@@ -127,11 +134,13 @@ cannot reach the credential that could erase everything.
   its own backup repository. One service definition in inventory derives all of
   them.
 - **Subordinate ID ranges are arithmetic, not allocated**:
-  `subid_base + (uid - uid_base) * subid_count`, from
+  `podman_user_subid_base + (uid - podman_user_uid_base) * podman_user_subid_count`,
+  from
   `roles/podman_user/templates/subid.j2`. A rebuilt host derives the same
   mapping from the same inventory, which is what makes a restore portable. The
   corollary is a live hazard: **changing a service's `uid`, or
-  `podman_user_uid_base` / `subid_base` / `subid_count`, silently invalidates
+  `podman_user_uid_base` / `podman_user_subid_base` /
+  `podman_user_subid_count`, silently invalidates
   the file ownership recorded in every existing snapshot for that service.**
 
 ## Where everything lives on a host
@@ -220,7 +229,9 @@ a fault, but it will restart the affected units when it happens.
 
 Neither host permits root SSH. Connect as the admin user
 (`{{ deerlab_admin_user }}`, encrypted in `inventory/group_vars/all/`) and
-escalate with `sudo -i`; ad-hoc Ansible needs `-b`.
+escalate with `sudo -i`. `ansible.cfg` sets `become = true` globally, so ad-hoc
+Ansible already escalates without `-b`; the examples here pass it anyway, so they
+still read correctly out of context.
 
     # Is a pull running? `systemctl is-active --quiet` LIES here - see below.
     systemctl show deerlab-pull.service -p ActiveState --value
@@ -298,7 +309,9 @@ rule before looking anywhere else.
 Two independent channels, deliberately sharing no failure domain:
 
 - **Pushover, direct from each host**, attached with `OnFailure=` to every
-  Quadlet, every backup unit, the pull unit and the firewall unit. A failing
+  Quadlet, every backup unit, the pull unit, and the host units listed in
+  `base_notify_onfailure_units` — `nftables.service` and
+  `systemd-networkd.service`. The reboot-required timer posts the same way. A failing
   unit reports itself. Notifications leave the host directly and depend on
   neither the edge nor the external monitor — an outage of the thing that
   watches must not also silence the thing that reports.
@@ -508,12 +521,16 @@ push it, keep the script in a file and use `-a "$(cat step.sh)"`.
     s=/var/lib/<svc>/backup/restore
     r=$s/var/lib/<svc>/backup/staging/<db file>
     rm -rf "$s"
-    restic restore latest --target "$s" --include /var/lib/<svc>/backup/staging/<db file>
+    /usr/bin/restic restore latest --target "$s" --include /var/lib/<svc>/backup/staging/<db file>
     test -s "$r"
-    test "$(sqlite3 "$r" "PRAGMA integrity_check")" = ok
+    test "$(/usr/bin/sqlite3 "$r" "PRAGMA integrity_check")" = ok
+    # Take ownership and mode from the file being replaced. The fallback is
+    # this application's container uid, not a universal one - see below.
+    own=$(stat -c '%u:%g' "$d/<db file>" 2>/dev/null || echo 65534:65534)
+    mode=$(stat -c '%a' "$d/<db file>" 2>/dev/null || echo 644)
     cp "$r" "$d/<db file>.restored"
-    chown 65534:65534 "$d/<db file>.restored"
-    chmod 0644 "$d/<db file>.restored"
+    chown "$own" "$d/<db file>.restored"
+    chmod "$mode" "$d/<db file>.restored"
     rm -f "$d/<db file>-wal" "$d/<db file>-shm" "$d/<db file>-journal"
     mv -f "$d/<db file>.restored" "$d/<db file>"
     rm -rf "$s"
@@ -533,17 +550,22 @@ Why each of those lines is the way it is:
   truncates and rewrites the live inode; anything that reads it mid-copy — an
   `ansible-pull`-triggered start, for instance — sees a torn file. A rename
   within one filesystem is atomic.
-- **Set the mode explicitly, not just the owner.** `cp` onto an *existing* file
-  keeps that file's mode, but in the disaster this procedure is for the file may
-  be gone, and the mode would then come from the transient unit's umask.
+- **Set owner and mode explicitly, read off the file being replaced.** `cp`
+  onto an *existing* file keeps that file's mode, but in the disaster this
+  procedure is for the file may be gone, and owner and mode would then come from
+  the transient unit's umask. Reading them with `stat` first means the procedure
+  carries no service-specific constant whenever the live file is present.
 - **Remove `-journal` as well as `-wal` and `-shm`.** This database is not in
   WAL mode, so no `-wal`/`-shm` exist at all; `-journal`, the rollback journal,
   is the file that can actually re-corrupt a freshly restored database. Removing
   all three costs nothing.
-- **`chown 65534:65534` is correct and looks wrong.** Inside `podman unshare`
-  the service user is uid 0 and the container's web server user maps to
-  namespace uid 65534. `ls` renders it as `nobody nogroup` from the host's
-  `/etc/passwd`; it is a real mapped id, not an unmapped one.
+- **`65534:65534 644` is only the fallback, and it is not universal.** It is
+  *this* application's container uid: inside `podman unshare` the service user is
+  uid 0 and this image's web server user maps to namespace uid 65534. `ls`
+  renders it as `nobody nogroup` from the host's `/etc/passwd`; it is a real
+  mapped id, not an unmapped one. **Another image will map a different uid**, so
+  check the live tree with `stat` before trusting the fallback, and never copy
+  this number into a procedure for a different service.
 - `restic restore --include` still creates the whole parent directory chain, so
   the file lands at a nested absolute path under `--target` and the summary
   reads something like `Restored 6 / 1 files/dirs`. That is normal.
@@ -667,6 +689,14 @@ that state from a correct one, because every check asks whether the database is
 
 ### The sequence
 
+> **This sequence has never been run end to end.** Every restore drill so far
+> was onto a host that already had its service user, subordinate ranges, Quadlet
+> units, pulled image, Podman secrets, backup credentials, user manager, tunnel
+> and firewall. Steps 2 and 3 below are drilled; step 1 is inference from the
+> fact that these hosts were themselves built this way. Expect to debug, budget
+> accordingly, and read
+> [What is not proven](#what-is-not-proven) before you start.
+
 The realistic order on a genuinely new host is *not* "restore, then start". It
 is:
 
@@ -705,8 +735,32 @@ data is verified.
    `base_wireguard_public_key`. It is deliberately plaintext: it is derived from
    the private key, it is handed to the peer by design, and keeping it clear
    stops each host having to decrypt the other's host vars.
-   `base_wireguard_public_endpoint` is derived from `ansible_host` and the
-   WireGuard port, so it does not need its own value.
+   **`base_wireguard_public_endpoint` is not uniform across the two hosts, and
+   getting it wrong degrades the tunnel silently.** Its role default is the
+   empty string. The services host derives its own in
+   `inventory/host_vars/svc1/main.yml` from `ansible_host` and the WireGuard
+   port; the edge carries an explicit value in its own
+   `inventory/host_vars/edge1/secrets.sops.yaml` and defines none in
+   `main.yml`. Each host builds its peer list from the **other** host's value,
+   and `roles/base_wireguard/templates/wg.netdev.j2` emits **neither
+   `Endpoint=` nor `PersistentKeepalive=`** when that value is empty.
+
+   So a replacement host must be given an endpoint one way or the other —
+   explicitly in its `secrets.sops.yaml`, or derived in its `main.yml` as the
+   services host does. Miss it and the *other* host has nothing to send to and
+   no keepalive to hold the path open, so it cannot initiate. That is the
+   asymmetry described under
+   [Reboots and planned maintenance](#reboots-and-planned-maintenance), only
+   mirrored — and it will not fail outright, because the host that still has an
+   endpoint keeps initiating. It stays hidden until the host that still has one
+   is the host that reboots. **A rebuilt edge is the dangerous case**, because
+   the edge is the one whose value is explicit rather than derived, so it is the
+   one that is easy to leave empty.
+
+   After bootstrapping either host, confirm from the **peer** that it has an
+   endpoint for the new host before you consider the tunnel done:
+
+       mise x -- ansible <peer> -m ansible.builtin.shell -a 'wg show wg0 endpoints'
 3. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`.
    That run connects as root with `base_pull_enabled=false`, because a host
    being bootstrapped is not yet a SOPS recipient and its first unattended pull
@@ -730,9 +784,12 @@ path back.
 1. Add an entry to `podman_services` — in
    `inventory/group_vars/services/main.yml` for the services host, or
    `inventory/group_vars/edge/main.yml` for the edge. Give it the next UID from
-   2000 upward, a fully qualified digest-pinned image written literally on the
-   `Image=` line so Renovate can bump it, published ports, volumes, tmpfs, a
-   health command, limits, an egress class and a `backup:` block. Secrets go in
+   2000 upward, a fully qualified digest-pinned image written as a literal
+   `image:` value, published ports, volumes, tmpfs, a health command, limits, an
+   egress class and a `backup:` block. Renovate's custom manager matches
+   `image:` lines under `inventory/group_vars/` — not the Quadlet's `Image=`
+   line, which the role renders — so an image assembled from variables is one
+   Renovate will never bump. Secrets go in
    the matching `secrets.sops.yaml` and are referenced from the definition with
    `{{ }}`.
 

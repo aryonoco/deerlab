@@ -29,13 +29,30 @@ not exist.
 - Tool versions are managed by mise — `mise.toml` is the single source of truth, Python tools included
 - Run `just ci` before committing. It is the only gate; there are no git hooks, and `--no-verify` is never the answer
 - Never hardcode credentials. All secrets use SOPS + age; recipients are listed in `.sops.yaml`
-- **This repository is public.** Encrypt everything useful to an attacker, not
-  just credentials: addresses, hostnames, domains, accounts, keys, endpoints,
-  ports, bucket names and tunnel topology all belong in SOPS. Plaintext is for
-  values that are already public knowledge or meaningless alone. When adding a
-  variable, the default is to encrypt it — justify plaintext, never the reverse.
-  This applies to prose and comments as much as to values: the only real leak
-  ever found here was a comment naming a hosting provider
+- **This repository is public, and there are two categories here, not one.**
+
+  *Encryption genuinely protects these — keep encrypting them with full rigour:*
+  public IP addresses, tunnel addresses and topology, the WireGuard port,
+  object-store bucket names and endpoints, dead-man URLs, SSH and WireGuard
+  keys, password hashes, and every credential. For a variable of this kind the
+  default is to encrypt it — justify plaintext, never the reverse. The rule
+  covers prose and comments as much as values: the only real leak ever found
+  here was a comment naming a hosting provider.
+
+  *Encryption cannot protect these, and the policy must not pretend otherwise:*
+  the site's domain and its hostnames. Caddy obtains certificates from a public
+  CA, and every issued certificate is published to Certificate Transparency
+  logs — so each hostname became publicly searchable the moment it was issued,
+  and the domain is in this repository's own REUSE headers besides. Keeping them
+  as `{{ }}` references is still right, because it keeps one definition instead
+  of scattering the domain through the tree, but it buys indirection, not
+  secrecy. Never build a control on the assumption that they are hidden, and
+  never describe them as hidden.
+
+  Neither category licenses relaxing the other. A policy that overstates what it
+  protects is worse than one that admits its limits, because it stops the reader
+  being careful exactly where care pays.
+
 - Targets run Podman 5.4.2. Quadlet files may only use keys that exist in 5.4.2 — never `Memory=`, never `Wants=`/`After=` naming a `.container`; both arrived in 5.5
 - Never put systemd sandboxing directives in a Quadlet `[Service]` section. In a user manager they implicitly enable private user namespaces or no-new-privileges on the Podman process itself and break rootless operation
 - Never run Podman as root. Every Podman or `systemctl --user` task sets `become_user` to the service user and puts **both** `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` in the task environment; without the second, Podman silently falls back to the cgroupfs manager, which also disables health checks
@@ -83,23 +100,23 @@ not exist.
 
 ## Services
 
-- One entry in `podman_services` per service: explicit UID from 2000, a fully qualified digest-pinned image written literally on the `Image=` line so Renovate can bump it, published ports, volumes, tmpfs, health command, limits, egress class and backup paths
+- One entry in `podman_services` per service: explicit UID from 2000, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, health command, limits, egress class and backup paths. Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, not the Quadlet's rendered `Image=` line, so an image assembled from variables will never be bumped
 - Everything else derives from that entry: the service user, its subordinate ID range, slice drop-in, firewall egress chain, Quadlet units, Podman secrets, backup unit and timer
 - **Least privilege, established empirically.** Drop all capabilities, set read-only root and no-new-privileges, then add back only what the image proves it needs, one at a time. Record in a comment beside the definition what failed and how when a capability is added, and re-test the list when the image changes
-- Subordinate ID ranges are arithmetic, not allocated. Changing a service's `uid`, or `podman_user_uid_base`/`subid_base`/`subid_count`, silently invalidates the file ownership recorded in every existing snapshot for that service
+- Subordinate ID ranges are arithmetic, not allocated. Changing a service's `uid`, or `podman_user_uid_base`/`podman_user_subid_base`/`podman_user_subid_count`, silently invalidates the file ownership recorded in every existing snapshot for that service
 
 ## Development Environment
 
 - Work runs directly on the operator's macOS host. There is no devcontainer
 - Tool versions come from `mise.toml`; run `just setup`. `wireguard-tools` and an HTTP/3-capable `curl` come from Homebrew alongside them
 - The SOPS age identity is **not on disk**. It is fetched from the operator's password manager at runtime through `SOPS_AGE_KEY_CMD`, which the login shell exports. A process that does not inherit it cannot decrypt — prefix the command rather than writing the key to a file
-- Never set `SOPS_AGE_KEY_FILE` or create a keys file. `sops` prefers the file variable over the command variable, so either would silently retire the vault route and put the identity back on disk
+- **On the operator's machine**, never set `SOPS_AGE_KEY_FILE` or create a keys file. `sops` prefers the file variable over the command variable, so either would silently retire the vault route and put the identity back on disk. **On the hosts it is set deliberately** — `deerlab-pull.service` carries `Environment=SOPS_AGE_KEY_FILE=/etc/deerlab/age.key`, because there is no vault and no interactive shell there. The prohibition is about the operator's machine only
 - A `sops`, `ansible` or `just` command that **hangs** rather than failing means the vault is locked, not that decryption failed
 
 ## Secrets
 
 - Encrypted files (`*.sops.yaml`) are committed with values encrypted. Ciphertext in a public repository is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total: never commit a value you would not accept being decrypted later
-- Encrypt identifiers, not just credentials. A reader of this repository must not be able to learn where the hosts are, what they are called, who logs into them, or how they are connected
+- Encrypt identifiers, not just credentials — while being honest about which ones encryption actually protects. A reader of this repository must not be able to learn the hosts' public addresses, the tunnel's addressing or ports, where the backups live, or anything that authenticates. The public domain and its hostnames are the separate case described under CRITICAL above
 - `secrets/` has its own creation rule, listed first, encrypted to the operator key alone. Nothing on a host reads it: it holds the object-store credential that can erase backup history, so a host key on it would mean a compromise of either host also destroys the path back
 - sops matches creation rules against the **absolute** path, so a `secrets/` rule must be anchored `(^|/)secrets/…`. An anchor that matches nothing makes `updatekeys` report success while changing nothing
 - Plaintext exceptions must earn it. `base_wireguard_public_key` is plaintext because it is derived from the private key, is handed to the peer by design, and keeping it clear stops each host having to decrypt the other's host vars
@@ -120,6 +137,7 @@ secrets/            # operator-only credentials, outside the inventory
 - Two Debian 13 VPSs. The edge terminates TLS and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
 - The hosts are linked by kernel WireGuard through `systemd-networkd`. The services host's only public listeners are SSH and WireGuard, the latter scoped by the firewall to the edge's public address alone
 - **Both peers carry an `Endpoint=`**, so either host can restore the tunnel alone. An earlier asymmetric design left the edge unable to initiate after a reboot and produced up to 180 seconds of `503 no upstreams available` per edge reboot. Do not remove either endpoint or the source-scoped inbound rule that makes them work
+- The two endpoints are not configured the same way: the services host derives `base_wireguard_public_endpoint` in its `main.yml`, the edge carries an explicit value in its `secrets.sops.yaml`, and the role default is the empty string. The template silently drops both `Endpoint=` and `PersistentKeepalive=` when it is empty, so a host rebuilt without one leaves its *peer* unable to initiate — degraded, not failed, and therefore easy to miss. See `docs/runbook.md`, Bootstrapping a host
 - Backends publish on the wildcard address, never on the tunnel address; a unit that binds the tunnel address races the interface at boot and fails hard on Podman 5.4.2. The firewall is what scopes a backend to the tunnel
 - Per-service restic backups to an object store, one repository and one prefix-scoped credential per service, verified on every run. Retention runs only from the operator's machine
 - Failure is reported by Pushover directly from each host; absence is reported by dead-man push monitors on an external uptime monitor. The two share no failure domain, deliberately
