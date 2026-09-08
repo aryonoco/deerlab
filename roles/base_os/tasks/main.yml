@@ -107,6 +107,9 @@
   loop_control:
     label: "{{ item.key }}"
 
+# blacklist and install /bin/false stop future loads. A module the provider's
+# image already had resident stays resident, so this takes effect on reboot
+# like every other kernel change in this role.
 - name: Block modules that will never be legitimately loaded
   ansible.builtin.template:
     src: modprobe-blocklist.conf.j2
@@ -114,6 +117,7 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Flag reboot required
 
 - name: Check that GRUB is the boot loader
   ansible.builtin.stat:

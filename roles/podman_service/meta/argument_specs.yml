@@ -20,8 +20,10 @@ argument_specs:
           (list of host:container[/udp]), volumes (list of {name, mount}),
           mounts (list of {src, dst, ro}), tmpfs (list of strings),
           env (dict), secrets (list of {name, value, type, target}),
-          config_files (list of {path, content, mode}), capabilities
-          (list), read_only (bool), no_new_privileges (bool), userns
+          config_files (list of {path, content, mode, banner}, banner
+          being the format's comment marker, which prefixes the file
+          with the managed header), capabilities (list),
+          read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
           limits ({memory, cpu, tasks, pids}), start_timeout (int),
           egress (any|web|none), backup ({sqlite: {volume, path}, volumes}).

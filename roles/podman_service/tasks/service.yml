@@ -30,9 +30,15 @@
     label: "{{ item.path | dirname }}"
   when: item.path | dirname | length > 0
 
+# banner is the file format's comment marker, and carries the same "edit the
+# repository, not this file" line every other generated file on either host
+# gets. It is optional because config_files is generic: a format with no
+# comment syntax cannot take one.
 - name: Write the config files of {{ podman_service_name }}
   ansible.builtin.copy:
-    content: "{{ item.content }}"
+    content: |-
+      {% if item.banner is defined %}{{ item.banner }} {{ deerlab_managed }}
+      {% endif %}{{ item.content }}
     dest: "{{ podman_service_home }}/{{ item.path }}"
     owner: "{{ podman_service_name }}"
     group: "{{ podman_service_name }}"

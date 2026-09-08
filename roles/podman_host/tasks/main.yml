@@ -45,6 +45,9 @@
       - "{{ podman_host_min_passt_version }}"
   changed_when: false
 
+# A malformed render here makes every image pull on the host fail, so it gets
+# the same treatment as every other structured file this repository writes.
+# check-json in `just ci` proves the same idiom against the tracked JSON.
 - name: Reject unlisted registries system-wide
   ansible.builtin.template:
     src: policy.json.j2
@@ -53,6 +56,7 @@
     group: root
     mode: "0644"
     backup: true
+    validate: python3 -c "import sys,json;json.load(open(sys.argv[1]))" %s
 
 - name: Disable short image names
   ansible.builtin.copy:

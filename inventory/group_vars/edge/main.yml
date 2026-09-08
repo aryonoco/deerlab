@@ -62,7 +62,7 @@ podman_services:
     env:
       TZ: Etc/UTC
     config_files:
-      - { path: config/Caddyfile, content: "{{ caddy_caddyfile }}", mode: "0640" }
+      - { path: config/Caddyfile, content: "{{ caddy_caddyfile }}", mode: "0640", banner: "#" }
     # The official binary carries a file capability and will not exec with
     # everything dropped. NET_BIND_SERVICE is confined to Caddy's namespace.
     capabilities:
