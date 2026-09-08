@@ -7,10 +7,15 @@
       - item.value.uid is defined
       - item.value.uid | int >= podman_user_uid_base
       - item.value.egress in ['any', 'web', 'none']
+      # Ansible evaluates `that:` in order and stops at the first false
+      # condition, so this guard has to run before the three indexing checks
+      # below - without it, a service missing from deerlab_service_limits
+      # dies as a raw Jinja KeyError instead of this assert's own fail_msg.
+      - item.key in podman_user_limits
       - podman_user_limits[item.key].slice.memory is defined
       - podman_user_limits[item.key].slice.cpu is defined
       - podman_user_limits[item.key].slice.tasks is defined
-    fail_msg: "service {{ item.key }} needs uid >= {{ podman_user_uid_base }}, an egress class, and a slice budget in deerlab_service_limits"
+    fail_msg: "service {{ item.key }} needs uid >= {{ podman_user_uid_base }}, an egress class, and an entry with a slice budget in deerlab_service_limits"
     quiet: true
   loop: "{{ podman_user_services | dict2items }}"
   loop_control:

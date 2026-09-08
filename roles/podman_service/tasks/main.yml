@@ -7,11 +7,18 @@
       - item.value.image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$')
       - item.value.publish is defined
       - item.value.health.cmd is defined
+      # Ansible evaluates `that:` in order and stops at the first false
+      # condition, so this guard has to run before the two indexing checks
+      # below - without it, a service missing from deerlab_service_limits
+      # dies as a raw Jinja KeyError instead of this assert's own fail_msg.
+      - item.key in podman_service_limits
+      - item.key in podman_service_limits[item.key].containers
       - podman_service_limits[item.key].containers[item.key].pids is defined
       - (item.value.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
     fail_msg: >-
       service {{ item.key }} needs a fully qualified digest-pinned image, publish,
-      health.cmd, a pids limit in deerlab_service_limits, and no CHANGE-ME secrets
+      health.cmd, an entry with a pids limit in deerlab_service_limits, and no
+      CHANGE-ME secrets
     quiet: true
   loop: "{{ podman_service_services | dict2items }}"
   loop_control:
