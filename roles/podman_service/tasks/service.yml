@@ -144,7 +144,18 @@
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
          or (podman_service_secrets.changed | default(false)) }}
+    podman_service_reload: >-
+      {{ (podman_service_units | selectattr('changed') | list | length > 0)
+         or (podman_service_volume_units.changed | default(false))
+         or (podman_service_config_files.changed | default(false))
+         or (podman_service_secrets.changed | default(false)) }}
 
+# Broader than podman_service_restart on purpose: Quadlet regenerates a
+# .service unit only on a daemon-reload, so a sidecar-only change that skipped
+# this would write the new .container file, leave the stale generated unit in
+# place, and then restart that stale unit below. systemd-analyze verify would
+# still pass, because it reads the new file directly rather than the stale
+# generated one, so nothing would catch the mismatch.
 - name: Reload the user manager of {{ podman_service_name }}
   ansible.builtin.systemd_service:
     daemon_reload: true
@@ -152,7 +163,7 @@
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
-  when: podman_service_restart | bool
+  when: podman_service_reload | bool
 
 - name: Verify the generated units of {{ podman_service_name }}
   ansible.builtin.command:
