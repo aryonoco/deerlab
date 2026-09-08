@@ -204,10 +204,19 @@
 # provably cannot exist yet, so there is nothing for a dry run to compare
 # against — skip rather than fail, or every task after this one in the play
 # loses its dry-run gate too.
+# Restarted rather than merely started when the config moved, because the size
+# and the compression algorithm are applied by systemd-zram-setup@ when the
+# device is set up and never re-read afterwards. Starting an already-active
+# device is a no-op, so without this a changed zram-generator.conf has no effect
+# until the next reboot - and on a host's very first run the device can come up
+# on the generator's own defaults (4 GB, lz4) while the file on disk says
+# something else entirely, which is exactly what happened to both hosts here.
+# Gated on the file having changed: swapoff has to fault every swapped page back
+# into RAM, which is not something to do on every run.
 - name: Start the zram swap device
   ansible.builtin.systemd_service:
     name: dev-zram0.swap
-    state: started
+    state: "{{ 'restarted' if base_os_zram_conf_changed | bool else 'started' }}"
   when:
     - base_os_zram_enabled | bool
     - not ansible_check_mode
