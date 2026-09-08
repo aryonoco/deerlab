@@ -17,6 +17,49 @@
   loop_control:
     label: "{{ item.key }}"
 
+# service.yml blocks a sidecar from INHERITING publish, secrets, health,
+# backup, uid, egress or sidecars from its parent - it does not stop a sidecar
+# from declaring one of those keys itself. base_firewall builds every host's
+# egress chains from map(attribute='publish') over the top-level
+# podman_services entries alone, so a sidecar's own PublishPort= would open a
+# port with no egress chain and no firewall rule ever written for it: a silent
+# bypass introduced by one misplaced key, not a startup failure. A sidecar
+# with no matching entry in deerlab_service_limits fails instead with a raw
+# Jinja error from deep inside service.yml; this gives that a clean fail_msg.
+- name: Validate the sidecar definitions
+  ansible.builtin.assert:
+    that:
+      - podman_service_sidecar_forbidden_hits | length == 0
+      - podman_service_sidecar_missing_limits | length == 0
+    fail_msg: >-
+      service {{ item.key }}: sidecars declaring a parent-only key
+      {{ podman_service_sidecar_forbidden_hits }}; sidecars missing a
+      deerlab_service_limits containers entry {{ podman_service_sidecar_missing_limits }}
+    quiet: true
+  loop: "{{ podman_service_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    podman_service_sidecar_parent_only_keys:
+      - publish
+      - secrets
+      - health
+      - backup
+      - uid
+      - egress
+      - sidecars
+    podman_service_sidecar_forbidden_hits: >-
+      {{ (item.value.sidecars | default({}) | dict2items | map(attribute='key') | list)
+         | zip(item.value.sidecars | default({}) | dict2items | map(attribute='value')
+               | map('list') | map('intersect', podman_service_sidecar_parent_only_keys) | list)
+         | rejectattr('1', 'equalto', [])
+         | list }}
+    podman_service_sidecar_missing_limits: >-
+      {{ item.value.sidecars | default({}) | dict2items | map(attribute='key')
+         | map('regex_replace', '^(.*)$', item.key ~ '-\1')
+         | difference(podman_service_limits[item.key].containers | default({}) | dict2items
+                      | selectattr('value.pids', 'defined') | map(attribute='key') | list) }}
+
 - name: Deploy each service
   ansible.builtin.include_tasks: service.yml
   loop: "{{ podman_service_services | dict2items }}"
