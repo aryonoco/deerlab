@@ -131,3 +131,26 @@ podman_services:
     backup:
       sqlite: { volume: data, path: db.sqlite3 }
       volumes: [data]
+    sidecars:
+      worker:
+        # Huey's consumer, run directly rather than under supervisord.
+        # supervisord cannot run here at all: both its configs declare
+        # [supervisord] user=root and it refuses to start when it cannot drop
+        # privilege. This is the command its own config would have run.
+        exec: python manage.py run_huey -f
+        env:
+          # manage.py defaults to bookmarks.settings, whose __init__ tries dev
+          # and falls back to prod. uwsgi.ini sets this explicitly rather than
+          # relying on that fallback, so this does too.
+          DJANGO_SETTINGS_MODULE: bookmarks.settings.prod
+          # supervisord set HOME=/tmp/home for Chromium and nothing ever created
+          # the directory. We do not run supervisord, so set it somewhere that
+          # exists.
+          HOME: /tmp
+        tmpfs:
+          - "/tmp:rw,nosuid,nodev,size=1g,uid=33,gid=33"
+          # single-file-cli passes --user-data-dir=./chromium-profile, relative
+          # to WORKDIR /etc/linkding, which is read-only. The directory exists
+          # in the image owned by www-data; this makes it writable without
+          # touching the image.
+          - "/etc/linkding/chromium-profile:rw,nosuid,nodev,size=256m,uid=33,gid=33"
