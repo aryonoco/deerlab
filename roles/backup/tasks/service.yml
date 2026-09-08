@@ -31,6 +31,8 @@
       - backup_s3_secret_key | length > 0
       - backup_s3_secret_key != 'CHANGE-ME'
       - backup_deadman_urls[backup_name] is defined
+      - backup_deadman_urls[backup_name] | length > 0
+      - backup_deadman_urls[backup_name] != 'CHANGE-ME'
     fail_msg: "backup credentials or dead-man URL for {{ backup_name }} are not set"
     quiet: true
 
