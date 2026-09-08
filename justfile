@@ -204,5 +204,29 @@ restore-drill service:
     export RESTIC_REPOSITORY="$(sops -d --extract '["backup_s3_bucket"]' inventory/group_vars/all/secrets.sops.yaml)/{{ service }}"
     export RESTIC_PASSWORD_COMMAND="sops -d --extract '[\"backup_{{ service }}_restic_password\"]' $secrets"
     sops exec-env secrets/backup-admin.sops.yaml "restic restore latest --target $target"
-    find "$target" -name '*.sqlite' -print -exec sqlite3 {} 'PRAGMA integrity_check' \;
-    echo "Restored to $target"
+    # The drill exists to be able to fail, and `find -exec` cannot: it exits 0
+    # whether it matched nothing or ran sqlite3 over a corrupt database, because
+    # sqlite3 itself exits 0 on corruption. So count what came back and test the
+    # answer, the same shape the backup unit uses.
+    mapfile -t restored < <(find "$target" -type f)
+    if [[ ${#restored[@]} -eq 0 ]]; then
+        echo "ERROR: restored nothing to $target. Wrong repository, or an empty snapshot." >&2
+        exit 1
+    fi
+    mapfile -t dbs < <(find "$target" -type f -name '*.sqlite')
+    if [[ ${#dbs[@]} -eq 0 ]]; then
+        echo "ERROR: ${#restored[@]} file(s) restored to $target, but no *.sqlite to check." >&2
+        echo "If {{ service }} keeps a database, the snapshot has lost it. If it keeps none, this drill can prove nothing about it: read the restored tree by hand." >&2
+        exit 1
+    fi
+    for db in "${dbs[@]}"; do
+        if ! answer="$(sqlite3 "$db" 'PRAGMA integrity_check' 2>&1)"; then
+            answer="sqlite3 exited non-zero: $answer"
+        fi
+        if [[ "$answer" != ok ]]; then
+            echo "ERROR: $db failed integrity_check: $answer" >&2
+            exit 1
+        fi
+        echo "ok $db"
+    done
+    echo "Restored ${#restored[@]} file(s) to $target, ${#dbs[@]} database(s) checked"

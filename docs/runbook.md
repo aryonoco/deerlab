@@ -502,9 +502,15 @@ Quarterly, from the operator's machine, using the operator credential:
 
     just restore-drill <service>
 
-This restores the latest snapshot to `/tmp/deerlab-restore-<service>`, runs
-`PRAGMA integrity_check` on every `*.sqlite` it finds, and prints the target. It
-touches nothing on the hosts.
+This restores the latest snapshot to `/tmp/deerlab-restore-<service>` and runs
+`PRAGMA integrity_check` on every `*.sqlite` it finds. It touches nothing on the
+hosts.
+
+It fails if the restore produced no files, if it produced no database, or if any
+database answers anything but `ok`. `sqlite3` exits 0 on a corrupt database, so
+the answer is tested and not the exit status. A service that keeps no database
+therefore fails this drill by design: there is nothing here for it to check, and
+a green tick would claim otherwise. Restore it and read the tree by hand.
 
 ### A. Restore a database into a live service
 
