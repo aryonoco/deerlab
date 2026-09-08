@@ -7,10 +7,10 @@
       - item.value.uid is defined
       - item.value.uid | int >= podman_user_uid_base
       - item.value.egress in ['any', 'web', 'none']
-      - item.value.limits.memory is defined
-      - item.value.limits.cpu is defined
-      - item.value.limits.tasks is defined
-    fail_msg: "service {{ item.key }} needs uid >= {{ podman_user_uid_base }}, an egress class, and memory, cpu and tasks limits"
+      - podman_user_limits[item.key].slice.memory is defined
+      - podman_user_limits[item.key].slice.cpu is defined
+      - podman_user_limits[item.key].slice.tasks is defined
+    fail_msg: "service {{ item.key }} needs uid >= {{ podman_user_uid_base }}, an egress class, and a slice budget in deerlab_service_limits"
     quiet: true
   loop: "{{ podman_user_services | dict2items }}"
   loop_control:
@@ -22,6 +22,24 @@
       - podman_user_services.values() | map(attribute='uid') | list | unique | length == podman_user_services | length
     fail_msg: two services share a UID
     quiet: true
+
+# A service with a sidecar puts both containers in one slice, so a slice sized
+# for one of them throttles the other. The symptom is a container that is
+# running, healthy and slow for a reason that appears nowhere in its own unit,
+# so this refuses to render rather than letting it happen. human_to_bytes
+# normalises the suffixes; comparing "4G" to "512M" as strings would not.
+- name: Reject a slice budget smaller than the containers it holds
+  ansible.builtin.assert:
+    that:
+      - podman_user_limits[item.key].slice.memory | human_to_bytes
+        >= podman_user_limits[item.key].containers.values() | map(attribute='memory') | map('human_to_bytes') | sum
+      - podman_user_limits[item.key].slice.tasks | int
+        >= podman_user_limits[item.key].containers.values() | map(attribute='tasks') | map('int') | sum
+    fail_msg: "the slice budget of {{ item.key }} is smaller than the sum of its containers"
+    quiet: true
+  loop: "{{ podman_user_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 # Writing the whole file replaces whatever it held before, including any
 # subordinate range this role does not manage — such as the one Debian's

@@ -25,7 +25,6 @@ argument_specs:
           with the managed header), capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
-          limits ({memory, cpu, tasks, pids}), start_timeout (int),
           egress (any|web|none), backup ({sqlite: {volume, path}, volumes}),
           user (str or int, container-side UID), group (str or int),
           exec (str, overrides the image command), volumes entries taking
@@ -34,3 +33,10 @@ argument_specs:
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users
+      podman_service_limits:
+        type: dict
+        required: true
+        description: >
+          Resource ceilings keyed by service name, each holding a slice
+          budget and a containers mapping. Every container's own entry
+          carries memory, cpu, tasks, pids and start_timeout.

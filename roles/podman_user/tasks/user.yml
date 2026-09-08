@@ -71,9 +71,9 @@
     content: |
       # {{ deerlab_managed }}
       [Slice]
-      MemoryMax={{ podman_user_item.value.limits.memory }}
-      CPUQuota={{ podman_user_item.value.limits.cpu }}
-      TasksMax={{ podman_user_item.value.limits.tasks }}
+      MemoryMax={{ podman_user_limits[podman_user_item.key].slice.memory }}
+      CPUQuota={{ podman_user_limits[podman_user_item.key].slice.cpu }}
+      TasksMax={{ podman_user_limits[podman_user_item.key].slice.tasks }}
       {% if podman_user_item.value.egress == 'none' %}
       IPAddressDeny=any
       IPAddressAllow=localhost

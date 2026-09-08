@@ -54,12 +54,6 @@ podman_services:
       cmd: curl --fail --silent --output /dev/null http://localhost/login
       interval: 30s
       start_period: 180s
-    limits:
-      memory: 768M
-      cpu: "100%"
-      tasks: 512
-      pids: 256
-    start_timeout: 900
     egress: web
     backup:
       sqlite: { volume: data, path: db/wallabag.sqlite }

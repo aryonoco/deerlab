@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Every service's resource ceilings, in one place, because svc1 is expected to
+# carry around nineteen of them and hunting through records to answer "what is
+# capped at what" does not scale.
+#
+# Two levels, and they mean different things. `slice` caps the service user's
+# whole slice, which is where ALL of that service's containers live; a service
+# with a sidecar shares one slice, so this is the aggregate. `containers` caps
+# each container individually. podman_user asserts the slice is at least the sum
+# of its containers, because a slice sized for one of two containers throttles
+# the other through a number that appears nowhere near it.
+#
+# These are CEILINGS enforced by the kernel (memory.max, cpu.max, pids.max), not
+# reservations. Nothing is set aside, an idle service costs nothing, and the sum
+# across services is expected to exceed host RAM. CPUQuota is per core: 100% is
+# one core, 400% is all four of svc1's.
+#
+# There is deliberately no MemoryLow or MemoryMin anywhere: nothing has a
+# protected floor, so under host-wide pressure the kernel chooses what to
+# reclaim. zram (base_os) is what turns that from an OOM kill into a slowdown.
+deerlab_service_limits:
+  caddy:
+    slice: { memory: 1G, cpu: "200%", tasks: 512 }
+    containers:
+      caddy: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }
+
+  wallabag:
+    slice: { memory: 2G, cpu: "200%", tasks: 1024 }
+    containers:
+      wallabag: { memory: 2G, cpu: "200%", tasks: 1024, pids: 512, start_timeout: 900 }

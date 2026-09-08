@@ -3,3 +3,4 @@
 
 podman_service_services: "{{ podman_services }}"
 podman_service_unit_root: /etc/containers/systemd/users
+podman_service_limits: "{{ deerlab_service_limits }}"

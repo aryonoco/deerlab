@@ -59,7 +59,7 @@ Mask=/proc/acpi:/proc/kcore:/proc/keys:/proc/timer_list:/proc/sched_debug:/proc/
 {% if podman_service_container_spec.exec is defined %}
 Exec={{ podman_service_container_spec.exec }}
 {% endif %}
-PidsLimit={{ podman_service_container_spec.limits.pids }}
+PidsLimit={{ podman_service_container_limits.pids }}
 {% if podman_service_container_spec.userns is defined %}
 UserNS={{ podman_service_container_spec.userns }}
 {% endif %}
@@ -80,10 +80,10 @@ StopTimeout=30
 [Service]
 Restart=always
 RestartSec=5
-TimeoutStartSec={{ podman_service_container_spec.start_timeout | default(300) }}
-MemoryMax={{ podman_service_container_spec.limits.memory }}
-CPUQuota={{ podman_service_container_spec.limits.cpu }}
-TasksMax={{ podman_service_container_spec.limits.tasks }}
+TimeoutStartSec={{ podman_service_container_limits.start_timeout | default(300) }}
+MemoryMax={{ podman_service_container_limits.memory }}
+CPUQuota={{ podman_service_container_limits.cpu }}
+TasksMax={{ podman_service_container_limits.tasks }}
 
 [Install]
 WantedBy=default.target

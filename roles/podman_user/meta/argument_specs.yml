@@ -16,8 +16,15 @@ argument_specs:
         required: true
         description: >
           The podman_services dictionary. Keys are service names. Each
-          value needs uid (int, 2000 or higher), egress (any, web or
-          none) and limits with memory, cpu and tasks.
+          value needs uid (int, 2000 or higher) and egress (any, web or
+          none).
+      podman_user_limits:
+        type: dict
+        required: true
+        description: >
+          Resource ceilings keyed by service name. The slice budget is
+          applied to the service user's slice, which holds every container
+          that service runs, and is asserted to be at least their sum.
       podman_user_uid_base:
         type: int
         default: 2000
