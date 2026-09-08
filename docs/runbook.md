@@ -82,14 +82,22 @@ Consequences to internalise:
 
 Per-service object-store credentials are scoped to that service's prefix, and
 that scoping is real — each service's key is refused at the `Stat` of the other
-service's repository config object, so a compromise of one host reaches that
-host's own repository and no further.
+service's repository config object. What it does not buy is a per-host blast
+radius. Every `*.sops.yaml` under `inventory/` is encrypted to **both** host
+keys, because a host that cannot decrypt the other's group vars cannot parse
+the inventory at all: `base_wireguard` and `base_firewall` derive their peer
+settings from `hostvars[<peer>]`, and reading those forces Ansible to compute
+the peer's whole variable set. So every service's restic password and
+object-store keys sit on both hosts, and the matching ciphertext is in a public
+repository besides. **Assume a compromise of either host reaches every
+service's repository.** What makes the resulting deletion recoverable is the
+retention window below, not the prefix scoping.
 
 But those credentials **can delete**. They have to: `restic backup` takes and
 releases a lock under `locks/` on every run and cannot complete without delete
 rights. So the only thing standing between a compromised host and the erasure of
-its own backup history is that **the object store retains prior versions of
-deleted objects for a fixed window**.
+that history is that **the object store retains prior versions of deleted
+objects for a fixed window**.
 
 That window is configured at the provider. It is not recorded in this
 repository and cannot be, and nothing in the estate verifies it. It is a
