@@ -83,7 +83,15 @@ podman_services:
       # uwsgi.ini writes /tmp/linkding.pid and there is no writable path
       # anywhere else with a read-only root, so the container exits 1 without
       # this: "No usable temporary directory found".
-      - "/tmp:rw,nosuid,nodev,size=256m,uid=33,gid=33"
+      #
+      # mode, never uid/gid. Podman 5.4.2 rejects those two outright - the
+      # container exits 125 with `unknown mount option "uid=33": invalid mount
+      # option` before the image is even started. A tmpfs is created root-owned
+      # and Podman offers no way to chown it, so mode is the only lever. 1777
+      # is also Podman's own default here, confirmed on the host; setting it
+      # explicitly says the container's uid must be able to write rather than
+      # resting on a default.
+      - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
     env:
       # LD_DISABLE_BACKGROUND_TASKS is deliberately ABSENT and must stay absent.
       # It reads as "do not start supervisord", which is what we want here, but
@@ -148,9 +156,9 @@ podman_services:
           # exists.
           HOME: /tmp
         tmpfs:
-          - "/tmp:rw,nosuid,nodev,size=1g,uid=33,gid=33"
+          - "/tmp:rw,nosuid,nodev,size=1g,mode=1777"
           # single-file-cli passes --user-data-dir=./chromium-profile, relative
           # to WORKDIR /etc/linkding, which is read-only. The directory exists
           # in the image owned by www-data; this makes it writable without
           # touching the image.
-          - "/etc/linkding/chromium-profile:rw,nosuid,nodev,size=256m,uid=33,gid=33"
+          - "/etc/linkding/chromium-profile:rw,nosuid,nodev,size=256m,mode=1777"
