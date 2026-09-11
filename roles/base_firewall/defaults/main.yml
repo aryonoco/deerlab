@@ -31,3 +31,11 @@ base_firewall_private_v6:
   - ::1/128
 
 base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
+
+# The egress classes nftables.conf.j2 renders a chain for. Named here so the
+# assert and the template cannot drift apart; adding a class needs a branch in
+# the template as well as an entry here.
+base_firewall_egress_classes:
+  - any
+  - web
+  - platform

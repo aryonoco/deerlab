@@ -18,7 +18,9 @@ argument_specs:
       base_firewall_services:
         type: dict
         required: true
-        description: The podman_services dictionary for this host.
+        description: >
+          The podman_services dictionary for this host. Every entry needs an
+          egress key holding one of base_firewall_egress_classes.
       base_firewall_ssh_port:
         type: int
         default: 22
@@ -58,3 +60,15 @@ argument_specs:
         type: list
         elements: str
         description: Resolver addresses web-class services may reach on port 53.
+      base_firewall_egress_classes:
+        type: list
+        elements: str
+        default: [any, web, platform]
+        description: >
+          Egress classes a service may declare. any accepts everything. web
+          permits DNS, 80 and 443 outside the private ranges. platform is web
+          without 80, for a service whose application makes no outbound calls
+          but whose service user still pulls its image, runs restic and posts
+          to Pushover. A value outside this list is refused rather than
+          rendered, because the template's fallback drops everything including
+          the backup and the alert about it.

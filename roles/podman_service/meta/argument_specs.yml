@@ -25,7 +25,7 @@ argument_specs:
           with the managed header), capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
-          egress (any|web|none), backup ({sqlite: {volume, path}, volumes}),
+          egress (any|web|platform), backup ({sqlite: {volume, path}, volumes}),
           user (str or int, container-side UID), group (str or int),
           exec (str, overrides the image command), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to

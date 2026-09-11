@@ -8,9 +8,17 @@
       - base_firewall_services is mapping
       - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
       - base_firewall_role == 'edge' or base_firewall_peer_public_v4 | length > 0
+      # `that:` stops at the first false condition, so the defined check has to
+      # come before the value check - rejectattr on an undefined attribute dies
+      # as a raw Jinja error rather than this fail_msg.
+      - base_firewall_services | dict2items | rejectattr('value.egress', 'defined') | list | length == 0
+      - base_firewall_services | dict2items | rejectattr('value.egress', 'in', base_firewall_egress_classes) | list | length == 0
     fail_msg: >-
-      base_firewall_role must be edge or services, and a services host needs
-      the edge's tunnel address and public address
+      base_firewall_role must be edge or services, a services host needs the
+      edge's tunnel address and public address, and every service needs an
+      egress class from {{ base_firewall_egress_classes | join(', ') }}. An
+      unrecognised class renders the template's fail-closed branch, which
+      would drop the nightly backup and the alert about it.
 
 # Split by protocol. A publish entry may carry a /udp suffix, and collapsing
 # both into one list would emit a tcp accept for a udp service: the rendered

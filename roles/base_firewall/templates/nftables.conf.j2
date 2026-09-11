@@ -10,7 +10,7 @@ table inet deerlab {
   chain svc_{{ name }} {
 {% if svc.egress == 'any' %}
     accept
-{% elif svc.egress == 'web' %}
+{% elif svc.egress in ('web', 'platform') %}
 {# The resolver accepts come first on purpose. drop is terminal, so if a #}
 {# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
 {# resolver, a link-local metadata address - a drop placed above would make #}
@@ -21,10 +21,17 @@ table inet deerlab {
 {% endfor %}
     ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
     ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
-    tcp dport { 80, 443 } accept
+{# platform is web without port 80. Both still need DNS and 443, because the #}
+{# service user itself pulls the image, runs restic and posts to Pushover. #}
+{# No class can deny everything, which is why there is no longer one that #}
+{# claims to. #}
+    tcp dport { {{ '80, 443' if svc.egress == 'web' else '443' }} } accept
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
 {% else %}
+{# Unreachable: base_firewall asserts the class. Kept anyway, because an empty #}
+{# chain returns to output, whose policy is accept - deleting this branch #}
+{# would turn a typo into a service with no egress control at all. #}
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
 {% endif %}
