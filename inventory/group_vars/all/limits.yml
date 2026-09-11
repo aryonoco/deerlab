@@ -41,3 +41,8 @@ deerlab_service_limits:
       # renderer - so the pid and task allowances are far above a normal
       # service's. 4G is a ceiling for one render, which Huey performs serially.
       linkding-worker: { memory: 4G, cpu: "400%", tasks: 4096, pids: 2048, start_timeout: 120 }
+
+  baikal:
+    slice: { memory: 1G, cpu: "200%", tasks: 512 }
+    containers:
+      baikal: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }

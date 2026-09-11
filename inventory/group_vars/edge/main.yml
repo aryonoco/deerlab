@@ -62,6 +62,25 @@ caddy_caddyfile: |
       }
   }
 
+  baikal.{{ deerlab_domain }} {
+      log {
+          output stdout
+          format json
+      }
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8082 {
+          # Exactly 401, not 2xx. Every Baikal failure mode - unwritable config,
+          # missing database, unwritable database directory - answers 200 with
+          # an exception page, so a conventional check reports a dead server as
+          # healthy.
+          health_uri /dav.php
+          health_status 401
+          health_interval 15s
+          health_timeout 5s
+          # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
 podman_services:
   caddy:
     uid: 2000

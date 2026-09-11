@@ -162,3 +162,56 @@ podman_services:
           # in the image owned by www-data; this makes it writable without
           # touching the image.
           - "/etc/linkding/chromium-profile:rw,nosuid,nodev,size=256m,mode=1777"
+
+  baikal:
+    uid: 2003
+    image: ghcr.io/aryonoco/baikal:0.12.1@sha256:123c2b94d5855c758f2b0840a910491f23210c90622351cae03f5fb527a33b65
+    # Pinned rather than inherited from the image's own USER, so an image that
+    # changed it fails to start instead of silently re-chowning the volume.
+    user: 65532
+    group: 65532
+    # 8081 is the image's health listener and is deliberately NOT published:
+    # base_firewall derives the tunnel-scoped inbound rules from this list, so
+    # publishing it would open it to the edge.
+    publish:
+      - "8082:8080"
+    volumes:
+      - { name: data, mount: /data, chown: true }
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777"
+    env:
+      # An input to every password hash Baikal ever writes. Changing it after
+      # the first run invalidates the admin password and every DAV user's
+      # credentials at once, with no error.
+      BAIKAL_AUTH_REALM: BaikalDAV
+      BAIKAL_DAV_AUTH_TYPE: Basic
+      BAIKAL_TIMEZONE: Etc/UTC
+      TZ: Etc/UTC
+    secrets:
+      # Create-only: once the config file exists the image never rewrites it,
+      # so changing this and promoting appears to succeed and changes nothing.
+      # A real password change goes through the admin UI.
+      - { name: admin-password, value: "{{ baikal_admin_password }}", type: env, target: BAIKAL_ADMIN_PASSWORD }
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    health:
+      # A JSON array, not a plain string: Podman runs a plain string through
+      # /bin/sh -c and this image has no shell. Simplifying this to a bare
+      # command makes the probe fail forever, and Notify=healthy then holds the
+      # unit in `activating` rather than failing it.
+      #
+      # No leading "CMD" element, and that is load-bearing rather than a
+      # shorthand. Podman before 5.8.0 - svc1 runs 5.4.2 - discards the parsed
+      # array when its first element is the literal "CMD" and re-splits the raw
+      # string on whitespace, leaving one token that can never execute. Without
+      # the element it prepends CMD to the parsed array and gets exec form on
+      # every version. Adding "CMD" back reads like a correction and is a
+      # permanently unhealthy container.
+      cmd: '["/usr/local/bin/frankenphp","php-cli","/usr/local/bin/baikal-health"]'
+      interval: 30s
+      start_period: 60s
+    egress: platform
+    backup:
+      sqlite: { volume: data, path: Specific/db/db.sqlite }
+      volumes: [data]
