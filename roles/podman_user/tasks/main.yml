@@ -6,7 +6,7 @@
     that:
       - item.value.uid is defined
       - item.value.uid | int >= podman_user_uid_base
-      - item.value.egress in ['any', 'web', 'none']
+      - item.value.egress in ['any', 'web', 'platform']
       # Ansible evaluates `that:` in order and stops at the first false
       # condition, so this guard has to run before the three indexing checks
       # below - without it, a service missing from deerlab_service_limits

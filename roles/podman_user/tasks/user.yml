@@ -74,13 +74,6 @@
       MemoryMax={{ podman_user_limits[podman_user_item.key].slice.memory }}
       CPUQuota={{ podman_user_limits[podman_user_item.key].slice.cpu }}
       TasksMax={{ podman_user_limits[podman_user_item.key].slice.tasks }}
-      {% if podman_user_item.value.egress == 'none' %}
-      IPAddressDeny=any
-      IPAddressAllow=localhost
-      {% for prefix in podman_user_wg_prefixes %}
-      IPAddressAllow={{ prefix }}
-      {% endfor %}
-      {% endif %}
     dest: "/etc/systemd/system/user-{{ podman_user_item.value.uid }}.slice.d/50-deerlab.conf"
     owner: root
     group: root

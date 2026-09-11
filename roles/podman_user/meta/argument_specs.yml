@@ -17,7 +17,7 @@ argument_specs:
         description: >
           The podman_services dictionary. Keys are service names. Each
           value needs uid (int, 2000 or higher) and egress (any, web or
-          none).
+          platform).
       podman_user_limits:
         type: dict
         required: true
@@ -38,7 +38,3 @@ argument_specs:
       podman_user_wg_interface:
         type: str
         default: wg0
-      podman_user_wg_prefixes:
-        type: list
-        elements: str
-        description: Tunnel prefixes allowed for egress-class none services.

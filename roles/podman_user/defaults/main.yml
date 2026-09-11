@@ -6,7 +6,4 @@ podman_user_uid_base: 2000
 podman_user_subid_base: 100000
 podman_user_subid_count: 65536
 podman_user_wg_interface: wg0
-podman_user_wg_prefixes:
-  - "{{ deerlab_wg_ipv4_prefix }}"
-  - "{{ deerlab_wg_ipv6_prefix }}"
 podman_user_limits: "{{ deerlab_service_limits }}"
