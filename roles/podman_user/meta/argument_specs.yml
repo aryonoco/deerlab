@@ -25,6 +25,14 @@ argument_specs:
           Resource ceilings keyed by service name. The slice budget is
           applied to the service user's slice, which holds every container
           that service runs, and is asserted to be at least their sum.
+      podman_user_egress_classes:
+        type: list
+        elements: str
+        required: true
+        description: >
+          Valid egress classes for podman_user_services entries. Sourced
+          from deerlab_egress_classes so this role's own assert cannot
+          drift from base_firewall's.
       podman_user_uid_base:
         type: int
         default: 2000

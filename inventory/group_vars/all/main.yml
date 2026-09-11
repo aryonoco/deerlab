@@ -36,3 +36,7 @@ deerlab_pushover_url: https://api.pushover.net/1/messages.json
 # nothing.
 
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
+
+# Named globally because base_firewall renders the chains from it and
+# podman_user asserts its own inputs against it. One definition, two gates.
+deerlab_egress_classes: [any, web, platform]

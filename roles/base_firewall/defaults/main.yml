@@ -32,10 +32,7 @@ base_firewall_private_v6:
 
 base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
 
-# The egress classes nftables.conf.j2 renders a chain for. Named here so the
-# assert and the template cannot drift apart; adding a class needs a branch in
-# the template as well as an entry here.
-base_firewall_egress_classes:
-  - any
-  - web
-  - platform
+# Sourced from deerlab_egress_classes so this role's assert and its template
+# cannot drift from podman_user's own gate. Adding a class still needs a
+# branch in the template as well as an entry in the global list.
+base_firewall_egress_classes: "{{ deerlab_egress_classes }}"

@@ -59,11 +59,10 @@ argument_specs:
       base_firewall_resolvers:
         type: list
         elements: str
-        description: Resolver addresses web-class services may reach on port 53.
+        description: Resolver addresses web- and platform-class services may reach on port 53.
       base_firewall_egress_classes:
         type: list
         elements: str
-        default: [any, web, platform]
         description: >
           Egress classes a service may declare. any accepts everything. web
           permits DNS, 80 and 443 outside the private ranges. platform is web

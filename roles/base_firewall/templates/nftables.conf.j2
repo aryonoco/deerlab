@@ -29,9 +29,10 @@ table inet deerlab {
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
 {% else %}
-{# Unreachable: base_firewall asserts the class. Kept anyway, because an empty #}
-{# chain returns to output, whose policy is accept - deleting this branch #}
-{# would turn a typo into a service with no egress control at all. #}
+{# Reached only if base_firewall_egress_classes gains a class this template #}
+{# has no branch for. Kept because an empty chain returns to output, whose #}
+{# policy is accept - deleting this would turn that mistake into a service #}
+{# with no egress control at all. #}
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
 {% endif %}
