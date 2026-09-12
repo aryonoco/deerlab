@@ -21,19 +21,43 @@ LoadCredential=deadman.conf:{{ backup_dir }}/{{ backup_name }}-deadman.conf
 # the sandbox in an unprivileged user namespace first all stop it from running
 # at all. What is left is the least privilege this job can actually hold: an
 # unprivileged service user whose egress the firewall already confines.
-{% if backup_spec.sqlite is defined %}
-# The source must exist and be non-empty before anything writes to staging.
-# sqlite3 opens the source with OPEN_CREATE, so a path that is merely wrong
-# does not fail: it creates an empty database, copies that, passes the
-# integrity check below, uploads it over the last good copy and pings the
-# dead-man. Nothing downstream can tell that apart from a healthy backup.
-# -s rather than -f, because a zero-length file is exactly the case to refuse.
-ExecStartPre=/usr/bin/podman unshare /usr/bin/test -s {{ backup_volume_root }}/{{ backup_name }}-{{ backup_spec.sqlite.volume }}/_data/{{ backup_spec.sqlite.path }}
-# Online SQLite backup inside the user namespace so subordinate-owned files are readable.
-ExecStart=/usr/bin/podman unshare /usr/bin/sqlite3 {{ backup_volume_root }}/{{ backup_name }}-{{ backup_spec.sqlite.volume }}/_data/{{ backup_spec.sqlite.path }} ".backup %h/backup/staging/{{ backup_spec.sqlite.path | basename }}"
+{% if backup_spec.sqlite | default([]) | length > 0 %}
+# Every live source is validated before staging is touched. sqlite3 opens its
+# source with OPEN_CREATE, so a path that is merely wrong does not fail: it
+# creates an empty database, copies that, passes the integrity check below,
+# uploads it over the last good copy and pings the dead-man. Nothing downstream
+# can tell that apart from a healthy backup.
+{% for db in backup_spec.sqlite %}
+{% set root = backup_volume_root ~ '/' ~ backup_name ~ '-' ~ db.volume ~ '/_data' %}
+{% if '*' in db.path %}
+# A glob matching nothing is the same bug wearing a different hat, so the count
+# is asserted as well as every matched file being non-empty.
+ExecStartPre=/usr/bin/podman unshare /bin/sh -c 'set -e; cd {{ root }}; n=0; for f in {{ db.path }}; do test -s "$f"; n=$((n+1)); done; test "$n" -gt 0'
+{% else %}
+ExecStartPre=/usr/bin/podman unshare /usr/bin/test -s {{ root }}/{{ db.path }}
+{% endif %}
+{% endfor %}
+# Staging is cleared once every source has passed validation. With a glob, a
+# deleted user's database would otherwise sit in staging forever and be
+# archived into every later snapshot, where a careless restore could pick it
+# up and resurrect the account. Clearing is safe: restic holds the history, and
+# a failed run loses only this run's copy.
+ExecStartPre=/usr/bin/rm -rf %h/backup/staging
+ExecStartPre=/usr/bin/install -d -m 0700 %h/backup/staging
+{% for db in backup_spec.sqlite %}
+{% set root = backup_volume_root ~ '/' ~ backup_name ~ '-' ~ db.volume ~ '/_data' %}
+{% if '*' in db.path %}
+# cd first so the glob yields a path relative to the volume root: staging
+# mirrors it, because every per-user database is named db.sqlite and a basename
+# rule would have two users overwrite each other in staging.
+ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; cd {{ root }}; for f in {{ db.path }}; do /usr/bin/install -d -m 0700 "%h/backup/staging/$(dirname "$f")"; /usr/bin/sqlite3 "$f" ".backup %h/backup/staging/$f"; test "$(/usr/bin/sqlite3 "%h/backup/staging/$f" "PRAGMA integrity_check")" = ok; done'
+{% else %}
+ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; /usr/bin/install -d -m 0700 "%h/backup/staging/$(dirname {{ db.path }})"; /usr/bin/sqlite3 {{ root }}/{{ db.path }} ".backup %h/backup/staging/{{ db.path }}"'
 # A copy that cannot be read back is worse than no copy, because it still pings
 # the dead-man. sqlite3 exits 0 on a corrupt database, so the result is tested.
-ExecStart=/usr/bin/sh -c 'test "$(/usr/bin/sqlite3 %h/backup/staging/{{ backup_spec.sqlite.path | basename }} "PRAGMA integrity_check")" = ok'
+ExecStart=/usr/bin/sh -c 'test "$(/usr/bin/sqlite3 %h/backup/staging/{{ db.path }} "PRAGMA integrity_check")" = ok'
+{% endif %}
+{% endfor %}
 {% endif %}
 ExecStart=/usr/bin/podman unshare /usr/bin/restic backup --quiet --exclude-caches %h/backup/staging{% for volume in backup_spec.volumes | default([]) %} {{ backup_volume_root }}/{{ backup_name }}-{{ volume }}/_data{% endfor %}
 

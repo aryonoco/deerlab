@@ -16,9 +16,11 @@ argument_specs:
         required: true
         description: >
           The podman_services dictionary. Only entries with a backup key
-          are configured. That key takes an optional sqlite mapping of
-          volume and path, the path being relative to that volume's root,
-          and an optional volumes list naming the volumes to archive.
+          are configured. That key takes an optional sqlite list of volume and
+          path mappings, with each path relative to the named literal volume's
+          _data root and optionally containing *. A glob must match at least
+          one file or the unit fails, and staging mirrors each relative path.
+          An optional volumes list names the volumes to archive.
       backup_s3_bucket:
         type: str
         required: true

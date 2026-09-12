@@ -56,7 +56,7 @@ podman_services:
       start_period: 180s
     egress: web
     backup:
-      sqlite: { volume: data, path: db/wallabag.sqlite }
+      sqlite: [{ volume: data, path: db/wallabag.sqlite }]
       volumes: [data, images]
 
   linkding:
@@ -137,7 +137,7 @@ podman_services:
       start_period: 120s
     egress: web
     backup:
-      sqlite: { volume: data, path: db.sqlite3 }
+      sqlite: [{ volume: data, path: db.sqlite3 }]
       volumes: [data]
     workloads:
       worker:
@@ -214,5 +214,5 @@ podman_services:
       start_period: 60s
     egress: platform
     backup:
-      sqlite: { volume: data, path: Specific/db/db.sqlite }
+      sqlite: [{ volume: data, path: Specific/db/db.sqlite }]
       volumes: [data]
