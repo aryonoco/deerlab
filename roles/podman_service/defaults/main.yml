@@ -10,8 +10,10 @@ podman_service_limits: "{{ deerlab_service_limits }}"
 # health-check; and the secret-creation loop in service.yml iterates the parent
 # spec alone, so an inherited secrets entry would render a Secret= reference to
 # a Podman secret that was never created and the container would fail to start.
-# Named here rather than inline so the task that inherits and the assert that
-# validates cannot drift apart.
+# Named here rather than inline so inheritance and its documented default
+# cannot drift apart. Workload-control keys do not cross from the primary
+# either; each workload must declare its own kind and any job scheduling
+# policy.
 podman_service_never_inherited:
   - publish
   - secrets
@@ -20,3 +22,6 @@ podman_service_never_inherited:
   - backup
   - uid
   - egress
+  - kind
+  - schedule
+  - persistent

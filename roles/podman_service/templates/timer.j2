@@ -1,0 +1,19 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+[Unit]
+Description=Scheduled {{ podman_service_workload_name }} for {{ podman_service_name }}
+{# Stopping the service stops its schedule. Without this, a restore is unsafe: #}
+{# Restore A swaps the database file and Restore B deletes the volume, and a   #}
+{# timer firing mid-restore would open the file being replaced. PartOf         #}
+{# propagates stop and restart but not start, so `systemctl start <service>`   #}
+{# does not start the timer - a reboot does, through the [Install] below.      #}
+PartOf={{ podman_service_name }}.service
+
+[Timer]
+OnCalendar={{ podman_service_workload_spec.schedule }}
+RandomizedDelaySec={{ podman_service_workload_spec.jitter | default(60) }}
+Persistent={{ 'true' if podman_service_workload_spec.persistent | default(false) else 'false' }}
+
+[Install]
+WantedBy=timers.target

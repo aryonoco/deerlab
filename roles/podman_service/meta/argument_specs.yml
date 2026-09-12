@@ -27,19 +27,24 @@ argument_specs:
           (str), network (str), health ({cmd, interval, start_period}),
           egress (any|web|platform), backup ({sqlite: {volume, path}, volumes}),
           user (str or int, container-side UID), group (str or int),
-          exec (str, overrides the image command), volumes entries taking
+          entrypoint (str, renders Entrypoint=), exec (str, overrides the
+          image command), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
           the container user, health being optional, and
           workloads (dict of name to a partial spec, each rendering an
           extra container unit under the same service user, volume and
           slice, ordered After= and PartOf= the primary unit), each
-          requiring a kind of worker or job. A workload inherits every
-          key of its parent except publish, secrets, health, workloads,
-          backup, uid and egress, and overrides any of them; env is
-          merged with the workload winning, and a volume's chown is
-          never inherited. The exclusion list is the contract - an
-          enumeration of what IS inherited goes stale every time a key
-          is added.
+          requiring a kind of worker or job. A job requires schedule
+          (renders OnCalendar=), may set jitter (renders
+          RandomizedDelaySec=, default 60) and persistent (renders
+          Persistent=, boolean, default false), and may not set health.
+          A worker rejects schedule and persistent. A workload inherits
+          every key of its parent except publish, secrets, health,
+          workloads, backup, uid, egress, kind, schedule and persistent,
+          and overrides any of them; env is merged with the workload
+          winning, and a volume's chown is never inherited. The exclusion
+          list is the contract - an enumeration of what IS inherited goes
+          stale every time a key is added.
       podman_service_never_inherited:
         type: list
         elements: str
@@ -51,10 +56,14 @@ argument_specs:
           - backup
           - uid
           - egress
+          - kind
+          - schedule
+          - persistent
         description: >
           Keys a workload never inherits from its parent service. This is
-          the shared exclusion contract used by both workload inheritance
-          and validation so the two cannot drift apart.
+          the workload inheritance contract. Workloads must declare their
+          own kind and job scheduling policy; the validation forbidden-key
+          list intentionally does not reject those mandatory workload keys.
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users
@@ -64,4 +73,10 @@ argument_specs:
         description: >
           Resource ceilings keyed by service name, each holding a slice
           budget and a containers mapping. Every container's own entry
-          carries memory, cpu, tasks, pids and start_timeout.
+          carries memory, cpu, tasks and pids. Primary containers and workers
+          use start_timeout as systemd TimeoutStartSec. Jobs instead require
+          runtime_max, strictly shorter than their schedule interval, which
+          renders as Podman's --timeout argument. Conmon enforces the bound by
+          killing the container, making the unit fail and firing its failure
+          notification; systemd RuntimeMaxSec is ignored for Type=oneshot and
+          TimeoutStartSec does not terminate the Podman 5.4.2 container.

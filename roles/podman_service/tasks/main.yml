@@ -24,9 +24,11 @@
   loop_control:
     label: "{{ item.key }}"
 
-# service.yml blocks a workload from INHERITING publish, secrets, backup, uid,
-# egress or workloads from its parent - it does not stop a workload from
-# declaring one of those keys itself. base_firewall builds every host's
+# service.yml blocks a workload from INHERITING the keys in
+# podman_service_never_inherited - it does not stop a workload from declaring
+# a key itself. kind, schedule and persistent are mandatory or valid workload
+# keys, so they must not join the forbidden-key list below. base_firewall
+# builds every host's
 # egress chains from map(attribute='publish') over the top-level
 # podman_services entries alone, so a workload's own PublishPort= would open a
 # port with no egress chain and no firewall rule ever written for it: a silent
@@ -34,10 +36,9 @@
 # with no matching entry in deerlab_service_limits fails instead with a raw
 # Jinja error from deep inside service.yml; this gives that a clean fail_msg.
 #
-# health is deliberately absent from this list, even though the design
-# document is the binding authority and every other key here matches it
-# exactly. The design states a workload may declare its own health and
-# secrets, inheriting neither. secrets stays forbidden anyway: the
+# health is deliberately absent from this list. The design states a worker may
+# declare its own health and secrets, inheriting neither. secrets stays
+# forbidden anyway: the
 # secret-creation loop in service.yml iterates the parent spec only, so a
 # workload's own secrets entry would render a Secret= reference to a Podman
 # secret that was never created, and the container would fail to start. A
@@ -50,11 +51,24 @@
       - podman_service_workload_bad_kinds | length == 0
       - podman_service_workload_forbidden_hits | length == 0
       - podman_service_workload_missing_limits | length == 0
+      - podman_service_workload_bad_schedules | length == 0
+      - podman_service_workload_job_health | length == 0
+      - podman_service_workload_bad_persistent | length == 0
+      - podman_service_workload_missing_runtime_max | length == 0
+      - podman_service_workload_missing_start_timeout | length == 0
     fail_msg: >-
       service {{ podman_service_workload_service_name }}: workloads with a missing or invalid kind
       {{ podman_service_workload_bad_kinds }}; workloads declaring a parent-only
       key {{ podman_service_workload_forbidden_hits }}; workloads missing a
-      deerlab_service_limits containers entry {{ podman_service_workload_missing_limits }}
+      deerlab_service_limits containers entry {{ podman_service_workload_missing_limits }};
+      jobs missing a schedule or workers declaring one
+      {{ podman_service_workload_bad_schedules }}; jobs declaring a health
+      check {{ podman_service_workload_job_health }}; workloads with invalid
+      persistent settings {{ podman_service_workload_bad_persistent }}; jobs
+      missing runtime_max in deerlab_service_limits
+      {{ podman_service_workload_missing_runtime_max }}; workers missing
+      start_timeout in deerlab_service_limits
+      {{ podman_service_workload_missing_start_timeout }}
     quiet: true
   # A failed loop result contains its complete item. Loop over the service name
   # alone so a validation failure cannot print the service's secret values.
@@ -91,6 +105,49 @@
          | map('regex_replace', '^(.*)$', podman_service_workload_service_name ~ '-\1')
          | difference(podman_service_limits[podman_service_workload_service_name].containers | default({}) | dict2items
                       | selectattr('value.pids', 'defined') | map(attribute='key') | list) }}
+    podman_service_workload_bad_schedules: >-
+      {{ (podman_service_workload_spec.workloads | default({}) | dict2items
+          | selectattr('value.kind', 'defined')
+          | selectattr('value.kind', 'equalto', 'job')
+          | rejectattr('value.schedule', 'defined')
+          | map(attribute='key') | list)
+         + (podman_service_workload_spec.workloads | default({}) | dict2items
+            | selectattr('value.kind', 'defined')
+            | selectattr('value.kind', 'equalto', 'worker')
+            | selectattr('value.schedule', 'defined')
+            | map(attribute='key') | list) }}
+    podman_service_workload_job_health: >-
+      {{ podman_service_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'job')
+         | selectattr('value.health', 'defined')
+         | map(attribute='key') | list }}
+    podman_service_workload_bad_persistent: >-
+      {{ ((podman_service_workload_spec.workloads | default({}) | dict2items
+           | selectattr('value.persistent', 'defined')
+           | rejectattr('value.persistent', 'boolean')
+           | map(attribute='key') | list)
+          + (podman_service_workload_spec.workloads | default({}) | dict2items
+             | selectattr('value.kind', 'defined')
+             | selectattr('value.kind', 'equalto', 'worker')
+             | selectattr('value.persistent', 'defined')
+             | map(attribute='key') | list)) | unique | list }}
+    podman_service_workload_missing_runtime_max: >-
+      {{ podman_service_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'job')
+         | map(attribute='key')
+         | map('regex_replace', '^(.*)$', podman_service_workload_service_name ~ '-\1')
+         | difference(podman_service_limits[podman_service_workload_service_name].containers | default({}) | dict2items
+                      | selectattr('value.runtime_max', 'defined') | map(attribute='key') | list) }}
+    podman_service_workload_missing_start_timeout: >-
+      {{ podman_service_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'worker')
+         | map(attribute='key')
+         | map('regex_replace', '^(.*)$', podman_service_workload_service_name ~ '-\1')
+         | difference(podman_service_limits[podman_service_workload_service_name].containers | default({}) | dict2items
+                      | selectattr('value.start_timeout', 'defined') | map(attribute='key') | list) }}
 
 - name: Deploy each service
   ansible.builtin.include_tasks: service.yml

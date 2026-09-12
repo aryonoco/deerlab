@@ -137,6 +137,21 @@
          | combine(podman_service_workload.value | dict2items
                    | rejectattr('key', 'equalto', 'env') | items2dict) }}
 
+- name: Write the job timers of {{ podman_service_name }}
+  ansible.builtin.template:
+    src: timer.j2
+    dest: "/etc/systemd/user/{{ podman_service_name }}-{{ item.key }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ podman_service_spec.workloads | default({}) | dict2items | selectattr('value.kind', 'equalto', 'job') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    podman_service_workload_name: "{{ item.key }}"
+    podman_service_workload_spec: "{{ item.value }}"
+  register: podman_service_timers
+
 - name: Decide on a restart of {{ podman_service_name }}
   ansible.builtin.set_fact:
     podman_service_restart: >-
@@ -146,16 +161,17 @@
          or (podman_service_secrets.changed | default(false)) }}
     podman_service_reload: >-
       {{ (podman_service_units | selectattr('changed') | list | length > 0)
+         or (podman_service_timers.changed | default(false))
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
          or (podman_service_secrets.changed | default(false)) }}
 
 # Broader than podman_service_restart on purpose: Quadlet regenerates a
-# .service unit only on a daemon-reload, so a sidecar-only change that skipped
+# .service unit only on a daemon-reload, so a workload-only change that skipped
 # this would write the new .container file, leave the stale generated unit in
-# place, and then restart that stale unit below. systemd-analyze verify would
-# still pass, because it reads the new file directly rather than the stale
-# generated one, so nothing would catch the mismatch.
+# place. systemd-analyze verify would still pass, because it reads the new file
+# directly rather than the stale generated one, so nothing would catch the
+# mismatch.
 - name: Reload the user manager of {{ podman_service_name }}
   ansible.builtin.systemd_service:
     daemon_reload: true
@@ -170,14 +186,18 @@
     cmd: >-
       systemd-analyze --user --generators=true verify
       {{ podman_service_units | map(attribute='name') | map('regex_replace', '$', '.service') | join(' ') }}
+      {{ podman_service_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'equalto', 'job')
+         | map(attribute='key') | map('regex_replace', '^(.*)$', podman_service_name ~ '-\1.timer')
+         | join(' ') }}
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
   changed_when: false
 
-# Restarting the primary restarts its sidecars too, because they are PartOf= it.
-# So restart the primary whenever anything shared moved, and a sidecar on its
-# own only when the primary is not already being restarted.
+# Restarting the primary propagates to its workloads because they are PartOf=
+# it. So restart the primary whenever anything shared moved, and a worker on
+# its own only when the primary is not already being restarted.
 - name: Restart after a change to {{ podman_service_name }}
   ansible.builtin.systemd_service:
     name: "{{ podman_service_name }}.service"
@@ -209,9 +229,26 @@
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
-  loop: "{{ podman_service_units }}"
+  loop: "{{ podman_service_units | rejectattr('kind', 'equalto', 'job') | list }}"
   loop_control:
     label: "{{ item.name }}"
+
+# state: started on a timer arms the schedule; it does not run the job. A job
+# is never restarted or started directly by this role - either operation would
+# run it immediately, off schedule. Its changed Quadlet is reloaded above and
+# then waits for the timer's next window.
+- name: Enable the job timers of {{ podman_service_name }}
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_name }}-{{ item.key }}.timer"
+    enabled: true
+    state: started
+    scope: user
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_spec.workloads | default({}) | dict2items | selectattr('value.kind', 'equalto', 'job') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 # A pure read: it changes nothing, so it may run under check mode too, and the
 # assertion below needs its output to have something to parse during a dry run.

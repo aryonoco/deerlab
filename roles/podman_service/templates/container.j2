@@ -15,17 +15,27 @@ OnFailure=notify-failure@%n.service
 After={{ podman_service_parent_unit }}
 PartOf={{ podman_service_parent_unit }}
 {% endif %}
+{% if podman_service_container_kind != 'job' %}
 {# Without this, systemd's defaults (10s interval, burst 5) never trip: at    #}
 {# RestartSec=5 a unit manages about two restarts inside a 10s window, never  #}
 {# reaches the burst, and so never enters failed. OnFailure=notify-failure@   #}
 {# above only fires on that transition, so a crash loop would run forever    #}
 {# with no alert - the only alarm a container with no health check has.      #}
+{# A job never restarts, so there is no burst to detect.                     #}
 StartLimitIntervalSec=300
+{% endif %}
 
 [Container]
 ContainerName={{ podman_service_container_name }}
 Image={{ podman_service_container_spec.image }}
 Pull=never
+{% if podman_service_container_kind == 'job' %}
+{# Conmon enforces this bound on the running container. A timeout kills the  #}
+{# container, makes the unit fail, and triggers OnFailure= above. Neither    #}
+{# RuntimeMaxSec nor TimeoutStartSec actually terminates a Podman 5.4.2      #}
+{# container launched by a Type=oneshot Quadlet.                             #}
+PodmanArgs=--timeout={{ podman_service_container_limits.runtime_max }}
+{% endif %}
 {% if podman_service_container_spec.user is defined %}
 User={{ podman_service_container_spec.user }}
 {% endif %}
@@ -43,7 +53,7 @@ Network={{ podman_service_container_spec.network }}
 {# start. Needed when User= is set and the image ships content at the mount   #}
 {# point: Podman's copy-up into a fresh volume lands root-owned, and the      #}
 {# container then cannot write. Applied to the primary container only - a     #}
-{# sidecar is ordered After= it, so the chown has already happened, and doing #}
+{# workload is ordered After= it, so the chown has already happened, and      #}
 {# it twice doubles a cost that grows with the file count.                    #}
 Volume={{ podman_service_name }}-{{ volume.name }}.volume:{{ volume.mount }}{{ ':U' if (volume.chown | default(false) and podman_service_parent_unit | length == 0) else '' }}
 {% endfor %}
@@ -72,6 +82,12 @@ ReadOnly={{ 'true' if podman_service_container_spec.read_only | default(true) el
 ReadOnlyTmpfs=true
 SeccompProfile=/usr/share/containers/seccomp.json
 Mask=/proc/acpi:/proc/kcore:/proc/keys:/proc/timer_list:/proc/sched_debug:/proc/latency_stats:/sys/firmware
+{% if podman_service_container_spec.entrypoint is defined %}
+{# Replaces the image's ENTRYPOINT rather than appending to it. Needed when an #}
+{# image's entrypoint does first-run setup that a periodic job must not repeat #}
+{# against a live primary's files.                                            #}
+Entrypoint={{ podman_service_container_spec.entrypoint }}
+{% endif %}
 {% if podman_service_container_spec.exec is defined %}
 Exec={{ podman_service_container_spec.exec }}
 {% endif %}
@@ -79,7 +95,7 @@ PidsLimit={{ podman_service_container_limits.pids }}
 {% if podman_service_container_spec.userns is defined %}
 UserNS={{ podman_service_container_spec.userns }}
 {% endif %}
-{% if podman_service_container_spec.health is defined %}
+{% if podman_service_container_kind != 'job' and podman_service_container_spec.health is defined %}
 HealthCmd={{ podman_service_container_spec.health.cmd }}
 HealthInterval={{ podman_service_container_spec.health.interval | default('30s') }}
 HealthStartPeriod={{ podman_service_container_spec.health.start_period | default('60s') }}
@@ -94,12 +110,28 @@ Notify=healthy
 StopTimeout=30
 
 [Service]
+{% if podman_service_container_kind == 'job' %}
+{# Documented for exactly this case: a .container whose image exits once its #}
+{# entrypoint has finished. RemainAfterExit is deliberately NOT set. The man #}
+{# page recommends it alongside Type=oneshot in general, and for a           #}
+{# timer-activated unit it is exactly wrong: it leaves the job in a "started" #}
+{# state and PREVENTS every subsequent activation. Nothing fails, no alert   #}
+{# fires, the primary stays healthy, and the work simply stops happening.    #}
+Type=oneshot
+Restart=no
+{% else %}
 Restart=always
 RestartSec=5
 TimeoutStartSec={{ podman_service_container_limits.start_timeout | default(300) }}
+{% endif %}
 MemoryMax={{ podman_service_container_limits.memory }}
 CPUQuota={{ podman_service_container_limits.cpu }}
 TasksMax={{ podman_service_container_limits.tasks }}
 
+{% if podman_service_container_kind != 'job' %}
 [Install]
 WantedBy=default.target
+{% endif %}
+{# A job has no [Install] on purpose: its .timer owns activation. WantedBy=  #}
+{# default.target here would additionally run it once at every boot, outside #}
+{# its schedule and with no jitter.                                          #}
