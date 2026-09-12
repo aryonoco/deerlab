@@ -139,8 +139,9 @@ podman_services:
     backup:
       sqlite: { volume: data, path: db.sqlite3 }
       volumes: [data]
-    sidecars:
+    workloads:
       worker:
+        kind: worker
         # Huey's consumer, run directly rather than under supervisord.
         # supervisord cannot run here at all: both its configs declare
         # [supervisord] user=root and it refuses to start when it cannot drop

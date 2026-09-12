@@ -4,3 +4,19 @@
 podman_service_services: "{{ podman_services }}"
 podman_service_unit_root: /etc/containers/systemd/users
 podman_service_limits: "{{ deerlab_service_limits }}"
+
+# The keys a workload never inherits from its parent service. Two containers
+# cannot publish the same host port; a queue consumer has no endpoint to
+# health-check; and the secret-creation loop in service.yml iterates the parent
+# spec alone, so an inherited secrets entry would render a Secret= reference to
+# a Podman secret that was never created and the container would fail to start.
+# Named here rather than inline so the task that inherits and the assert that
+# validates cannot drift apart.
+podman_service_never_inherited:
+  - publish
+  - secrets
+  - health
+  - workloads
+  - backup
+  - uid
+  - egress

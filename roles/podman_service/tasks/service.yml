@@ -109,38 +109,38 @@
     podman_service_container_spec: "{{ podman_service_spec }}"
     podman_service_container_limits: "{{ podman_service_limits[podman_service_name].containers[podman_service_name] }}"
     podman_service_parent_unit: ""
+    podman_service_container_kind: primary
 
-# A sidecar is not a second service: it shares the user, UID, subordinate range,
-# slice, egress chain and backup repository, and differs only in what it runs.
-# It inherits the parent's spec and overrides what it declares. publish,
-# secrets, health, backup, uid, egress and sidecars are never inherited -
-# two containers cannot publish the same host port, and a queue consumer has no
-# endpoint to health-check. env is merged rather than replaced, with the
-# sidecar winning, because a worker needs the parent's application settings as
-# well as its own.
-- name: Write the sidecar container units of {{ podman_service_name }}
+# A workload is not a second service: it shares the user, UID, subordinate
+# range, slice, egress chain and backup repository, and differs only in what it
+# runs and when. It inherits the parent's spec and overrides what it declares.
+# Inheritance is allow-by-default: everything except podman_service_never_inherited
+# crosses. env is merged rather than replaced, with the workload winning,
+# because a worker needs the parent's application settings as well as its own.
+- name: Write the workload container units of {{ podman_service_name }}
   ansible.builtin.include_tasks: container.yml
-  loop: "{{ podman_service_spec.sidecars | default({}) | dict2items }}"
+  loop: "{{ podman_service_spec.workloads | default({}) | dict2items }}"
   loop_control:
-    loop_var: podman_service_sidecar
-    label: "{{ podman_service_sidecar.key }}"
+    loop_var: podman_service_workload
+    label: "{{ podman_service_workload.key }}"
   vars:
-    podman_service_container_name: "{{ podman_service_name }}-{{ podman_service_sidecar.key }}"
-    podman_service_container_limits: "{{ podman_service_limits[podman_service_name].containers[podman_service_name ~ '-' ~ podman_service_sidecar.key] }}"
+    podman_service_container_name: "{{ podman_service_name }}-{{ podman_service_workload.key }}"
+    podman_service_container_limits: "{{ podman_service_limits[podman_service_name].containers[podman_service_name ~ '-' ~ podman_service_workload.key] }}"
     podman_service_parent_unit: "{{ podman_service_name }}.service"
+    podman_service_container_kind: "{{ podman_service_workload.value.kind }}"
     podman_service_container_spec: >-
       {{ podman_service_spec | dict2items
-         | rejectattr('key', 'in', ['publish', 'secrets', 'health', 'sidecars', 'backup', 'uid', 'egress'])
+         | rejectattr('key', 'in', podman_service_never_inherited)
          | items2dict
          | combine({'env': (podman_service_spec.env | default({}))
-                           | combine(podman_service_sidecar.value.env | default({}))})
-         | combine(podman_service_sidecar.value | dict2items
+                           | combine(podman_service_workload.value.env | default({}))})
+         | combine(podman_service_workload.value | dict2items
                    | rejectattr('key', 'equalto', 'env') | items2dict) }}
 
 - name: Decide on a restart of {{ podman_service_name }}
   ansible.builtin.set_fact:
     podman_service_restart: >-
-      {{ (podman_service_units | rejectattr('sidecar') | selectattr('changed') | list | length > 0)
+      {{ (podman_service_units | selectattr('kind', 'equalto', 'primary') | selectattr('changed') | list | length > 0)
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
          or (podman_service_secrets.changed | default(false)) }}
@@ -188,7 +188,7 @@
   environment: "{{ podman_service_env }}"
   when: podman_service_restart | bool
 
-- name: Restart the changed sidecars of {{ podman_service_name }}
+- name: Restart the changed workers of {{ podman_service_name }}
   ansible.builtin.systemd_service:
     name: "{{ item.name }}.service"
     state: restarted
@@ -196,7 +196,7 @@
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
-  loop: "{{ podman_service_units | selectattr('sidecar') | selectattr('changed') | list }}"
+  loop: "{{ podman_service_units | selectattr('kind', 'equalto', 'worker') | selectattr('changed') | list }}"
   loop_control:
     label: "{{ item.name }}"
   when: not (podman_service_restart | bool)

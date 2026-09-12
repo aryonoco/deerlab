@@ -30,14 +30,16 @@ argument_specs:
           exec (str, overrides the image command), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
           the container user, health being optional, and
-          sidecars (dict of name to a partial spec, each rendering an
+          workloads (dict of name to a partial spec, each rendering an
           extra container unit under the same service user, volume and
-          slice, ordered After= and PartOf= the primary unit). A sidecar
-          inherits image, user, group, volumes, tmpfs, capabilities,
-          read_only, no_new_privileges, userns, network and exec, and
-          overrides any of them. env is merged with the sidecar winning.
-          publish, secrets, health, backup, uid and egress are never
-          inherited.
+          slice, ordered After= and PartOf= the primary unit), each
+          requiring a kind of worker or job. A workload inherits every
+          key of its parent except publish, secrets, health, workloads,
+          backup, uid and egress, and overrides any of them; env is
+          merged with the workload winning, and a volume's chown is
+          never inherited. The exclusion list is the contract - an
+          enumeration of what IS inherited goes stale every time a key
+          is added.
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users

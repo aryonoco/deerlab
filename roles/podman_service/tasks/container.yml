@@ -19,4 +19,4 @@
       {{ podman_service_units | default([])
          + [{'name': podman_service_container_name,
              'changed': podman_service_unit_result.changed,
-             'sidecar': podman_service_parent_unit | length > 0}] }}
+             'kind': podman_service_container_kind}] }}
