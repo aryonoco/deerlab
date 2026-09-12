@@ -256,6 +256,7 @@ palm-*
 .auto-gpt/
 .agent/
 .agents/
+.worktrees/
 .assistant/
 .assistants/
 .langchain/
