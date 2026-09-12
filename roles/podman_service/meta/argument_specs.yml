@@ -40,6 +40,21 @@ argument_specs:
           never inherited. The exclusion list is the contract - an
           enumeration of what IS inherited goes stale every time a key
           is added.
+      podman_service_never_inherited:
+        type: list
+        elements: str
+        default:
+          - publish
+          - secrets
+          - health
+          - workloads
+          - backup
+          - uid
+          - egress
+        description: >
+          Keys a workload never inherits from its parent service. This is
+          the shared exclusion contract used by both workload inheritance
+          and validation so the two cannot drift apart.
       podman_service_unit_root:
         type: path
         default: /etc/containers/systemd/users
