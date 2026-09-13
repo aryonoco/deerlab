@@ -102,6 +102,7 @@ flowchart LR
 | Backup env, password, dead-man conf | `/etc/deerlab/backup/<svc>.env`, `.password`, `-deadman.conf` |
 | Backup bootstrap marker | `/etc/deerlab/backup/<svc>.initialised` |
 | Backup unit and timer | `/etc/systemd/user/deerlab-backup-<svc>.{service,timer}` |
+| Job timers | `/etc/systemd/user/<svc>-<job>.timer`; the job's container is a Quadlet like the rest |
 | SQLite staging copy | `/var/lib/<svc>/backup/staging/` |
 | User-manager ordering drop-in | `/etc/systemd/system/user@<uid>.service.d/10-wait-network.conf` |
 | Per-service slice limits | `/etc/systemd/system/user-<uid>.slice.d/50-deerlab.conf` |
@@ -223,19 +224,25 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 
 - Notifications leave the host directly and depend on neither the edge nor the external monitor: an outage of the thing that watches must not silence the thing that reports
 - Push URLs are bearer secrets, in SOPS as `deerlab_deadman_urls`. Anyone holding one can mark a check healthy and mask a real outage
+- **A job that stops running is reported by nothing.** Pushover hears only a run that *fails*, and no dead-man watches a job. A job timer left stopped after a [restore](#restore), or a job that exits 0 having done nothing — FreshRSS's refresh does exactly that if its `/tmp` is read-only — looks like health: every unit green, the data going stale
+- **Never set `RemainAfterExit=yes` on a timer-activated job.** The general advice pairs it with `Type=oneshot`; here it is exactly wrong. The job stays in a started state after its first run and **every later timer activation is suppressed**. Nothing fails, no unit enters `failed`, `OnFailure=` never fires, the primary stays healthy, and the scheduled work simply stops, with no alert on either channel. `roles/podman_service/templates/container.j2` leaves it out on purpose. On the host, the job's unit reads `active` between runs instead of `inactive`
 
 ### Expected, not incidents
 
 | Symptom | Why |
 | --- | --- |
-| Stopping any service leaves it `failed` and pages you | Quadlets carry `Restart=always` and `Notify=healthy`, and Podman exits non-zero on `SIGTERM`, so an explicit `systemctl --user stop` ends `ActiveState=failed` and trips `OnFailure=`. Exactly one alert per stop; do not chase it. `Restart=always` does not resurrect after an explicit stop, so the stop holds |
+| Stopping any service leaves it `failed` and pages you | A primary or worker Quadlet carries `Restart=always` — a primary `Notify=healthy` too — and Podman exits non-zero on `SIGTERM`, so an explicit `systemctl --user stop` ends `ActiveState=failed` and trips `OnFailure=`. Exactly one alert per stop; do not chase it. `Restart=always` does not resurrect after an explicit stop, so the stop holds |
+| A job's unit `inactive` between runs | A job is `Type=oneshot` with `Restart=no` and no `Notify=healthy`: `inactive` between runs is its normal state, and `activating` while one runs. A run that exits non-zero, including one killed by Podman's `--timeout`, enters `failed` and pages through `OnFailure=` — that one *is* an incident |
 | Red backup dead-man **and** a Pushover alert | May mean "snapshot fine, repository unverifiable": `restic check` runs *after* the snapshot is committed and a check failure fails the unit, so `ExecStartPost` — the dead-man ping — is skipped. Read the journal before concluding the snapshot did not happen |
 | `just plan` reports one change on a converged host | The pip task, not drift. See [Delivery](#delivery) |
 | A host briefly ahead of `release` after `just apply` | Reverted by the next pull, restarting the affected unit once. Resolves when the commit is promoted |
 
 - **linkding's web container logs `Error: Can't drop privilege as nonroot user` once per start.** Upstream's supervisord declares `[supervisord] user=root` and refuses to run in a non-root container. `bootstrap.sh` has no `set -e`, does not check it, and `exec`s uwsgi anyway — so the web app serves and, more importantly, keeps *enqueueing* work. `linkding-worker.service` is what drains the queue
-- **Do NOT "fix" it by setting `LD_DISABLE_BACKGROUND_TASKS`.** That variable gates task *enqueueing*, not just supervisord: setting it stops favicons, previews, metadata refresh and snapshots being queued at all, and the worker then consumes an empty queue forever. The symptom is indistinguishable from the upstream defect the sidecar exists to avoid
-- **Headless Chromium renders snapshots at maximum confinement.** The worker inherits `capabilities: []`, `read_only: true` and `no_new_privileges: true` from the primary, and on exactly that configuration a real page snapshotted to 806 KB on the live host. No `--no-sandbox`, no `ShmSize=`, no capability added back. The only concessions are the two tmpfs mounts recorded beside the sidecar definition, because `single-file-cli` writes its Chromium profile relative to a read-only WORKDIR. If a future image regresses this, add one thing at a time and record what failed beside the definition — `--no-sandbox` trades the confinement away for the convenience, and never relax the web container, which is a separate container that nothing here touches
+- **Do NOT "fix" it by setting `LD_DISABLE_BACKGROUND_TASKS`.** That variable gates task *enqueueing*, not just supervisord: setting it stops favicons, previews, metadata refresh and snapshots being queued at all, and the worker then consumes an empty queue forever. The symptom is indistinguishable from the upstream defect the worker exists to avoid
+- **Headless Chromium renders snapshots at maximum confinement.** The worker inherits `capabilities: []`, `read_only: true` and `no_new_privileges: true` from the primary, and on exactly that configuration a real page snapshotted to 806 KB on the live host. No `--no-sandbox`, no `ShmSize=`, no capability added back. The only concessions are the two tmpfs mounts recorded beside the worker definition, because `single-file-cli` writes its Chromium profile relative to a read-only WORKDIR. If a future image regresses this, add one thing at a time and record what failed beside the definition — `--no-sandbox` trades the confinement away for the convenience, and never relax the web container, which is a separate container that nothing here touches
+- **FreshRSS's entrypoint logs failed `sed` calls against `httpd.conf` and the Apache config on every start.** They fail under the read-only rootfs. The script has no `set -e`, so it proceeds and the container works
+- `LISTEN`, `TRUSTED_PROXY` and `ENABLE_ACCESS_LOG` are inert for the same reason, so setting them changes nothing: the vendored `FreshRSS.Apache.conf` is where those are set. `TZ` is inert too, and the image's own `TZ=UTC` is what applies
+- **Setting `CRON_MIN` does not refresh FreshRSS's feeds.** The image's crontab drops privilege with `su`, which is setuid-root and neutered by `NoNewPrivileges=true`, so its internal cron cannot work here under any configuration. On this Alpine image it fails silently: the container runs, `crond` starts, `crontab -` fails with `must be suid to work properly`. `freshrss-refresh.timer` is what fetches
 
 ### The health check does not prove the data is good
 
@@ -249,6 +256,9 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 - The acceptance test after any restore is **`GET /login` returning 200 after a restart**, and nothing weaker
 - Even that proves only that the database is *readable*, never that it is **yours** — see [Rebuilding a host from nothing](#rebuilding-a-host-from-nothing). Only a human looking at content can
 - **Baikal is the exception to the first bullet, and only the first.** Its health command opens the database through a fresh connection on every check and reads its schema, so a destroyed file is caught within a minute or two rather than at the next restart. It still proves only that the database opens — not that it is yours
+- **FreshRSS is the sharpest case: nothing that reports its health reads the database at all.** With `db.sqlite` replaced by random bytes, `cli/health.php` exits 0, `cli/user-info.php` exits 0, `actualize_script.php` exits 0 and prints `admin OK`, and `/api/` and `/i/` both return 200, because `p/api/index.php` calls `initSystem()` and never queries the database. Its container health check and the edge's `/api/` check are liveness only, and neither request is an acceptance test after a FreshRSS restore: read content you recognise
+  - `cli/actualize-user.php` is **not** a usable canary: it exits 1 on a healthy database when there was nothing to refresh
+  - `cli/db-optimize.php` does detect the corruption, but runs `VACUUM` and is too heavy to poll
 
 ## Backups
 
@@ -256,14 +266,17 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 - Schedule `OnCalendar=*-*-* 03:00:00` + `RandomizedDelaySec=1800` = 03:00–03:30, hosts run `Etc/UTC`, bounded by `TimeoutStartSec=1h`
 - The unit's steps, in order:
 
-1. `ExecStartPre`: `podman unshare test -s <live database>`. `sqlite3` opens its source with `OPEN_CREATE`, so a merely *wrong* path does not fail — it creates an empty 4096-byte database, copies that over the last good staging copy, passes the integrity check, uploads it and pings the dead-man, and nothing downstream can tell that from a healthy backup. `-s`, not `-f`, because a zero-length file is exactly the case to refuse
-2. Online SQLite `.backup` into `/var/lib/<svc>/backup/staging/`, inside `podman unshare` so subordinate-owned files are readable
-3. `PRAGMA integrity_check` on that copy, **tested** rather than merely run: `sqlite3` exits 0 on a corrupt database
-4. `podman unshare restic backup` of the staging directory plus each named volume's `_data`
-5. `restic check` — structural, no `--read-data`
-6. `ExecStartPost`: the dead-man ping
+1. `ExecStartPre`, for every `sqlite` entry: `podman unshare test -s <live database>`. `sqlite3` opens its source with `OPEN_CREATE`, so a merely *wrong* path does not fail — it creates an empty 4096-byte database, copies that into staging, passes the integrity check, uploads it and pings the dead-man, and nothing downstream can tell that from a healthy backup. `-s`, not `-f`, because a zero-length file is exactly the case to refuse
+   - A `path` containing `*` is a glob, expanded by `sh` inside `podman unshare` when the unit runs, not by Ansible at apply time. Every match gets the same `test -s`, and **a glob matching nothing fails the unit**, for the same `OPEN_CREATE` reason
+2. `ExecStartPre`: clear `/var/lib/<svc>/backup/staging/` and recreate it empty, only once every source has passed step 1. Otherwise a renamed path's or a deleted user's old copy would be archived into every later snapshot, where a careless restore could resurrect it. A run that fails validation leaves the previous staging copy in place; clearing is safe either way because restic holds the history
+3. Online SQLite `.backup` of each database into staging **at its path relative to the volume's `_data` root** — `users/alice/db.sqlite` stages at `staging/users/alice/db.sqlite` — inside `podman unshare` so subordinate-owned files are readable. Mirrored, not flattened, because every FreshRSS user's database is named `db.sqlite`
+4. `PRAGMA integrity_check` on each staged copy, **tested** rather than merely run: `sqlite3` exits 0 on a corrupt database
+5. `podman unshare restic backup` of the staging directory plus each named volume's `_data`
+6. `restic check` — structural, no `--read-data`
+7. `ExecStartPost`: the dead-man ping
 
-- A service with no database skips steps 1–3
+- `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root
+- A service with no database skips steps 1–4
 - The edge's Caddy data volume is backed up the same way, so a rebuild does not burn ACME rate limits reissuing certificates
 
 | Hazard | Consequence |
@@ -271,7 +284,6 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | **`restic check` takes an exclusive repository lock**, after every snapshot | A manual `just backup-prune` fired inside the backup window contends with it. Run retention outside 03:00–03:30 UTC |
 | **restic invoked by the role runs under the service user's systemd manager, not your SSH session** | It **outlives an interrupted command**: `Ctrl-C` does not stop it and it may still hold a repository lock after your terminal returns. Check `restic list locks` before calling a lock stale |
 | A repository lock | **Cleared with `restic unlock`. Never by deleting objects from the repository** |
-| Renaming a database path in inventory | The old file stays in staging, is never cleaned up, and keeps being archived beside the new one where a careless restore could pick it. Delete it from `/var/lib/<svc>/backup/staging/` by hand |
 | Removing a volume | Check nothing else references it first — another service definition, another mount, another backup path |
 | `restic` on the hosts is Debian's, not the version pinned in `mise.toml` | That pin is the operator machine's. Do not assume flag parity |
 
@@ -349,6 +361,9 @@ R /usr/bin/restic snapshots --compact
 
 - The proved sequence. Run **as root on the services host**
 - **Paste it into a root shell rather than pushing it through Ansible.** Pushed, it passes through three shells (yours, Ansible's `/bin/sh -c`, and the inner `sh -c`), and `$d` eaten by the outer shell makes the copy target `/<db file>` at the filesystem root, where it silently succeeds. If you must push it, keep the script in a file and use `-a "$(cat step.sh)"`
+- `<db file>` is the database's `path` from the service's `backup.sqlite` entry — baikal's is `Specific/db/db.sqlite` — and means that same relative path in the staging copy and under the live volume's `_data`
+- **Staging has had two layouts.** Backup units from before `sqlite` became a list staged a flat `staging/<basename>`; later ones stage the relative path. There was no single cut-over instant, so check the snapshot you chose rather than its date: `R /usr/bin/restic ls <snapshot> /var/lib/<svc>/backup/staging`. The database file itself directly under `staging/` is the older layout; the first directory of its `path` there is the newer one
+- From an older-layout snapshot, put the basename in the `r=` and `--include` lines only; the live side keeps the full path. A database at the volume root, such as linkding's `db.sqlite3`, stages at the same path in both layouts
 
 ```sh
 # 1. Stop the service. It will end `failed` and page you. Expected.
@@ -358,7 +373,7 @@ systemctl --user --machine=<svc>@ show <svc>.service -p ActiveState --value
 # 2. Restore, verify, then swap atomically.
 R /usr/bin/podman unshare /bin/sh -c '
 set -e
-d=/var/lib/<svc>/.local/share/containers/storage/volumes/<svc>-<volume>/_data/<db dir>
+d=/var/lib/<svc>/.local/share/containers/storage/volumes/<svc>-<volume>/_data
 s=/var/lib/<svc>/backup/restore
 r=$s/var/lib/<svc>/backup/staging/<db file>
 rm -rf "$s"
@@ -380,6 +395,16 @@ echo "restore rc=$?"   # must be 0
 #    return green over a destroyed database - see above.
 systemctl --user --machine=<svc>@ start <svc>.service
 curl -s -o /dev/null -w "login=%{http_code}\n" http://127.0.0.1:<port>/login
+
+# 4. Start each worker and job timer the service has - one per entry under its
+#    workloads: <svc>-<name>.service for a worker, <svc>-<name>.timer for a job.
+#    Stopping the service stopped them (PartOf=), which is what kept a job from
+#    firing mid-swap; starting the service does NOT start them again. Skip this
+#    and they stay down, with no alert, until the next pull starts them, up to
+#    about 35 minutes later. Starting a timer arms its schedule; it does not
+#    run the job.
+systemctl --user --machine=<svc>@ start <svc>-<worker>.service <svc>-<job>.timer
+systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value   # need active
 ```
 
 | Line | Why it is that way |
@@ -389,7 +414,7 @@ curl -s -o /dev/null -w "login=%{http_code}\n" http://127.0.0.1:<port>/login
 | `stat` the live file for owner and mode | `cp` onto an *existing* file keeps that file's mode, but in the disaster this is for the file may be gone, and owner and mode would then come from the transient unit's umask. Reading them first keeps the procedure free of service-specific constants |
 | `rm -f` the `-journal` as well as `-wal`/`-shm` | This database is not in WAL mode, so no `-wal`/`-shm` exist at all; `-journal`, the rollback journal, is what can re-corrupt a freshly restored database. Removing all three costs nothing |
 | the `65534:65534 644` fallback | **Only a fallback, and not universal.** Inside `podman unshare` the service user is uid 0 and *this* image's web-server user maps to namespace uid 65534. `ls` renders it `nobody nogroup` from the host's `/etc/passwd`; it is a real mapped id, not an unmapped one. **Another image maps a different uid** — `stat` the live tree first, and never copy this number into another service's procedure |
-| a summary reading `Restored 6 / 1 files/dirs` | Normal. `restic restore --include` still creates the whole parent directory chain, so the file lands at a nested absolute path under `--target` |
+| a summary reading `Restored 6 / 1 files/dirs`, or more directories for a nested `<db file>` | Normal. `restic restore --include` still creates the whole parent directory chain, so the file lands at a nested absolute path under `--target` |
 
 ### B. Rebuild a service's volumes from a snapshot
 
@@ -403,10 +428,11 @@ export XDG_RUNTIME_DIR=/run/user/<uid>
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus
 
 # 1. Stop the service. Ends `failed`, pages you. Expected.
-# For a service with a sidecar, stopping the primary stops the sidecar too
-# (PartOf=). Do NOT stop them separately and do NOT restore with the worker
-# still running: it writes to the same SQLite files inside the volume you are
-# about to replace.
+# For a service with workloads, stopping the primary also stops every worker,
+# any job mid-run and every job timer (PartOf=). Do NOT stop them separately
+# and do NOT restore with a worker still running: it writes to the same SQLite
+# files inside the volume you are about to replace. A job timer left armed
+# could fire mid-restore and recreate an empty volume underneath you.
 systemctl --user --machine=<svc>@ stop <svc>.service
 
 # 2. Remove the volumes. Quadlet runs the container with --rm, so stopping
@@ -428,6 +454,12 @@ R /usr/bin/podman unshare /usr/bin/restic restore \
 
 # 5. Start it, then verify with a real request.
 systemctl --user --machine=<svc>@ start <svc>.service
+
+# 6. Start each worker and job timer, exactly as in Restore A step 4. Starting
+#    the service did not, and nothing alerts while one stays down; the next
+#    pull starts them, up to about 35 minutes later.
+systemctl --user --machine=<svc>@ start <svc>-<worker>.service <svc>-<job>.timer
+systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value   # need active
 ```
 
 > #### The trap: restore to the volume directory, never to its `_data` child
@@ -513,12 +545,18 @@ systemctl --user --machine=<svc>@ start <svc>.service
 1. Add an entry to `podman_services` — `inventory/group_vars/services/main.yml` for the services host, `inventory/group_vars/edge/main.yml` for the edge — with the next UID from 2000 upward, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, a health command, an egress class and a `backup:` block. Secrets go in the matching `secrets.sops.yaml`, referenced with `{{ }}`
    - Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, **not** the Quadlet's rendered `Image=` line, so an image assembled from variables is one Renovate will never bump
    - The record stays plaintext: the service key, image, ports, UID, capabilities, health command and egress class are what review is *for*, and identify nothing on their own. Every field that resolves to or authenticates against something outside the repository is a `{{ }}` reference to an encrypted variable
-   - A service needing a second process — a queue consumer, a scheduler — gets a `sidecars:` entry, **not** a second `podman_services` entry. Two service users cannot share a named volume in rootless Podman, so a worker is the same service: same UID, same subordinate range, same slice, same egress chain, same backup repository, different command
-   - A sidecar inherits `image`, `user`, `group`, `volumes`, `tmpfs`, `capabilities`, `read_only`, `no_new_privileges`, `userns`, `network` and `exec`, and overrides any of them. `env` is merged, sidecar wins. `publish`, `secrets`, `health`, `backup`, `uid` and `egress` are never inherited
-   - A sidecar **may declare** its own `health` check but **cannot declare** `publish`, `secrets`, `backup`, `uid`, `egress` or nested `sidecars` — an assert in `roles/podman_service/tasks/main.yml` rejects the whole play if one does
+   - A service needing a second process gets a `workloads:` entry, **not** a second `podman_services` entry. Two service users cannot share a named volume in rootless Podman, so a workload is the same service: same UID, same subordinate range, same slice, same egress chain, same backup repository, different command
+   - Every workload declares `kind:`, and the play fails without it. A `worker` is long-lived like the primary — linkding's queue consumer. A `job` is a `Type=oneshot` container started by a timer — FreshRSS's fifteen-minute feed refresh. Either way its unit is `<service>-<name>.service`
+   - A workload inherits every key of its parent except the ten in `podman_service_never_inherited`, in `roles/podman_service/defaults/main.yml`: `publish`, `secrets`, `health`, `workloads`, `backup`, `uid`, `egress`, `kind`, `schedule` and `persistent`. A key the workload declares replaces the parent's outright, lists included; only `env` is merged, workload winning. A volume's `:U` (`chown: true`) is applied to the primary only — a workload starts `After=` it, so the chown has already happened
+   - A workload **may declare** its own `health` check but **cannot declare** `publish`, `secrets`, `backup`, `uid`, `egress` or nested `workloads` — an assert in `roles/podman_service/tasks/main.yml` rejects the whole play if one does
+   - A `job` must declare `schedule:`, an `OnCalendar=` expression, and must not declare `health`, since a probe on a container that exits is meaningless; a `worker` may declare neither `schedule` nor `persistent`. The play fails on any of these. `jitter:` (seconds, default 60) and `persistent:` (boolean, default `false`) are optional on a job
+   - A job's timer is a plain systemd unit, `/etc/systemd/user/<service>-<name>.timer`, root-owned `0644`, while its container is a Quadlet beside the primary's. **Quadlet silently ignores a `.timer` in its own directory**, so never move one there. Never add `RemainAfterExit=yes` to a job either — see [Alerts](#alerts-and-what-only-looks-like-a-fault)
    - `tmpfs:` entries take `mode=`, never `uid=`/`gid=`. Podman 5.4.2 rejects the latter two outright and the container exits 125 with `unknown mount option "uid=33": invalid mount option` before the image starts. A tmpfs is created root-owned and a Quadlet cannot chown it, so `mode=1777` is how a container running as a non-root uid gets a writable scratch directory
-   - The sidecar's unit is `After=` and `PartOf=` the primary's **generated** `.service`. So `systemctl stop <service>` stops both, and `systemctl start <service>` does **not** start the sidecar — `PartOf` propagates stop and restart only. Both units carry their own `WantedBy=default.target`, so a boot starts both in order
-   - Limits live in `inventory/group_vars/all/limits.yml`, not in the service record. Every container needs an entry under `containers:` keyed by its unit basename (`linkding`, `linkding-worker`), and the `slice:` budget must be at least their sum — `podman_user` asserts it and fails the play rather than silently throttling a container
+   - Every workload's unit is `After=` and `PartOf=` the primary's **generated** `.service`, and every job's timer is `PartOf=` it too. So `systemctl stop <service>` stops them all, and `systemctl start <service>` starts **none** of them — `PartOf` propagates stop and restart only. The primary and each worker carry `WantedBy=default.target` and each timer `WantedBy=timers.target`, so a boot starts the primary and workers and arms every timer; a job has no `[Install]` of its own, because its timer owns activation
+   - The role never starts or restarts a job directly: either would run it off schedule. A changed job waits for its timer's next window
+   - `env:` values are written quoted, so a value may contain spaces. Never put a secret there — Quadlet units are world-readable `0644`. That is what `secrets:` is for
+   - Limits live in `inventory/group_vars/all/limits.yml`, not in the service record. Every container needs an entry under `containers:` keyed by its unit basename (`linkding`, `linkding-worker`, `freshrss-refresh`), and the `slice:` budget must be at least their sum — `podman_user` asserts it and fails the play rather than silently throttling a container
+   - A worker's entry needs `start_timeout`, which becomes systemd's `TimeoutStartSec=`. A job's needs `runtime_max` instead, which becomes Podman's own `--timeout` in the generated `podman run`, through `[Container] PodmanArgs=` — not a systemd directive, because on Podman 5.4.2 `RuntimeMaxSec=` is ignored for `Type=oneshot` and `TimeoutStartSec=` marks the unit timed out while the container runs on to completion. A run the timeout kills fails the unit and pages. Keep `runtime_max` strictly below the schedule interval, so a hung run dies before its next window; nothing asserts it
    - `egress:` must be `any`, `web` or `platform`, and is asserted twice: `base_firewall` and `podman_user` each check it against their own prefixed option, but both options source from the single `deerlab_egress_classes` list, so a role still asserts its own inputs. A fourth class means editing that one definition, plus a branch in `nftables.conf.j2`. There is no class that denies everything: the service **user** pulls its own image, runs restic against the object store and posts to Pushover when a unit fails, so DNS and 443 are floors. `platform` is `web` without port 80, and says the application itself never calls out
 2. **Start from nothing and add back.** Drop all capabilities, set `read_only: true` and `no_new_privileges: true`, then add back only what the image proves it needs, one at a time, recording in a comment beside the definition what failed and how. That is how the current lists were arrived at, and why one capability that "looked required" is not in one of them
 3. Add a site block to `caddy_caddyfile` in `inventory/group_vars/edge/main.yml` pointing at `http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:<port>`, with an active health check whose URI actually reads the database, and create the DNS records
@@ -538,6 +576,7 @@ systemctl --user --machine=<svc>@ start <svc>.service
 
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
 - WireGuard keys rotate the same way, and **both hosts must be updated in the same commit** — a half-rotated tunnel is a broken tunnel, and the services host has no other route in
+- **FreshRSS's admin password is create-only.** `create-user.php` exits 3 once the account exists, so changing `freshrss_admin_password` and promoting appears to succeed and changes nothing. Change it in the FreshRSS UI, or with FreshRSS's `cli/update-user.php --user <user> --password <password>`; `cli/user-info.php` only reports. Prefer the UI: `update-user.php` takes the password as a command-line argument, which any local account can read from `/proc/<pid>/cmdline` while it runs
 - After changing the recipient list in `.sops.yaml`, run `just secrets-rekey`; it re-encrypts every tracked `*.sops.yaml` for the recipients currently listed
 - sops matches creation rules against the **absolute** path, which is why the `secrets/` rule is anchored `(^|/)secrets/…` and not `^secrets/…`. An anchor that matches nothing makes `updatekeys` report "already up to date" and leaves the credential shared, with a green result
 - Rotation is not a substitute for treating an exposure as an exposure. Ciphertext here is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total
@@ -565,7 +604,7 @@ systemctl --user --machine=<svc>@ start <svc>.service
 
 - **The full rebuild path has never been run end to end.** Every restore so far was onto a host that kept its service user, subordinate ranges, Quadlet units, pulled image, Podman secrets, backup credentials, user manager, tunnel and firewall. What is evidenced is the *last* link: data back into a host that was already built. The honest test is a third VPS, bootstrapped from this repository with nothing but an address and a DNS change, then restored
 - **Restoring onto a host with a different subordinate base has not been demonstrated.** The argument that `podman unshare` makes it portable follows from where the kernel applies the mapping and is sound, but both ends of every drill so far were the same host with the same `/etc/subuid`
-- **The raw volume copy of a database inside a snapshot is a hot copy.** Every snapshot holds the database twice: the staging copy, written by SQLite's online `.backup` and integrity-checked by the unit, consistent by construction; and the plain file read of the live database inside the volume tree, consistent only by luck. A volume-level restore (Restore B) takes the second. On a busy instance it can carry a torn page set and nothing in the pipeline would notice — `restic check` verifies the repository, not the database inside it. **A torn copy has never been produced, restored or detected.** Given the choice, restore the volumes and then overwrite the database with the snapshot's staging copy per Restore A
+- **The raw volume copy of a database inside a snapshot is a hot copy.** Every snapshot holds each database twice: the staging copy, written by SQLite's online `.backup` and integrity-checked by the unit, consistent by construction; and the plain file read of the live database inside the volume tree, consistent only by luck. A volume-level restore (Restore B) takes the second. On a busy instance it can carry a torn page set and nothing in the pipeline would notice — `restic check` verifies the repository, not the database inside it. **A torn copy has never been produced, restored or detected.** Given the choice, restore the volumes and then overwrite the database with the snapshot's staging copy per Restore A
 - **The alerting path has never fired for a backup failure.** That `OnFailure=notify-failure@…` resolves in user scope is verified by `systemd-analyze --user verify`; delivery is inherited from a path proved elsewhere. A real backup failure has never been deliberately induced
 - **Retention has never actually deleted a snapshot.** Every repository is well inside `--keep-within 30d`, so `forget --prune` has only ever been a no-op beyond index maintenance. That the operator credential *can* delete is untested; that the per-service credentials can delete their own locks is tested
 - **Scale is unproven.** The repositories are hundreds of kilobytes. Nothing here says anything about restore duration, timeout headroom or hot-copy risk at gigabytes
