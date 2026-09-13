@@ -17,8 +17,7 @@ base_firewall_role: services
 # OIDC_ENABLED is never defined, the piped CustomLog duplicates what the edge
 # already records, and RemoteIPInternalProxy trusts three whole private ranges
 # where one host would do. All three are accepted so that diffing this against
-# a new release stays trivial. The tunnel prefix is inside those ranges, so
-# X-Forwarded-For is trusted correctly today.
+# a new release stays trivial.
 freshrss_apache_conf: |
   ServerName freshrss.localhost
   Listen 8080
@@ -406,16 +405,24 @@ podman_services:
       # The whole argument string is the secret, not just the password, because
       # create-user.php takes the password as an argument and there is no way
       # to split it out. It must NOT go in env: above - the template renders
-      # env entries as Environment= lines into the root-owned Quadlet file, so
-      # the password would sit in plaintext on the host.
+      # env entries as Environment= lines into a world-readable (mode 0644)
+      # Quadlet file, so the password would sit in plaintext on the host.
       #
       # Create-only: create-user.php exits 3 once the user exists, so changing
       # this value and promoting appears to succeed and changes nothing. A real
       # password change goes through the UI or cli/user-info.php.
       #
-      # The password charset is constrained - see decision 15. The entrypoint
-      # expands this string through $(eval "echo \"$FRESHRSS_USER\""), so a
-      # backtick, $( or double quote would be re-interpreted by the shell.
+      # Charset: both the admin username and the password must use only
+      # A-Za-z0-9.,_-. The entrypoint expands this string through
+      # eval "echo \"$FRESHRSS_USER\"", so inside those double quotes a
+      # backtick, a dollar sign, a backslash or a double quote is interpreted,
+      # and the resulting unquoted command substitution then word-splits and
+      # globs.
+      #
+      # Even with a compliant charset the password is not kept off the host
+      # entirely: the entrypoint passes it to create-user.php as a
+      # command-line argument on every container start, so it is briefly
+      # visible in that process's /proc/<pid>/cmdline.
       - { name: user-args, value: "--user {{ freshrss_admin_user }} --password {{ freshrss_admin_password }} --language en", type: env, target: FRESHRSS_USER }
     capabilities: []
     read_only: true
@@ -426,7 +433,7 @@ podman_services:
       # http://localhost/api/ and the listen port moved. The probe asserts the
       # body starts with <!DOCTYPE html>, ends with </html> and contains
       # /scripts/api.js, so it is a content check - but it does NOT read the
-      # database. See decision 17: this is liveness only.
+      # database. This is liveness only.
       cmd: php /var/www/FreshRSS/cli/health.php --url=http://localhost:8080/api/
       interval: 30s
       start_period: 120s
@@ -444,7 +451,8 @@ podman_services:
         kind: job
         # Fifteen minutes, jittered by 60s so the fetch burst does not land on
         # a round minute. runtime_max in limits.yml is 600s, strictly inside
-        # the window and enforced by Podman's --timeout through decision 4.
+        # the window and enforced by Podman's own --timeout, not a systemd
+        # timeout directive.
         schedule: "*:0/15"
         persistent: false
         # Bypasses ./Docker/entrypoint.sh, which ends in exec "$@" and would
