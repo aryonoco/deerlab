@@ -46,3 +46,15 @@ deerlab_service_limits:
     slice: { memory: 1G, cpu: "200%", tasks: 512 }
     containers:
       baikal: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }
+
+  freshrss:
+    slice: { memory: 2G, cpu: "400%", tasks: 1024 }
+    containers:
+      freshrss:         { memory: 768M, cpu: "200%", tasks: 512, pids: 256, start_timeout: 300 }
+      # runtime_max, not start_timeout: on Podman 5.4.2, systemd's
+      # RuntimeMaxSec is ignored for Type=oneshot and TimeoutStartSec marks the
+      # activation timed out without killing the container. runtime_max
+      # renders as Podman's own --timeout, which does kill it. Ten minutes,
+      # strictly inside the fifteen-minute window, so a hung fetch dies before
+      # the next run would be due.
+      freshrss-refresh: { memory: 768M, cpu: "200%", tasks: 256, pids: 128, runtime_max: 600 }
