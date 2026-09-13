@@ -25,7 +25,9 @@ argument_specs:
           with the managed header), capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
-          egress (any|web|platform), backup ({sqlite: {volume, path}, volumes}),
+          egress (any|web|platform), backup ({sqlite, volumes}, sqlite
+          being a list of {volume, path} mappings whose path, relative to
+          the volume's _data, may be a glob),
           user (str or int, container-side UID), group (str or int),
           entrypoint (str, renders Entrypoint=), exec (str, overrides the
           image command), volumes entries taking
@@ -75,8 +77,12 @@ argument_specs:
           budget and a containers mapping. Every container's own entry
           carries memory, cpu, tasks and pids. Primary containers and workers
           use start_timeout as systemd TimeoutStartSec. Jobs instead require
-          runtime_max, strictly shorter than their schedule interval, which
-          renders as Podman's --timeout argument. Conmon enforces the bound by
-          killing the container, making the unit fail and firing its failure
-          notification; systemd RuntimeMaxSec is ignored for Type=oneshot and
-          TimeoutStartSec does not terminate the Podman 5.4.2 container.
+          runtime_max, which renders as Podman's --timeout argument. Conmon
+          enforces the bound by killing the container, making the unit fail
+          and firing its failure notification; systemd RuntimeMaxSec is
+          ignored for Type=oneshot and TimeoutStartSec does not terminate the
+          Podman 5.4.2 container. runtime_max plus the job's jitter must be
+          less than the schedule interval: RandomizedDelaySec is redrawn at
+          every elapse, so a run that starts late and is killed only at
+          runtime_max can outlast the next window, which systemd then skips
+          silently.

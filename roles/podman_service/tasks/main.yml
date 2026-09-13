@@ -34,23 +34,21 @@
 # podman_service_never_inherited - it does not stop a workload from declaring
 # a key itself. kind, schedule and persistent are mandatory or valid workload
 # keys, so they must not join the forbidden-key list below. base_firewall
-# builds every host's
-# egress chains from map(attribute='publish') over the top-level
-# podman_services entries alone, so a workload's own PublishPort= would open a
-# port with no egress chain and no firewall rule ever written for it: a silent
-# bypass introduced by one misplaced key, not a startup failure. A workload
-# with no matching entry in deerlab_service_limits fails instead with a raw
-# Jinja error from deep inside service.yml; this gives that a clean fail_msg.
+# builds every host's egress chains from map(attribute='publish') over the
+# top-level podman_services entries alone, so a workload's own PublishPort=
+# would open a port with no egress chain and no firewall rule ever written for
+# it: a silent bypass introduced by one misplaced key, not a startup failure. A
+# workload with no matching entry in deerlab_service_limits fails instead with
+# a raw Jinja error from deep inside service.yml; this gives that a clean
+# fail_msg.
 #
-# health is deliberately absent from this list. The design states a worker may
-# declare its own health and secrets, inheriting neither. secrets stays
-# forbidden anyway: the
+# health is deliberately absent from this list: a worker may declare its own
+# health check rather than inherit the primary's, and only a job is refused
+# one, by the job-health check below. secrets stays on the list because the
 # secret-creation loop in service.yml iterates the parent spec only, so a
 # workload's own secrets entry would render a Secret= reference to a Podman
-# secret that was never created, and the container would fail to start. A
-# future reader must not "restore" secrets here by reading the design
-# document alone - this narrowing is intentional and stays until the
-# secret-creation loop is taught to look at workloads too.
+# secret that was never created, and the container would fail to start. Keep
+# it here until that loop is taught to look at workloads too.
 - name: Validate the workload definitions
   ansible.builtin.assert:
     that:
