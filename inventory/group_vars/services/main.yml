@@ -357,8 +357,8 @@ podman_services:
       # Apache writes its pid here; the image creates the directory empty.
       - "/run/apache2:rw,nosuid,nodev,size=16m,mode=1777"
       # PHP sessions land in /tmp on Alpine because session.save_path is unset.
-      # Without this the container starts, the health check passes, and login
-      # is impossible: session_start() hits a read-only filesystem.
+      # The template's ReadOnlyTmpfs=true already makes /tmp a writable tmpfs;
+      # this entry is here to cap it at 256m.
       - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
     config_files:
       # A faithful copy of Docker/FreshRSS.Apache.conf at the pinned tag with
@@ -387,7 +387,6 @@ podman_services:
       # /etc/localtime, /etc/timezone and php.ini, all of which fail on a
       # read-only rootfs, with no set -e to notice. The image's own ENV TZ=UTC
       # is the effective setting, which is what this estate wants anyway.
-      # Declaring the variable would only imply it does something.
       #
       # Idempotent by upstream design: do-install.php exits 3 once
       # data/applied_migrations.txt exists and the entrypoint treats 3 as "no
@@ -410,7 +409,7 @@ podman_services:
       #
       # Create-only: create-user.php exits 3 once the user exists, so changing
       # this value and promoting appears to succeed and changes nothing. A real
-      # password change goes through the UI or cli/user-info.php.
+      # password change goes through the UI or cli/update-user.php.
       #
       # Charset: both the admin username and the password must use only
       # A-Za-z0-9.,_-. The entrypoint expands this string through
@@ -461,8 +460,8 @@ podman_services:
         # concurrently with the daemon serving from the same files.
         entrypoint: php
         exec: ./app/actualize_script.php
-        # Overrides the primary's list: no Apache here, but /tmp must stay
-        # writable. TMP_PATH holds the actualize mutex, and with a read-only
-        # /tmp the script EXITS 0 HAVING DONE NOTHING.
+        # Overrides the primary's list, which a workload otherwise inherits
+        # whole: no Apache runs here, so /run/apache2 is dropped and only the
+        # 256m cap on /tmp is kept.
         tmpfs:
           - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
