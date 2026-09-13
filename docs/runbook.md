@@ -240,8 +240,8 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 - **linkding's web container logs `Error: Can't drop privilege as nonroot user` once per start.** Upstream's supervisord declares `[supervisord] user=root` and refuses to run in a non-root container. `bootstrap.sh` has no `set -e`, does not check it, and `exec`s uwsgi anyway — so the web app serves and, more importantly, keeps *enqueueing* work. `linkding-worker.service` is what drains the queue
 - **Do NOT "fix" it by setting `LD_DISABLE_BACKGROUND_TASKS`.** That variable gates task *enqueueing*, not just supervisord: setting it stops favicons, previews, metadata refresh and snapshots being queued at all, and the worker then consumes an empty queue forever. The symptom is indistinguishable from the upstream defect the worker exists to avoid
 - **Headless Chromium renders snapshots at maximum confinement.** The worker inherits `capabilities: []`, `read_only: true` and `no_new_privileges: true` from the primary, and on exactly that configuration a real page snapshotted to 806 KB on the live host. No `--no-sandbox`, no `ShmSize=`, no capability added back. The only concessions are the two tmpfs mounts recorded beside the worker definition, because `single-file-cli` writes its Chromium profile relative to a read-only WORKDIR. If a future image regresses this, add one thing at a time and record what failed beside the definition — `--no-sandbox` trades the confinement away for the convenience, and never relax the web container, which is a separate container that nothing here touches
-- **FreshRSS's entrypoint logs failed `sed` calls against `httpd.conf` and the Apache config on every start.** They fail under the read-only rootfs. The script has no `set -e`, so it proceeds and the container works
-- `LISTEN`, `TRUSTED_PROXY` and `ENABLE_ACCESS_LOG` are inert for the same reason, so setting them changes nothing: the vendored `FreshRSS.Apache.conf` is where those are set. `TZ` is inert too, and the image's own `TZ=UTC` is what applies
+- **FreshRSS's entrypoint logs failed timezone writes on every start.** It applies `TZ` by writing `/etc/localtime` and `/etc/timezone` and by a `sed -i` on `php.ini`, and those writes fail under the read-only rootfs. The script has no `set -e`, so it proceeds and the container works. The image's own `ENV TZ=UTC` is what applies
+- Setting `LISTEN`, `TRUSTED_PROXY` or `ENABLE_ACCESS_LOG` makes the entrypoint `sed -i` the vendored `FreshRSS.Apache.conf`, which is mounted read-only, so the edit fails and the script carries on. The record sets none of them: the vendored file is where `Listen`, the `RemoteIP` trust and `CustomLog` are set
 - **Setting `CRON_MIN` does not refresh FreshRSS's feeds.** The image's crontab drops privilege with `su`, which is setuid-root and neutered by `NoNewPrivileges=true`, so its internal cron cannot work here under any configuration. On this Alpine image it fails silently: the container runs, `crond` starts, `crontab -` fails with `must be suid to work properly`. `freshrss-refresh.timer` is what fetches
 
 ### The health check does not prove the data is good
@@ -363,7 +363,7 @@ R /usr/bin/restic snapshots --compact
 - **Paste it into a root shell rather than pushing it through Ansible.** Pushed, it passes through three shells (yours, Ansible's `/bin/sh -c`, and the inner `sh -c`), and `$d` eaten by the outer shell makes the copy target `/<db file>` at the filesystem root, where it silently succeeds. If you must push it, keep the script in a file and use `-a "$(cat step.sh)"`
 - `<db file>` is the database's `path` from the service's `backup.sqlite` entry — baikal's is `Specific/db/db.sqlite` — and means that same relative path in the staging copy and under the live volume's `_data`
 - **Staging has had two layouts.** Backup units from before `sqlite` became a list staged a flat `staging/<basename>`; later ones stage the relative path. There was no single cut-over instant, so check the snapshot you chose rather than its date: `R /usr/bin/restic ls <snapshot> /var/lib/<svc>/backup/staging`. The database file itself directly under `staging/` is the older layout; the first directory of its `path` there is the newer one
-- From an older-layout snapshot, put the basename in the `r=` and `--include` lines only; the live side keeps the full path. A database at the volume root, such as linkding's `db.sqlite3`, stages at the same path in both layouts
+- Put the snapshot chosen in pre-flight (c) — `latest` or an ID — in place of `<snapshot>` in the `restic restore` line. From an older-layout snapshot, also put the basename in the `r=` line and in that line's `--include` path; the live side keeps the full path. A database at the volume root, such as linkding's `db.sqlite3`, stages at the same path in both layouts
 
 ```sh
 # 1. Stop the service. It will end `failed` and page you. Expected.
@@ -377,7 +377,7 @@ d=/var/lib/<svc>/.local/share/containers/storage/volumes/<svc>-<volume>/_data
 s=/var/lib/<svc>/backup/restore
 r=$s/var/lib/<svc>/backup/staging/<db file>
 rm -rf "$s"
-/usr/bin/restic restore latest --target "$s" --include /var/lib/<svc>/backup/staging/<db file>
+/usr/bin/restic restore <snapshot> --target "$s" --include /var/lib/<svc>/backup/staging/<db file>
 test -s "$r"
 test "$(/usr/bin/sqlite3 "$r" "PRAGMA integrity_check")" = ok
 own=$(stat -c '%u:%g' "$d/<db file>" 2>/dev/null || echo 65534:65534)
@@ -401,8 +401,9 @@ curl -s -o /dev/null -w "login=%{http_code}\n" http://127.0.0.1:<port>/login
 #    Stopping the service stopped them (PartOf=), which is what kept a job from
 #    firing mid-swap; starting the service does NOT start them again. Skip this
 #    and they stay down, with no alert, until the next pull starts them, up to
-#    about 35 minutes later. Starting a timer arms its schedule; it does not
-#    run the job.
+#    about 35 minutes later. A `persistent: false` job, such as FreshRSS's
+#    refresh, is only armed and waits for its next window; a `persistent: true`
+#    job runs once immediately if a window passed while its timer was stopped.
 systemctl --user --machine=<svc>@ start <svc>-<worker>.service <svc>-<job>.timer
 systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value   # need active
 ```
