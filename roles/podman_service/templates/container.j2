@@ -64,7 +64,18 @@ Volume={{ mount.src }}:{{ mount.dst }}{{ ':ro' if mount.ro | default(true) else 
 Tmpfs={{ tmpfs }}
 {% endfor %}
 {% for key, value in (podman_service_container_spec.env | default({})).items() %}
-Environment={{ key }}={{ value }}
+{# Quoted uniformly, proved against the real Quadlet 5.4.2 binary. Unquoted,   #}
+{# Quadlet splits an Environment= value on whitespace and only the first word  #}
+{# reaches the container - silently, with no error - so a multi-word value    #}
+{# such as FRESHRSS_INSTALL would truncate to its first flag. Escaping order   #}
+{# matters: backslash first, so the backslash a later step introduces is never #}
+{# re-escaped. % and $ are escaped because systemd expands both as specifiers  #}
+{# and variables in the generated ExecStart, even inside a quoted value.       #}
+Environment="{{ key }}={{ value | string
+  | replace('\\', '\\\\')
+  | replace('"', '\\"')
+  | replace('%', '%%')
+  | replace('$', '$$') }}"
 {% endfor %}
 {% for secret in podman_service_container_spec.secrets | default([]) %}
 {% if secret.type | default('mount') == 'env' %}
