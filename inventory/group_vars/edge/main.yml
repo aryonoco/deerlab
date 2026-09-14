@@ -81,6 +81,26 @@ caddy_caddyfile: |
       }
   }
 
+  freshrss.{{ deerlab_domain }} {
+      log {
+          output stdout
+          format json
+      }
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8083 {
+          # Liveness only, and deliberately so - unlike linkding's /health and
+          # baikal's exact-401, this proves nothing about the database.
+          # p/api/index.php calls initSystem() and never queries it, so /api/
+          # answers 200 over a destroyed database. No cheap endpoint exists
+          # that does better; see the runbook.
+          health_uri /api/
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
 podman_services:
   caddy:
     uid: 2000

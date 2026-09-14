@@ -233,10 +233,11 @@
   loop_control:
     label: "{{ item.name }}"
 
-# state: started on a timer arms the schedule; it does not run the job. A job
-# is never restarted or started directly by this role - either operation would
-# run it immediately, off schedule. Its changed Quadlet is reloaded above and
-# then waits for the timer's next window.
+# state: started arms a timer. A persistent: false job then waits for its next
+# window, but a persistent: true job runs at once if a window passed while its
+# timer was stopped. Beyond that a job is never restarted or started directly
+# by this role - either operation would run it immediately, off schedule - so
+# its changed Quadlet, reloaded above, waits for the timer's next window.
 - name: Enable the job timers of {{ podman_service_name }}
   ansible.builtin.systemd_service:
     name: "{{ podman_service_name }}-{{ item.key }}.timer"

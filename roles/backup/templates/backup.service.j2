@@ -42,9 +42,14 @@ ExecStartPre=/usr/bin/podman unshare /usr/bin/test -s {{ root }}/{{ db.path }}
 # archived into every later snapshot, where a careless restore could pick it
 # up and resurrect the account. Clearing is safe: restic holds the history, and
 # a failed run loses only this run's copy.
+{% endif %}
+{# The clear runs whether or not the service lists any sqlite entry. Inside   #}
+{# that condition, removing a service's last entry would leave its final     #}
+{# staged copy behind, archived into every later snapshot with nothing left  #}
+{# to clear it.                                                               #}
 ExecStartPre=/usr/bin/rm -rf %h/backup/staging
 ExecStartPre=/usr/bin/install -d -m 0700 %h/backup/staging
-{% for db in backup_spec.sqlite %}
+{% for db in backup_spec.sqlite | default([]) %}
 {% set root = backup_volume_root ~ '/' ~ backup_name ~ '-' ~ db.volume ~ '/_data' %}
 {% if '*' in db.path %}
 # cd first so the glob yields a path relative to the volume root: staging
@@ -58,7 +63,6 @@ ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; /usr/bin/install -d -m 070
 ExecStart=/usr/bin/sh -c 'test "$(/usr/bin/sqlite3 %h/backup/staging/{{ db.path }} "PRAGMA integrity_check")" = ok'
 {% endif %}
 {% endfor %}
-{% endif %}
 ExecStart=/usr/bin/podman unshare /usr/bin/restic backup --quiet --exclude-caches %h/backup/staging{% for volume in backup_spec.volumes | default([]) %} {{ backup_volume_root }}/{{ backup_name }}-{{ volume }}/_data{% endfor %}
 
 # Verify the repository structurally on every run, so corruption is found
