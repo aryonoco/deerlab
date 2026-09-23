@@ -60,3 +60,11 @@ deerlab_service_limits:
       # at runtime_max can outlast the next window, which systemd then skips
       # silently. Here 600 + 60 (the default jitter) < 900.
       freshrss-refresh: { memory: 768M, cpu: "200%", tasks: 256, pids: 128, runtime_max: 600 }
+
+  vikunja:
+    slice: { memory: 768M, cpu: "100%", tasks: 256 }
+    containers:
+      # 768M covers the 256m /tmp tmpfs, which counts against the container,
+      # plus the process: measured at 50 MiB idle and 75 MiB with a health
+      # probe running.
+      vikunja: { memory: 768M, cpu: "100%", tasks: 256, pids: 128, start_timeout: 120 }

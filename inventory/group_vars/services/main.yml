@@ -465,3 +465,109 @@ podman_services:
         # 256m cap on /tmp is kept.
         tmpfs:
           - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
+
+  vikunja:
+    uid: 2005
+    # The official image, FROM scratch: one static binary and a CA bundle, no
+    # shell, no curl and no entrypoint script. docker.io/vikunja/vikunja serves
+    # the same index digest; ghcr.io matches the image's own source label.
+    image: ghcr.io/go-vikunja/vikunja:2.6.0@sha256:417ada6f94e81f0267aa2f007d0a811fc82d38dd2aa58351e3ea520ca01c2ea5
+    # The image's own USER, pinned rather than inherited, so an image that
+    # changed it cannot make :U silently re-chown the volumes to a new uid.
+    # group is explicit because the image names none, which means gid 0.
+    user: 1000
+    group: 1000
+    publish:
+      - "8084:3456"
+    volumes:
+      # chown renders :U. The image ships nothing at either path, so a fresh
+      # volume is root-owned and uid 1000 exits 1 at start with "storage
+      # validation failed ... permission denied". :U also repairs ownership
+      # after Restore B recreates a volume empty.
+      - { name: db, mount: /db, chown: true }
+      - { name: files, mount: /app/vikunja/files, chown: true }
+    tmpfs:
+      # A data export zips every attachment into /tmp before moving it into
+      # files storage, and a vikunja-file import lands here up to
+      # migration.vikunjafile.maxsize, 256MB by default. tmpfs pages count
+      # against the container's memory limit in limits.yml.
+      - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
+    # Vikunja's web command traps only SIGINT. On Podman's default SIGTERM it
+    # exits at once with 143, cutting requests in flight.
+    stop_signal: SIGINT
+    env:
+      # Must equal the browser origin exactly: the web app is served with its
+      # API base rewritten to this URL plus api/v1. It also builds every link
+      # in mail and feeds, and is fatal at start if unset while CORS is on.
+      VIKUNJA_SERVICE_PUBLICURL: "https://{{ vikunja_hostname }}/"
+      # Open while the household registers, then closed by a follow-up change
+      # once their accounts exist. The hostname is in Certificate Transparency
+      # from the moment the edge obtains its certificate, so it stays open for
+      # hours, not days. Written out although true is the default, so closing
+      # it is a one-line diff.
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: "true"
+      # The database always stores GMT (pkg/db/db.go), so these two change how
+      # times are read and where a new account starts, never stored data.
+      VIKUNJA_SERVICE_TIMEZONE: Australia/Sydney
+      VIKUNJA_DEFAULTSETTINGS_TIMEZONE: Australia/Sydney
+      # Trust the edge's X-Forwarded-For, so logs, session lists and the
+      # unauthenticated rate limit of 10 a minute per IP see real clients, not
+      # the edge. CIDR only: a bare address is dropped with a warning
+      # (parseTrustedProxies in pkg/routes/ip.go).
+      VIKUNJA_SERVICE_IPEXTRACTIONMETHOD: xff
+      VIKUNJA_SERVICE_TRUSTEDPROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32"
+      # SQLite with no DSN tricks: on 2.6.0 overlapping writes can fail at once
+      # with HTTP 500 "database is locked", which is accepted and in the
+      # runbook. Both paths are explicit so a future image cannot move the data
+      # silently. .sqlite, not the image's .db, because just restore-drill
+      # checks *.sqlite and *.sqlite3 only.
+      VIKUNJA_DATABASE_TYPE: sqlite
+      VIKUNJA_DATABASE_PATH: /db/vikunja.sqlite
+      VIKUNJA_FILES_BASEPATH: /app/vikunja/files
+      # Implicit TLS on 465, the one port the mail egress class adds.
+      VIKUNJA_MAILER_ENABLED: "true"
+      VIKUNJA_MAILER_HOST: "{{ vikunja_mailer_host }}"
+      VIKUNJA_MAILER_PORT: "465"
+      VIKUNJA_MAILER_FORCESSL: "true"
+      VIKUNJA_MAILER_FROMEMAIL: "{{ vikunja_mailer_from }}"
+      TZ: Etc/UTC
+      # Deliberately ABSENT, and must stay absent:
+      # - VIKUNJA_SERVICE_TESTINGTOKEN mounts database-truncation endpoints;
+      # - VIKUNJA_LICENSE_KEY turns on a licence check that calls upstream;
+      # - VIKUNJA_SENTRY_* and VIKUNJA_AUTH_OPENID_*;
+      # - VIKUNJA_DATABASE_PASSWORD and every PG* variable: this is SQLite;
+      # - VIKUNJA_CORS_*. The default allows localhost:* and 127.0.0.1:* with
+      #   credentials, which the desktop app needs: it serves its frontend on
+      #   127.0.0.1:45735 and falls back to a random port when that is taken.
+    secrets:
+      # Signs access tokens, link-share tokens and API-token keys; unset, it
+      # is regenerated at every start. Not create-only: rotating it invalidates
+      # in-flight link-share and access tokens; share links and sessions
+      # survive.
+      - { name: service-secret, value: "{{ vikunja_service_secret }}", type: env, target: VIKUNJA_SERVICE_SECRET }
+      # The username too: it is half a credential, and env: would put it in
+      # the world-readable Quadlet file.
+      - { name: mailer-username, value: "{{ vikunja_mailer_username }}", type: env, target: VIKUNJA_MAILER_USERNAME }
+      - { name: mailer-password, value: "{{ vikunja_mailer_password }}", type: env, target: VIKUNJA_MAILER_PASSWORD }
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    health:
+      # A JSON array because the image has no shell, with no leading "CMD" (see
+      # baikal's record). It proves the database opens and migrates and the
+      # files directory is writable. It does NOT prove the data is there: over
+      # a deleted database it creates a new, empty one and passes, as the
+      # server does at every start. backup.sqlite's presence_query is what
+      # notices. Each probe runs Vikunja's full start-up, migrations included.
+      cmd: '["/app/vikunja/vikunja","healthcheck"]'
+      interval: 30s
+      start_period: 60s
+    # platform plus 465 for the mailer. Webhooks stay enabled and can reach
+    # any public address on 443 or 465.
+    egress: mail
+    backup:
+      sqlite:
+        # Fails the backup, and pages, when no account exists. A re-created
+        # empty database passes every other check.
+        - { volume: db, path: vikunja.sqlite, presence_query: "SELECT count(*) > 0 FROM users" }
+      volumes: [db, files]
