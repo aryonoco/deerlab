@@ -20,7 +20,10 @@ argument_specs:
           path mappings, with each path relative to the named literal volume's
           _data root and optionally containing *. A glob must match at least
           one file or the unit fails, and staging mirrors each relative path.
-          An optional volumes list names the volumes to archive.
+          An entry may carry presence_query, one plain SELECT matching
+          SELECT [A-Za-z0-9_ ().,*<>=!]+ in full, which must print exactly 1
+          against the staged copy or the unit fails before restic runs. An
+          optional volumes list names the volumes to archive.
       backup_s3_bucket:
         type: str
         required: true

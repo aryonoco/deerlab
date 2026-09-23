@@ -36,6 +36,23 @@
     fail_msg: "backup credentials or dead-man URL for {{ backup_name }} are not set"
     quiet: true
 
+# presence_query is written into the unit between double quotes inside
+# single quotes, in an sh -c line. A quote would end either, systemd expands
+# % and $, a backslash escapes for both, and a newline or ; would add a
+# statement. SELECT-only keeps a mistyped key from writing to the staged copy
+# before it is uploaded. The message names entries by path, never the query.
+- name: Refuse unsafe presence queries for {{ backup_name }}
+  ansible.builtin.assert:
+    that:
+      - backup_presence_bad | length == 0
+    fail_msg: "sqlite entries of {{ backup_name }} with a presence_query that is not one plain SELECT: {{ backup_presence_bad }}"
+    quiet: true
+  vars:
+    backup_presence_bad: >-
+      {{ backup_spec.sqlite | default([]) | selectattr('presence_query', 'defined')
+         | rejectattr('presence_query', 'regex', 'SELECT [A-Za-z0-9_ ().,*<>=!]+', match_type='fullmatch')
+         | map(attribute='path') | list }}
+
 - name: Write the restic environment of {{ backup_name }}
   ansible.builtin.copy:
     content: |
