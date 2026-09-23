@@ -30,7 +30,9 @@ argument_specs:
           the volume's _data, may be a glob),
           user (str or int, container-side UID), group (str or int),
           entrypoint (str, renders Entrypoint=), exec (str, overrides the
-          image command), volumes entries taking
+          image command), stop_signal (str matching SIG[A-Z0-9]+, renders
+          StopSignal= for an image that ignores or dies on SIGTERM; a
+          workload inherits it), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
           the container user, health being optional, and
           workloads (dict of name to a partial spec, each rendering an

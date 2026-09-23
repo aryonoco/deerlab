@@ -15,10 +15,13 @@
       - podman_service_definition_name in podman_service_limits[podman_service_definition_name].containers
       - podman_service_limits[podman_service_definition_name].containers[podman_service_definition_name].pids is defined
       - (podman_service_definition_spec.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
+      # fullmatch, not match: re.match's $ also matches before a trailing
+      # newline, and a newline here would split the unit file.
+      - podman_service_definition_spec.stop_signal is not defined or podman_service_definition_spec.stop_signal is regex('SIG[A-Z0-9]+', match_type='fullmatch')
     fail_msg: >-
       service {{ podman_service_definition_name }} needs a fully qualified digest-pinned image, publish,
-      health.cmd, an entry with a pids limit in deerlab_service_limits, and no
-      CHANGE-ME secrets
+      health.cmd, an entry with a pids limit in deerlab_service_limits, no
+      CHANGE-ME secrets, and a stop_signal, if set, of the form SIGNAME
     quiet: true
   # A failed loop result contains its complete item, and the CHANGE-ME check
   # fails exactly while real secrets are being staged. Loop over the service
@@ -60,6 +63,7 @@
       - podman_service_workload_bad_persistent | length == 0
       - podman_service_workload_missing_runtime_max | length == 0
       - podman_service_workload_missing_start_timeout | length == 0
+      - podman_service_workload_bad_stop_signals | length == 0
     fail_msg: >-
       service {{ podman_service_workload_service_name }}: workloads with a missing or invalid kind
       {{ podman_service_workload_bad_kinds }}; workloads declaring a parent-only
@@ -72,7 +76,9 @@
       missing runtime_max in deerlab_service_limits
       {{ podman_service_workload_missing_runtime_max }}; workers missing
       start_timeout in deerlab_service_limits
-      {{ podman_service_workload_missing_start_timeout }}
+      {{ podman_service_workload_missing_start_timeout }}; workloads with a
+      stop_signal not of the form SIGNAME
+      {{ podman_service_workload_bad_stop_signals }}
     quiet: true
   # A failed loop result contains its complete item. Loop over the service name
   # alone so a validation failure cannot print the service's secret values.
@@ -152,6 +158,12 @@
          | map('regex_replace', '^(.*)$', podman_service_workload_service_name ~ '-\1')
          | difference(podman_service_limits[podman_service_workload_service_name].containers | default({}) | dict2items
                       | selectattr('value.start_timeout', 'defined') | map(attribute='key') | list) }}
+    # fullmatch, not match, for the reason given on the service's own check.
+    podman_service_workload_bad_stop_signals: >-
+      {{ podman_service_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.stop_signal', 'defined')
+         | rejectattr('value.stop_signal', 'regex', 'SIG[A-Z0-9]+', match_type='fullmatch')
+         | map(attribute='key') | list }}
 
 - name: Deploy each service
   ansible.builtin.include_tasks: service.yml

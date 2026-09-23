@@ -118,6 +118,13 @@ HealthOnFailure=kill
 {# must appear and disappear together.                                        #}
 Notify=healthy
 {% endif %}
+{% if podman_service_container_spec.stop_signal is defined %}
+{# For an image whose process traps only some signals. Vikunja's web      #}
+{# command handles only SIGINT; on Podman's default SIGTERM it dies at once #}
+{# with exit 143, cutting requests in flight and dropping its in-memory     #}
+{# event queue. Rendered only when set, so every other unit is unchanged.   #}
+StopSignal={{ podman_service_container_spec.stop_signal }}
+{% endif %}
 StopTimeout=30
 
 [Service]
