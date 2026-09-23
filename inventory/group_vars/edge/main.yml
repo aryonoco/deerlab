@@ -101,6 +101,24 @@ caddy_caddyfile: |
       }
   }
 
+  {{ vikunja_hostname }} {
+      log {
+          output stdout
+          format json
+      }
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8084 {
+          # Liveness only. /health opens a session and pings the database,
+          # which on SQLite succeeds on any open handle: a deleted or empty
+          # database answers 200. See the runbook.
+          health_uri /health
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
 podman_services:
   caddy:
     uid: 2000
