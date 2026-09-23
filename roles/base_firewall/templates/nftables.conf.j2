@@ -10,7 +10,7 @@ table inet deerlab {
   chain svc_{{ name }} {
 {% if svc.egress == 'any' %}
     accept
-{% elif svc.egress in ('web', 'platform') %}
+{% elif svc.egress in ('web', 'platform', 'mail') %}
 {# The resolver accepts come first on purpose. drop is terminal, so if a #}
 {# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
 {# resolver, a link-local metadata address - a drop placed above would make #}
@@ -24,8 +24,10 @@ table inet deerlab {
 {# platform is web without port 80. Both still need DNS and 443, because the #}
 {# service user itself pulls the image, runs restic and posts to Pushover. #}
 {# No class can deny everything, which is why there is no longer one that #}
-{# claims to. #}
-    tcp dport { {{ '80, 443' if svc.egress == 'web' else '443' }} } accept
+{# claims to. mail is platform plus 465, SMTP submission over implicit TLS, #}
+{# for an application that sends its own mail through a relay. Like the #}
+{# others it is port-based: 465 is open to any public address. #}
+    tcp dport { {{ {'web': '80, 443', 'platform': '443', 'mail': '443, 465'}[svc.egress] }} } accept
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
 {% else %}

@@ -25,7 +25,7 @@ argument_specs:
           with the managed header), capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
-          egress (any|web|platform), backup ({sqlite, volumes}, sqlite
+          egress (any|web|platform|mail), backup ({sqlite, volumes}, sqlite
           being a list of {volume, path} mappings whose path, relative to
           the volume's _data, may be a glob),
           user (str or int, container-side UID), group (str or int),
