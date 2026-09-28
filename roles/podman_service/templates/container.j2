@@ -17,11 +17,12 @@ PartOf={{ podman_service_parent_unit }}
 {% endif %}
 {% if podman_service_container_kind != 'job' %}
 {# Without this, systemd's defaults (10s interval, burst 5) never trip: at    #}
-{# RestartSec=5 a unit manages about two restarts inside a 10s window, never  #}
-{# reaches the burst, and so never enters failed. OnFailure=notify-failure@   #}
-{# above only fires on that transition, so a crash loop would run forever    #}
-{# with no alert - the only alarm a container with no health check has.      #}
-{# A job never restarts, so there is no burst to detect.                     #}
+{# RestartSec=5 a unit manages about two starts inside a 10s window, so a     #}
+{# crash loop would restart forever. Each crash passes through failed and     #}
+{# fires OnFailure= above before the restart (RestartMode=normal, measured    #}
+{# in a systemd 257 lab), so that loop would page every few seconds. With     #}
+{# 300s the sixth start inside five minutes is refused, and the unit stays    #}
+{# failed. A job never restarts, so there is no burst to detect.              #}
 StartLimitIntervalSec=300
 {% endif %}
 
