@@ -1,9 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "docker:pinDigests"],
+  "extends": ["config:recommended"],
   "timezone": "Australia/Sydney",
-  "schedule": ["before 6am on monday"],
-  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "github-actions", "pip_requirements"],
+  "schedule": ["* * * * 1"],
+  "updateNotScheduled": false,
+  "prHourlyLimit": 0,
+  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "pip_requirements"],
+  "semanticCommits": "disabled",
+  "commitMessagePrefix": "deps:",
+  "commitBody": "{{#if (equals updateType 'digest')}}Upstream rebuilt the tag, so the pinned digest is stale.{{else}}Upstream published a newer release.{{/if}}\n\n{{#each upgrades}}{{#unless @first}}\n{{/unless}}{{{depName}}}: {{#if (equals updateType 'digest')}}{{{currentValue}}} {{{currentDigestShort}}} -> {{{newDigestShort}}}{{else}}{{{displayFrom}}} -> {{{displayTo}}}{{/if}}\n  in {{{packageFile}}}{{/each}}",
+  "commitTrailers": [
+    "Developed-by: Aryan Ameri <info@ameri.me>",
+    "Assisted-by: <Renovate:renovate-{{lookup (split renovateVersion '.') 0}}>"
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -14,18 +23,110 @@
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The sops release base_pull installs on each host; must move with mise.toml's sops",
+      "managerFilePatterns": ["/^roles/base_pull/defaults/main\\.yml$/"],
+      "matchStrings": ["base_pull_sops_version:\\s*\"(?<currentValue>[0-9][0-9.]*)\""],
+      "depNameTemplate": "sops",
+      "packageNameTemplate": "getsops/sops",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ],
   "packageRules": [
     {
+      "description": "Every container image gets its own PR",
       "matchManagers": ["custom.regex"],
-      "groupName": "container images",
+      "matchDatasources": ["docker"],
       "labels": ["dependencies", "images"]
     },
     {
+      "description": "Every major waits for a tick on the Dependency Dashboard",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Cooldown only where the registry supplies a push time: Docker Hub. ghcr.io has none and would pend forever",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker.io/**"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Cooldown for the Python toolchain (runs as root on both hosts) and the collections",
+      "matchDatasources": ["pypi", "galaxy-collection"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Caddy's image label points at caddy-docker, which publishes no releases",
+      "matchPackageNames": ["docker.io/library/caddy"],
+      "sourceUrl": "https://github.com/caddyserver/caddy",
+      "addLabels": ["edge"]
+    },
+    {
+      "description": "Vikunja: security fixes ship only in minors, and every start migrates the schema",
+      "matchPackageNames": ["ghcr.io/go-vikunja/vikunja"],
+      "schedule": ["at any time"],
+      "addLabels": ["stateful", "backup-first"],
+      "prBodyNotes": [
+        "**Before promoting:** run `deerlab-backup-vikunja.service` by hand and confirm `Result=success`. Vikunja migrates its schema on every start; the only rollback is a restore. See docs/runbook.md, Vikunja, Upgrading."
+      ]
+    },
+    {
+      "description": "Baikal has no downgrade path",
+      "matchPackageNames": ["ghcr.io/aryonoco/baikal"],
+      "addLabels": ["stateful"],
+      "prBodyNotes": [
+        "**No downgrade path.** Once promoted, reverting this PR leaves an image older than `configured_version`, which refuses to start. Pin forward, never back."
+      ]
+    },
+    {
+      "description": "FreshRSS: the vendored Apache config is a copy of the image's",
+      "matchPackageNames": ["docker.io/freshrss/freshrss"],
+      "prBodyNotes": [
+        "Re-diff `freshrss_apache_conf` against `Docker/FreshRSS.Apache.conf` at {{{newValue}}} before merging."
+      ]
+    },
+    {
+      "description": "The operator's Ansible and the hosts' Ansible move together",
       "matchManagers": ["mise", "pip_requirements"],
-      "matchPackageNames": ["ansible", "pipx:ansible"],
+      "matchPackageNames": ["ansible"],
       "groupName": "ansible"
+    },
+    {
+      "description": "One sops version on the operator's machine and on the hosts",
+      "matchPackageNames": ["getsops/sops"],
+      "groupName": "sops"
+    },
+    {
+      "description": "House subject for a version bump: 'subsystem: update <short name> to <version>'. A packageRule, because the docker datasource's own commitMessageTopic/Extra override top-level settings",
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "commitMessageAction": "update",
+      "commitMessageTopic": "{{{replace '^(.*/|pipx:)' '' depName}}}",
+      "commitMessageExtra": "to {{#if (equals datasource 'docker')}}{{{newValue}}}{{else}}{{#if isSingleVersion}}{{{newVersion}}}{{else}}{{{newValue}}}{{/if}}{{/if}}"
+    },
+    {
+      "description": "House subject for a tag rebuilt in place: 'subsystem: update caddy 2.11.4 digest to 0c99453'",
+      "matchUpdateTypes": ["digest"],
+      "commitMessageAction": "update",
+      "commitMessageTopic": "{{{replace '^.*/' '' depName}}} {{{currentValue}}} digest",
+      "commitMessageExtra": "to {{{newDigestShort}}}"
+    },
+    {
+      "description": "Subsystem: the services host's applications",
+      "matchFileNames": ["inventory/group_vars/services/**"],
+      "commitMessagePrefix": "services:"
+    },
+    {
+      "description": "Subsystem: the edge host's Caddy",
+      "matchFileNames": ["inventory/group_vars/edge/**"],
+      "commitMessagePrefix": "edge:"
+    },
+    {
+      "description": "Subsystem: the operator's toolchain and the Ansible and sops the hosts install",
+      "matchFileNames": ["mise.toml", "host-requirements.txt", "roles/base_pull/defaults/main.yml"],
+      "commitMessagePrefix": "tools:"
     }
   ]
 }
