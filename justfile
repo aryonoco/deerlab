@@ -156,10 +156,13 @@ merge branch:
     # resign whose push you declined leaves re-signed commits there that the
     # pull request never held and its checks never ran on.
     git fetch origin
-    git merge --ff-only {{ quote("refs/remotes/origin/" + branch) }}
-    # The same check ansible-pull --verify-commit runs against the release head.
+    # The same check ansible-pull --verify-commit runs against the release head,
+    # made before the merge, so a head that fails it is never merged into main.
     # A bot's commits carry GitHub's web-flow signature rather than a key in
     # allowed_signers: run just resign on the branch first.
+    git verify-commit {{ quote("refs/remotes/origin/" + branch) }}
+    git merge --ff-only {{ quote("refs/remotes/origin/" + branch) }}
+    # Again on the head about to be pushed.
     git verify-commit HEAD
     git push origin refs/heads/main:refs/heads/main
 
@@ -185,6 +188,13 @@ resign branch:
         echo "ERROR: the working tree has uncommitted changes" >&2
         exit 1
     fi
+    # A rebase or git am of yours in progress: git refuses to switch during
+    # one, and the exit trap below, which aborts any rebase it finds, would
+    # throw yours away.
+    if [[ -d $(git rev-parse --git-path rebase-merge) || -d $(git rev-parse --git-path rebase-apply) ]]; then
+        echo "ERROR: a rebase or git am is in progress; finish or abort it first" >&2
+        exit 1
+    fi
     # Full ref names throughout: git resolves refs/tags/<name> before
     # refs/remotes/<name>, and fetch follows any tag that points into the
     # history it fetches, so a tag called origin/main would otherwise become
@@ -197,23 +207,23 @@ resign branch:
     # --no-overwrite-ignore below cannot see that. .agents/ and .superpowers/
     # are ignored, and exist only on your machine.
     mapfile -d '' -t touched < <(git log -z --no-renames --format= --name-only \
-        refs/remotes/origin/main.."refs/remotes/origin/$branch" | sort -zu)
+        refs/remotes/origin/main.."refs/remotes/origin/$branch" | LC_ALL=C sort -zu)
     wait $!
     ignored=()
     if [[ ${#touched[@]} -gt 0 ]]; then
-        # check-ignore exits 1 when none of the paths is ignored.
-        mapfile -d '' -t ignored < <(printf '%s\0' "${touched[@]}" | git check-ignore -z --stdin)
+        # check-ignore reads each path as a pathspec, so ./ keeps a name such
+        # as :foo literal. It exits 1 when none of the paths is ignored.
+        mapfile -d '' -t ignored < <(printf './%s\0' "${touched[@]}" | git check-ignore -z --stdin)
         wait $! || [[ $? -eq 1 ]]
     fi
     clobbered=()
     for path in "${ignored[@]}"; do
         if [[ -e $path || -L $path ]]; then
-            clobbered+=("$path")
+            clobbered+=("${path#./}")
         fi
     done
     if [[ ${#clobbered[@]} -gt 0 ]]; then
-        echo "ERROR: $branch touches these ignored files of yours, which checking" >&2
-        echo "it out or rebasing it would overwrite or delete:" >&2
+        echo "ERROR: $branch's commits touch these paths, where you have ignored files:" >&2
         printf '    %s\n' "${clobbered[@]}" >&2
         echo "Nothing was checked out, and your files are unchanged." >&2
         exit 1
