@@ -1,12 +1,20 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
+# Exact versions, not ranges. The ansible pip package bundles its own copies,
+# and a range they satisfy installs nothing, so each site kept whichever copy
+# it already had. An exact pin gives every site the same copy, and gives
+# Renovate one release to propose at a time.
 collections:
   - name: community.general
-    version: ">=13.0.0,<14.0.0"
+    version: "13.4.0"
   - name: ansible.posix
-    version: ">=2.2.0,<3.0.0"
+    version: "2.2.2"
   - name: community.sops
-    version: ">=2.4.0,<3.0.0"
+    version: "2.4.0"
   - name: containers.podman
-    version: ">=1.20.0,<2.0.0"
+    version: "1.20.2"
+  # Not used directly: community.general depends on it. Pinned so that every
+  # site runs the same copy of it too.
+  - name: community.library_inventory_filtering_v1
+    version: "1.1.5"

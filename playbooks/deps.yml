@@ -13,6 +13,14 @@
       ansible.builtin.command:
         cmd: "{{ ansible_playbook_python | dirname }}/ansible-galaxy collection install -r requirements.yml -p collections"
         chdir: "{{ playbook_dir }}/.."
+      # Blind ansible-galaxy to the copies bundled in the ansible pip package,
+      # so it installs every pin into collections/, which ansible.cfg searches
+      # first. Otherwise a bundled copy equal to a pin stays in use from the
+      # venv, and an ansible bump could change it under the pin. The play
+      # itself still sees the bundled copies: a fresh host's first pull needs
+      # community.sops from them to decrypt the inventory.
+      environment:
+        ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "false"
       register: deps_galaxy
       changed_when: "'Installing' in deps_galaxy.stdout"
       delegate_to: localhost
