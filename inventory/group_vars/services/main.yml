@@ -500,12 +500,12 @@ podman_services:
       # API base rewritten to this URL plus api/v1. It also builds every link
       # in mail and feeds, and is fatal at start if unset while CORS is on.
       VIKUNJA_SERVICE_PUBLICURL: "https://{{ vikunja_hostname }}/"
-      # Open while the household registers, then closed by a follow-up change
-      # once their accounts exist. The hostname is in Certificate Transparency
-      # from the moment the edge obtains its certificate, so it stays open for
-      # hours, not days. Written out although true is the default, so closing
-      # it is a one-line diff.
-      VIKUNJA_SERVICE_ENABLEREGISTRATION: "true"
+      # Closed. The household registered while it was open. A new account is
+      # created on the host with `user create`, which prompts for the password
+      # (see the runbook's Vikunja section). Never reopen it to add one
+      # person: the hostname is in Certificate Transparency, and anyone
+      # watching it can register while it is open.
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: "false"
       # The database always stores GMT (pkg/db/db.go), so these two change how
       # times are read and where a new account starts, never stored data.
       VIKUNJA_SERVICE_TIMEZONE: Australia/Sydney
