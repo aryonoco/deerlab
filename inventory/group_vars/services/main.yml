@@ -175,7 +175,7 @@ podman_services:
 
   linkding:
     uid: 2002
-    image: ghcr.io/sissbruecker/linkding:1.46.2-plus@sha256:041dfbe0a9bb655d8a4bcdf983cd4d1b10f3f9a5cbe60432169df1612efecbd5
+    image: ghcr.io/sissbruecker/linkding:1.47.0-plus@sha256:1ba3d9ebb8be8944f771acd9bdf75d3a5d192e1fca779fe005a02fe2b798958a
     # The image drops privilege internally: uwsgi.ini carries uid = www-data,
     # which is 33 in the Debian image, and bootstrap.sh chowns the data
     # directory to it. Starting as 33 makes that chown a permitted same-owner
