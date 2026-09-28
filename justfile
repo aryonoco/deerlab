@@ -148,10 +148,15 @@ merge branch:
     gh pr checks {{ quote(branch) }} --watch
     git switch main
     # Full ref names: git prefers a tag to a branch of the same name, so a tag
-    # called main or after the branch would otherwise be merged in its place,
-    # and a local tag called main would make the push ambiguous.
+    # called main on origin, or origin/<branch> here, would otherwise be
+    # merged in the branch's place, and a local tag called main would make
+    # the push ambiguous.
     git pull --ff-only origin refs/heads/main
-    git merge --ff-only {{ quote("refs/heads/" + branch) }}
+    # Land the pull request's head as origin has it, not the local branch: a
+    # resign whose push you declined leaves re-signed commits there that the
+    # pull request never held and its checks never ran on.
+    git fetch origin
+    git merge --ff-only {{ quote("refs/remotes/origin/" + branch) }}
     # The same check ansible-pull --verify-commit runs against the release head.
     # A bot's commits carry GitHub's web-flow signature rather than a key in
     # allowed_signers: run just resign on the branch first.
@@ -180,23 +185,66 @@ resign branch:
         echo "ERROR: the working tree has uncommitted changes" >&2
         exit 1
     fi
-    # Switch back to where you started on exit. Left checked out, the bot's
-    # content would sit in your tree, where mise evaluates its mise.toml at
-    # your next prompt and just merge would read its justfile.
-    if start=$(git symbolic-ref --quiet HEAD); then
-        start=${start#refs/heads/}
-        trap 'git switch "$start"' EXIT
-    else
-        start=$(git rev-parse HEAD)
-        trap 'git switch --detach "$start"' EXIT
-    fi
     # Full ref names throughout: git resolves refs/tags/<name> before
     # refs/remotes/<name>, and fetch follows any tag that points into the
     # history it fetches, so a tag called origin/main would otherwise become
     # the base, and the commits up to it would drop out of the diff and the
     # signature check below.
     git fetch origin
-    git switch -C "$branch" "refs/remotes/origin/$branch"
+    # Stop before anything changes if the bot's commits touch a path that is
+    # ignored here and exists. Replaying a commit that adds it overwrites your
+    # file, even when a later commit deletes it again, and the checkout's
+    # --no-overwrite-ignore below cannot see that. .agents/ and .superpowers/
+    # are ignored, and exist only on your machine.
+    mapfile -d '' -t touched < <(git log -z --no-renames --format= --name-only \
+        refs/remotes/origin/main.."refs/remotes/origin/$branch" | sort -zu)
+    wait $!
+    ignored=()
+    if [[ ${#touched[@]} -gt 0 ]]; then
+        # check-ignore exits 1 when none of the paths is ignored.
+        mapfile -d '' -t ignored < <(printf '%s\0' "${touched[@]}" | git check-ignore -z --stdin)
+        wait $! || [[ $? -eq 1 ]]
+    fi
+    clobbered=()
+    for path in "${ignored[@]}"; do
+        if [[ -e $path || -L $path ]]; then
+            clobbered+=("$path")
+        fi
+    done
+    if [[ ${#clobbered[@]} -gt 0 ]]; then
+        echo "ERROR: $branch touches these ignored files of yours, which checking" >&2
+        echo "it out or rebasing it would overwrite or delete:" >&2
+        printf '    %s\n' "${clobbered[@]}" >&2
+        echo "Nothing was checked out, and your files are unchanged." >&2
+        exit 1
+    fi
+    # Switch back to where you started on exit. Left checked out, the bot's
+    # content would sit in your tree, where mise evaluates its mise.toml at
+    # your next prompt and just merge would read its justfile. An interrupt,
+    # such as Ctrl-C while the agent waits to sign, can leave a rebase in
+    # progress, and git refuses to switch until it is aborted.
+    if start=$(git symbolic-ref --quiet HEAD); then
+        start=${start#refs/heads/}
+        detach=()
+    else
+        start=$(git rev-parse HEAD)
+        detach=(--detach)
+    fi
+    switch_back() {
+        if [[ -d $(git rev-parse --git-path rebase-merge) || -d $(git rev-parse --git-path rebase-apply) ]]; then
+            git rebase --abort
+        fi
+        git switch "${detach[@]}" "$start"
+    }
+    trap switch_back EXIT
+    # Checking the branch out would otherwise silently overwrite an ignored
+    # file of yours at any path it tracks, and the switch back would then
+    # delete it.
+    if ! git switch --no-overwrite-ignore -C "$branch" "refs/remotes/origin/$branch"; then
+        echo "ERROR: could not check out $branch. Any files git names above are" >&2
+        echo "yours, untracked or ignored, and the branch would overwrite them" >&2
+        exit 1
+    fi
     if [[ $branch == dependabot/* ]]; then
         # Dependabot cannot write the two trailers every commit body must end
         # with. doNothing leaves a trailer that is already there alone.
