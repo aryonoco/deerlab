@@ -153,9 +153,9 @@ flowchart LR
 
 ### Bot pull requests
 
-- **Renovate** runs daily at 05:17 Sydney time in GitHub Actions (`.github/workflows/renovate.yml`), on the job's own `GITHUB_TOKEN`. No token is stored anywhere, and the job's token can write to the repository only while the job runs. It opens one PR per update on Mondays, except Vikunja's, which open on any day. The Dependency Dashboard issue lists everything pending, and a major waits there until you tick it
+- **Renovate** runs daily at 05:17 Sydney time in GitHub Actions (`.github/workflows/renovate.yml`), on the job's own `GITHUB_TOKEN`. No token is stored anywhere, and the job's token can write to the repository only while the job runs. It opens one PR per dependency on Mondays, except Vikunja's, which open on any day. `ansible` and `sops` each get a single PR covering both files that pin them. The Dependency Dashboard issue lists everything pending, and a major waits there until you tick it
 - **Dependabot** bumps the GitHub Actions and nothing else (`.github/dependabot.yml`), because `GITHUB_TOKEN` can never write workflow files. Every action is pinned by commit SHA, with its version beside it
-- Renovate needs **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** turned on. Without it, its runs cannot open PRs
+- Renovate needs **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests"** turned on. Without it, its runs cannot open PRs
 - A PR the bot opens or updates waits for approval before CI runs on it. Do not approve it: your push of the re-signed branch runs CI normally
 - **Landing one:**
   1. Read the PR and its notes. A Vikunja bump needs the backup first ([Vikunja](#vikunja)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
