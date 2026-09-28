@@ -145,10 +145,10 @@ idempotency host:
 
 # Fast-forward main to a green branch and push, refusing a head the hosts would reject
 merge branch:
-    gh pr checks {{ branch }} --watch
+    gh pr checks {{ quote(branch) }} --watch
     git switch main
     git pull --ff-only origin main
-    git merge --ff-only {{ branch }}
+    git merge --ff-only {{ quote(branch) }}
     # The same check ansible-pull --verify-commit runs against the release head.
     # A bot's commits carry GitHub's web-flow signature rather than a key in
     # allowed_signers: run just resign on the branch first.
@@ -157,9 +157,10 @@ merge branch:
 
 # Re-sign a Renovate or Dependabot branch under your own key and push it back
 # to its pull request, so that just merge can land it. A bot's commits carry
-# GitHub's web-flow signature, which the hosts refuse. Read the range-diff this
-# prints before you merge: it is the only review between the bot's content and
-# your signature.
+# GitHub's web-flow signature, which the hosts refuse. Read the diff this
+# prints before you merge: it is exactly the content your signature is about
+# to go on, and the only review between the bot's content and that signature.
+# The range-diff proves the rebase itself changed nothing the bot wrote.
 resign branch:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -179,15 +180,31 @@ resign branch:
     if [[ $branch == dependabot/* ]]; then
         # Dependabot cannot write the two trailers every commit body must end
         # with. doNothing leaves a trailer that is already there alone.
-        git rebase --force-rebase -S \
+        if ! git rebase --force-rebase -S \
             --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit -S --trailer "Developed-by: Aryan Ameri <info@ameri.me>" --trailer "Assisted-by: <Dependabot>"' \
-            origin/main
+            origin/main; then
+            git rebase --abort
+            echo "ERROR: rebase failed and was aborted; if it conflicted," >&2
+            echo "let the bot rebase its branch" >&2
+            exit 1
+        fi
     else
-        git rebase --force-rebase -S origin/main
+        if ! git rebase --force-rebase -S origin/main; then
+            git rebase --abort
+            echo "ERROR: rebase failed and was aborted; if it conflicted," >&2
+            echo "let the bot rebase its branch" >&2
+            exit 1
+        fi
     fi
+    # Proves the rebase changed none of the bot's content.
     git range-diff origin/main "origin/$branch" HEAD
+    # The actual content about to be signed and pushed.
+    git diff --stat origin/main HEAD
+    git diff origin/main HEAD
     git log --format='%h %G? %an / %cn %s' origin/main..HEAD
-    if git log --format='%G?' origin/main..HEAD | grep -qv '^G$'; then
+    # grep must read all its input: with -q it exits at the first match,
+    # git's write then dies of SIGPIPE, and pipefail reads that as a pass.
+    if git log --format='%G?' origin/main..HEAD | grep -v '^G$' >/dev/null; then
         echo "ERROR: a commit is not signed by a key in your allowed signers" >&2
         exit 1
     fi
