@@ -72,21 +72,26 @@
     daemon_reload: true
   when: podman_user_dropins_changed | default(false)
 
+# These two loop over the service name alone, like the checks above. A loop
+# result shows its whole item under -v, and a failed one, such as a socket
+# that never appears, shows it at any verbosity, secrets included.
 - name: Start each user manager
   ansible.builtin.systemd_service:
-    name: "user@{{ item.value.uid }}.service"
+    name: "user@{{ podman_user_services[podman_user_service_name].uid }}.service"
     state: started
-  loop: "{{ podman_user_services | dict2items }}"
+  loop: "{{ podman_user_services | list }}"
   loop_control:
-    label: "{{ item.key }}"
+    loop_var: podman_user_service_name
+    label: "{{ podman_user_service_name }}"
 
 - name: Wait for each user's D-Bus socket
   ansible.builtin.wait_for:
-    path: "/run/user/{{ item.value.uid }}/bus"
+    path: "/run/user/{{ podman_user_services[podman_user_service_name].uid }}/bus"
     timeout: 30
-  loop: "{{ podman_user_services | dict2items }}"
+  loop: "{{ podman_user_services | list }}"
   loop_control:
-    label: "{{ item.key }}"
+    loop_var: podman_user_service_name
+    label: "{{ podman_user_service_name }}"
 
 - name: Flush handlers so a storage migration never runs after services have started
   ansible.builtin.meta: flush_handlers

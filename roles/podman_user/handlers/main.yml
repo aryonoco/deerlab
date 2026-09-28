@@ -3,19 +3,19 @@
 
 # Podman documents that migrate stops the user's running containers, so this
 # migrates only the users tasks/subid.yml found to have moved, and every user
-# if that check never ran.
+# if that check never ran. It loops over the service name alone: a verbose
+# loop result prints its whole item, and a service record holds its secrets.
 - name: Migrate podman storage
   ansible.builtin.command:
     cmd: podman system migrate
   become: true
-  become_user: "{{ item.key }}"
+  become_user: "{{ podman_user_service_name }}"
   environment:
-    XDG_RUNTIME_DIR: "/run/user/{{ item.value.uid }}"
-    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ item.value.uid }}/bus"
+    XDG_RUNTIME_DIR: "/run/user/{{ podman_user_services[podman_user_service_name].uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_user_services[podman_user_service_name].uid }}/bus"
   changed_when: true
   failed_when: false
-  loop: >-
-    {{ podman_user_services | dict2items
-       | selectattr('key', 'in', podman_user_moved | default(podman_user_services | list)) }}
+  loop: "{{ podman_user_moved | default(podman_user_services | list) }}"
   loop_control:
-    label: "{{ item.key }}"
+    loop_var: podman_user_service_name
+    label: "{{ podman_user_service_name }}"
