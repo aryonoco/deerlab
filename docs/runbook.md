@@ -119,7 +119,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   b["branch, change, just ci"] --> pr["pull request, CI workflow"]
-  pr --> m["just merge BRANCH: waits for required checks,<br/>ff main locally, git verify-commit HEAD, pushes"]
+  pr --> m["just merge BRANCH: waits for the PR's checks,<br/>ff main locally, git verify-commit HEAD, pushes"]
   m --> ci["CI on the push to main"]
   ci -->|"success"| pm["Promote workflow:<br/>ff release to the exact sha CI passed on"]
   pm --> rel["release branch"]
@@ -137,6 +137,7 @@ flowchart LR
 | `just bootstrap HOST` | first run on a fresh image, as root, pull timer held off |
 | `just idempotency HOST` | apply twice, fail if the second run changed anything |
 | `just merge BRANCH` | fast-forward `main` from your machine, then verify the head |
+| `just resign BRANCH` | re-sign a Renovate or Dependabot branch under your key and push it back to its PR, before `just merge` |
 | `just secrets-edit FILE`, `just secrets-rekey` | edit, or re-encrypt for the current recipients |
 | `just backup-prune SVC`, `just restore-drill SVC` | one argument, the service name |
 
@@ -144,10 +145,26 @@ flowchart LR
 - Pull sooner with `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
 - `Promote` fast-forwards `release` to the commit CI passed on, not to whatever `main` points at when it runs, and only for a **push** to `main`. It is the only thing that pushes `release`
 - GitHub's own merge buttons rewrite or re-sign commits and the hosts would reject the result. Hence `just merge`, which fast-forwards from your machine so your signature stays on the head
-- Commits created through the GitHub API — **every** Renovate commit — carry GitHub's web-flow GPG signature rather than a key in `deerlab_allowed_signers`, and the hosts refuse them. Rebase a bot branch under your own key first: `git rebase --force-rebase -S main`
+- Commits a bot creates, Renovate's and Dependabot's, carry GitHub's web-flow GPG signature rather than a key in `deerlab_allowed_signers`, and the hosts refuse them. Every bot change lands through [Bot pull requests](#bot-pull-requests)
 - The gate that matters is on the host, not on GitHub. There are no server-side branch rules: GitHub calls a commit verified if *any* registered key signed it, while `ansible-pull --verify-commit` demands a key from the allowed-signers file. An unverifiable commit halts delivery and pages, whatever GitHub accepted
 - **`just plan` reports exactly one change on a converged host**: `base_pull : Install Ansible into its virtual environment`, because `ansible.builtin.pip` cannot tell whether requirements are satisfied without invoking pip, which check mode forbids. **Anything beyond that one change is real drift**
 - **`just plan` requires an already-bootstrapped host.** `podman_service` runs `podman info` as each service user, and that user does not exist until a real run has created it. Check mode against a fresh image fails; use `just bootstrap`
+- **Collections are pinned exactly** in `requirements.yml`, and `deps.yml` installs every pin into the checkout's `collections/`, ignoring the copies the `ansible` pip package bundles. A pull loads its collections before `deps.yml` runs, so a collection bump takes effect on the **second pull after promotion**. `just plan` never installs them, because check mode skips the command: after a collection bump, run `just setup` before `just plan`
+
+### Bot pull requests
+
+- **Renovate** runs daily at 05:17 Sydney time in GitHub Actions (`.github/workflows/renovate.yml`), on the job's own `GITHUB_TOKEN`. No token is stored anywhere, and the job's token can write to the repository only while the job runs. It opens one PR per update on Mondays, except Vikunja's, which open on any day. The Dependency Dashboard issue lists everything pending, and a major waits there until you tick it
+- **Dependabot** bumps the GitHub Actions and nothing else (`.github/dependabot.yml`), because `GITHUB_TOKEN` can never write workflow files. Every action is pinned by commit SHA, with its version beside it
+- Renovate needs **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** turned on. Without it, its runs cannot open PRs
+- A PR the bot opens or updates waits for approval before CI runs on it. Do not approve it: your push of the re-signed branch runs CI normally
+- **Landing one:**
+  1. Read the PR and its notes. A Vikunja bump needs the backup first ([Vikunja](#vikunja)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
+  2. `just resign BRANCH`. It refuses anything but a `renovate/` or `dependabot/` branch, and refuses a dirty working tree. It rebases the branch onto `origin/main` under your key, adds the two trailers to Dependabot's commits, prints the range-diff, the diff and the signature log, fails unless every commit shows `G`, and pushes the branch back to its PR
+  3. Read the diff it prints. It is exactly the content your signature goes on, and the only review between the bot's content and that signature. The range-diff above it shows the rebase changed nothing the bot wrote
+  4. `just merge BRANCH`, then watch Promote
+- If the rebase fails, `just resign` aborts it and stops, leaving your checkout clean on the bot's branch. A conflict means `main` moved under the branch: let the bot rebase its own branch
+- Once you have re-signed a PR, Renovate marks it as edited and stops updating it. That is expected. **Never tick its rebase box on a re-signed PR**: that replaces your signatures with the web-flow's
+- GitHub turns off a scheduled workflow after 60 days with no repository activity. If the Dependency Dashboard issue stops updating, look at the Actions tab
 
 ## Reading state on a host
 
@@ -610,7 +627,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 
   - The container's health probe runs Vikunja's own migration too, and Podman 5.4.2 fires the first probe as the container starts, so on a first boot and on an upgrade it races the server's migration. When the server loses, one alert and then `active` about 5 s later is expected (see [Expected, not incidents](#expected-not-incidents)). In a systemd 257 / Podman 5.4.2 lab, a 2.5.0 to 2.6.0 upgrade with data came up healthy with the data intact, and every forced loss recovered by itself with the database complete. That is evidence, not proof
   - Every Vikunja CLI command runs the migration as well, `user list` included, so do not run one while the unit is starting
-- **Security fixes ship only in minor releases, which also migrate the schema** (65 advisories between February and August 2026). Watch `github.com/go-vikunja/vikunja/releases`
+- **Security fixes ship only in minor releases, which also migrate the schema** (65 advisories between February and August 2026). Renovate opens a Vikunja PR within a day of a release, on any day of the week, labelled `backup-first`; land it as [Bot pull requests](#bot-pull-requests) describes, after the backup below
 - **The unauthenticated rate limit** is 10 requests a minute per client address, and it covers login and registration
 - Vikunja trusts the edge's `X-Forwarded-For`, so it logs and rate-limits each client by its own address, not the edge's
 - `/health` is not rate-limited

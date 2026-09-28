@@ -82,6 +82,7 @@ for Claude 5 Fable.
 - `just bootstrap HOST` — first run against a fresh image, as root, with the pull timer held off
 - `just idempotency HOST` — apply twice, fail if the second run changed anything
 - `just merge BRANCH` — fast-forward `main` from your machine so signatures survive, then verify the head
+- `just resign BRANCH` — re-sign a Renovate or Dependabot branch under your key and push it back to its PR, before `just merge`
 - `just secrets-edit FILE`, `just secrets-rekey`
 - `just backup-prune SERVICE`, `just restore-drill SERVICE` — one argument, the service name; the inventory file is found by the key it holds
 
@@ -89,6 +90,7 @@ for Claude 5 Fable.
 
 - Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, verifies the head commit's SSH signature, and applies `site.yml --limit <itself>`
 - The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only thing that pushes `release`
+- Renovate runs daily in GitHub Actions on the job's own `GITHUB_TOKEN`, and Dependabot bumps the Actions. Their commits carry GitHub's web-flow signature, which the hosts refuse: land every bot PR with `just resign BRANCH`, then `just merge BRANCH`. See `docs/runbook.md`, Bot pull requests
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 
 ## Code Quality
