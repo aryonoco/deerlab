@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: CPAL-1.0
 # Copyright (c) 2026 Aryan Ameri
 
+# Podman documents that migrate stops the user's running containers, so this
+# migrates only the users tasks/subid.yml found to have moved, and every user
+# if that check never ran.
 - name: Migrate podman storage
   ansible.builtin.command:
     cmd: podman system migrate
@@ -11,6 +14,8 @@
     DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ item.value.uid }}/bus"
   changed_when: true
   failed_when: false
-  loop: "{{ podman_user_services | dict2items }}"
+  loop: >-
+    {{ podman_user_services | dict2items
+       | selectattr('key', 'in', podman_user_moved | default(podman_user_services | list)) }}
   loop_control:
     label: "{{ item.key }}"

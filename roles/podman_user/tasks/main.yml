@@ -55,27 +55,8 @@
     loop_var: podman_user_service_name
     label: "{{ podman_user_service_name }}"
 
-# Writing the whole file replaces whatever it held before, including any
-# subordinate range this role does not manage — such as the one Debian's
-# useradd auto-allocates to a regular account. That is intended: only
-# service users run rootless Podman, so only service users need one here.
-- name: Write the subordinate UID ranges
-  ansible.builtin.template:
-    src: subid.j2
-    dest: /etc/subuid
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Migrate podman storage
-
-- name: Write the subordinate GID ranges
-  ansible.builtin.template:
-    src: subid.j2
-    dest: /etc/subgid
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Migrate podman storage
+- name: Write the subordinate ID ranges
+  ansible.builtin.import_tasks: subid.yml
 
 - name: Configure each service user
   ansible.builtin.include_tasks: user.yml

@@ -43,6 +43,18 @@ argument_specs:
       podman_user_subid_count:
         type: int
         default: 65536
+      podman_user_subuid_path:
+        type: path
+        default: /etc/subuid
+        description: >
+          The subordinate UID file, written whole from subid.j2. A variable
+          only so that a test can point the role at a synthetic file.
+      podman_user_subgid_path:
+        type: path
+        default: /etc/subgid
+        description: >
+          The subordinate GID file, written whole from subid.j2. A variable
+          only so that a test can point the role at a synthetic file.
       podman_user_wg_interface:
         type: str
         default: wg0

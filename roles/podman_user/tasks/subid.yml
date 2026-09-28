@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Podman documents that `podman system migrate` stops the user's running
+# containers, so the handler migrates only the users whose range moves. In
+# check mode lineinfile writes nothing and reports "line added" or "line
+# replaced" for a line it would change, followed by a note on ownership or
+# mode if those differ too, hence a match on the prefix. The line is subid.j2
+# rendered for that one service, so the arithmetic stays in the template.
+# These loop over the service name alone: a failed loop result prints its
+# whole item, secrets too.
+- name: Find the service users whose subordinate UID range moves
+  ansible.builtin.lineinfile:
+    path: "{{ podman_user_subuid_path }}"
+    regexp: "^{{ podman_user_service_name }}:"
+    line: >-
+      {{ lookup('ansible.builtin.template', 'subid.j2', template_vars={'podman_user_services':
+           {podman_user_service_name: podman_user_services[podman_user_service_name]}}) | trim }}
+    create: true
+    mode: "0644"
+  check_mode: true
+  changed_when: false
+  register: podman_user_subuid_check
+  loop: "{{ podman_user_services | list }}"
+  loop_control:
+    loop_var: podman_user_service_name
+
+- name: Find the service users whose subordinate GID range moves
+  ansible.builtin.lineinfile:
+    path: "{{ podman_user_subgid_path }}"
+    regexp: "^{{ podman_user_service_name }}:"
+    line: >-
+      {{ lookup('ansible.builtin.template', 'subid.j2', template_vars={'podman_user_services':
+           {podman_user_service_name: podman_user_services[podman_user_service_name]}}) | trim }}
+    create: true
+    mode: "0644"
+  check_mode: true
+  changed_when: false
+  register: podman_user_subgid_check
+  loop: "{{ podman_user_services | list }}"
+  loop_control:
+    loop_var: podman_user_service_name
+
+- name: Record the service users whose range moves
+  ansible.builtin.set_fact:
+    podman_user_moved: >-
+      {{ (podman_user_subuid_check.results + podman_user_subgid_check.results)
+         | selectattr('msg', 'match', 'line (added|replaced)')
+         | map(attribute='podman_user_service_name') | unique | list }}
+
+# Writing the whole file replaces whatever it held before, including any
+# subordinate range this role does not manage — such as the one Debian's
+# useradd auto-allocates to a regular account. That is intended: only
+# service users run rootless Podman, so only service users need one here.
+- name: Write the subordinate UID ranges
+  ansible.builtin.template:
+    src: subid.j2
+    dest: "{{ podman_user_subuid_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Migrate podman storage
+
+- name: Write the subordinate GID ranges
+  ansible.builtin.template:
+    src: subid.j2
+    dest: "{{ podman_user_subgid_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Migrate podman storage
