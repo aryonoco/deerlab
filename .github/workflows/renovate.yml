@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+# Runs self-hosted Renovate against this repository with the job's own
+# GITHUB_TOKEN. No PAT, no App key, no stored secret: the token exists only
+# for the length of the job. It cannot hold the workflows permission, so
+# Renovate's github-actions manager is off in renovate.json and Dependabot
+# bumps the actions instead (.github/dependabot.yml).
+
+name: Renovate
+
+on:
+  # Daily, so a Vikunja release (schedule "at any time" in renovate.json)
+  # opens within a day. Everything else is held to Monday by renovate.json's
+  # own schedule, which Renovate evaluates in Australia/Sydney.
+  schedule:
+    - cron: "17 5 * * *"
+      timezone: "Australia/Sydney"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Nothing here restores or saves a cache, so deny it outright: a job
+    # holding contents: write must not be able to seed a cache that CI on
+    # main later restores.
+    cache-mode: none
+    permissions:
+      contents: write # push renovate/* branches, delete merged ones
+      pull-requests: write # open, edit and label its PRs
+      issues: write # the Dependency Dashboard issue
+      statuses: write # the renovate/stability-days status (minimumReleaseAge)
+    steps:
+      # No checkout. Renovate clones the repository itself through the API
+      # token, and reads renovate.json from the default branch.
+      - name: Run Renovate
+        uses: renovatebot/github-action@1cd96b855fee0da6f230617e89dbff0e06ea393a # v46.3.5
+        with:
+          token: ${{ github.token }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          RENOVATE_PLATFORM_COMMIT: enabled
+          RENOVATE_GIT_AUTHOR: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

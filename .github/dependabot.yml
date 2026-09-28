@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+# GitHub Actions only. Renovate runs on the job's GITHUB_TOKEN, which cannot
+# write workflow files, so the actions are Dependabot's.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Australia/Sydney"
+    commit-message:
+      prefix: "ci"
+    cooldown:
+      default-days: 7
