@@ -145,16 +145,53 @@ idempotency host:
 
 # Fast-forward main to a green branch and push, refusing a head the hosts would reject
 merge branch:
-    gh pr checks {{ branch }} --required --watch
+    gh pr checks {{ branch }} --watch
     git switch main
     git pull --ff-only origin main
     git merge --ff-only {{ branch }}
     # The same check ansible-pull --verify-commit runs against the release head.
-    # Commits created through the GitHub API, which is every Renovate commit,
-    # carry GitHub's GPG web-flow signature rather than a key in allowed_signers.
-    # Recreate them under your own key first: git rebase --force-rebase -S main
+    # A bot's commits carry GitHub's web-flow signature rather than a key in
+    # allowed_signers: run just resign on the branch first.
     git verify-commit HEAD
     git push origin main
+
+# Re-sign a Renovate or Dependabot branch under your own key and push it back
+# to its pull request, so that just merge can land it. A bot's commits carry
+# GitHub's web-flow signature, which the hosts refuse. Read the range-diff this
+# prints before you merge: it is the only review between the bot's content and
+# your signature.
+resign branch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch={{ quote(branch) }}
+    # A strict pattern, not just the prefix: the name is copied from a pull
+    # request and ends up in git commands.
+    if [[ ! $branch =~ ^(renovate|dependabot)/[A-Za-z0-9._/-]+$ ]]; then
+        echo "ERROR: '$branch' is not a renovate/ or dependabot/ branch" >&2
+        exit 1
+    fi
+    if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
+        echo "ERROR: the working tree has uncommitted changes" >&2
+        exit 1
+    fi
+    git fetch origin
+    git switch -C "$branch" "origin/$branch"
+    if [[ $branch == dependabot/* ]]; then
+        # Dependabot cannot write the two trailers every commit body must end
+        # with. doNothing leaves a trailer that is already there alone.
+        git rebase --force-rebase -S \
+            --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit -S --trailer "Developed-by: Aryan Ameri <info@ameri.me>" --trailer "Assisted-by: <Dependabot>"' \
+            origin/main
+    else
+        git rebase --force-rebase -S origin/main
+    fi
+    git range-diff origin/main "origin/$branch" HEAD
+    git log --format='%h %G? %an / %cn %s' origin/main..HEAD
+    if git log --format='%G?' origin/main..HEAD | grep -qv '^G$'; then
+        echo "ERROR: a commit is not signed by a key in your allowed signers" >&2
+        exit 1
+    fi
+    git push --force-with-lease origin "HEAD:$branch"
 
 # Edit a SOPS-encrypted file
 secrets-edit file:
