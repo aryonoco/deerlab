@@ -53,14 +53,14 @@ for Claude 5 Fable.
   here was a comment naming a hosting provider.
 
   *Encryption cannot protect these, and the policy must not pretend otherwise:*
-  the site's domain and its hostnames. Caddy obtains certificates from a public
-  CA, and every issued certificate is published to Certificate Transparency
-  logs — so each hostname became publicly searchable the moment it was issued,
-  and the domain is in this repository's own REUSE headers besides. Keeping them
-  as `{{ }}` references is still right, because it keeps one definition instead
-  of scattering the domain through the tree, but it buys indirection, not
-  secrecy. Never build a control on the assumption that they are hidden, and
-  never describe them as hidden.
+  the public domains and their hostnames. Caddy obtains certificates from a
+  public CA, and every issued certificate is published to Certificate
+  Transparency logs — so each hostname became publicly searchable the moment it
+  was issued, and `deerlab_domain` is in this repository's own REUSE headers
+  besides. Keeping them as `{{ }}` references is still right, because it keeps
+  one definition of each instead of scattering them through the tree, but it
+  buys indirection, not secrecy. Never build a control on the assumption that
+  they are hidden, and never describe them as hidden.
 
   Neither category licenses relaxing the other. A policy that overstates what it
   protects is worse than one that admits its limits, because it stops the reader
@@ -130,7 +130,7 @@ for Claude 5 Fable.
 ## Secrets
 
 - Encrypted files (`*.sops.yaml`) are committed with values encrypted. Ciphertext in a public repository is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total: never commit a value you would not accept being decrypted later
-- Encrypt identifiers, not just credentials — while being honest about which ones encryption actually protects. A reader of this repository must not be able to learn the hosts' public addresses, the tunnel's addressing or ports, where the backups live, or anything that authenticates. The public domain and its hostnames are the separate case described under CRITICAL above
+- Encrypt identifiers, not just credentials — while being honest about which ones encryption actually protects. A reader of this repository must not be able to learn the hosts' public addresses, the tunnel's addressing or ports, where the backups live, or anything that authenticates. The public domains and their hostnames are the separate case described under CRITICAL above
 - `secrets/` has its own creation rule, listed first, encrypted to the operator key alone. Nothing on a host reads it: it holds the object-store credential that can erase backup history, so a host key on it would mean a compromise of either host also destroys the path back
 - The inventory rule is shared by design, and the cost is real: every `*.sops.yaml` under `inventory/` decrypts on **both** hosts, because `hostvars[<peer>]` in `base_wireguard` and `base_firewall` forces each host to compute the other's whole variable set. Per-service backup credentials are therefore readable by either host, so treat a compromise of one as reaching every service's repository. The object store's version retention, not the prefix scoping, is what makes that recoverable
 - sops matches creation rules against the **absolute** path, so a `secrets/` rule must be anchored `(^|/)secrets/…`. An anchor that matches nothing makes `updatekeys` report success while changing nothing
@@ -149,7 +149,7 @@ secrets/            # operator-only credentials, outside the inventory
 
 ## Architecture
 
-- The edge terminates TLS and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
+- The edge terminates TLS for every public domain and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
 - The hosts are linked by kernel WireGuard through `systemd-networkd`. The services host's only public listeners are SSH and WireGuard, the latter scoped by the firewall to the edge's public address
 - **Both peers carry an `Endpoint=`**, so either host can restore the tunnel alone.
 - The two endpoints are not configured the same way: the services host derives `base_wireguard_public_endpoint` in its `main.yml`, the edge carries an explicit value in its `secrets.sops.yaml`, and the role default is the empty string. The template silently drops both `Endpoint=` and `PersistentKeepalive=` when it is empty, so a host rebuilt without one leaves its *peer* unable to initiate — degraded, not failed, and therefore easy to miss. See `docs/runbook.md`, Bootstrapping a host
