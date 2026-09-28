@@ -147,20 +147,25 @@ idempotency host:
 merge branch:
     gh pr checks {{ quote(branch) }} --watch
     git switch main
-    git pull --ff-only origin main
-    git merge --ff-only {{ quote(branch) }}
+    # Full ref names: git prefers a tag to a branch of the same name, so a tag
+    # called main or after the branch would otherwise be merged in its place,
+    # and a local tag called main would make the push ambiguous.
+    git pull --ff-only origin refs/heads/main
+    git merge --ff-only {{ quote("refs/heads/" + branch) }}
     # The same check ansible-pull --verify-commit runs against the release head.
     # A bot's commits carry GitHub's web-flow signature rather than a key in
     # allowed_signers: run just resign on the branch first.
     git verify-commit HEAD
-    git push origin main
+    git push origin refs/heads/main:refs/heads/main
 
-# Re-sign a Renovate or Dependabot branch under your own key and push it back
-# to its pull request, so that just merge can land it. A bot's commits carry
-# GitHub's web-flow signature, which the hosts refuse. Read the diff this
-# prints before you merge: it is exactly the content your signature is about
-# to go on, and the only review between the bot's content and that signature.
-# The range-diff proves the rebase itself changed nothing the bot wrote.
+# Re-sign a Renovate or Dependabot branch under your own key and, once you
+# answer y, push it back to its pull request, so that just merge can land it.
+# A bot's commits carry GitHub's web-flow signature, which the hosts refuse.
+# Read the diff this prints before you answer: it is exactly the content your
+# signature goes on, and the only review between the bot's content and that
+# signature. Nothing is pushed until you answer y. The range-diff proves the
+# rebase itself changed nothing the bot wrote. When it exits, it switches you
+# back to the branch you started on.
 resign branch:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -175,21 +180,36 @@ resign branch:
         echo "ERROR: the working tree has uncommitted changes" >&2
         exit 1
     fi
+    # Switch back to where you started on exit. Left checked out, the bot's
+    # content would sit in your tree, where mise evaluates its mise.toml at
+    # your next prompt and just merge would read its justfile.
+    if start=$(git symbolic-ref --quiet HEAD); then
+        start=${start#refs/heads/}
+        trap 'git switch "$start"' EXIT
+    else
+        start=$(git rev-parse HEAD)
+        trap 'git switch --detach "$start"' EXIT
+    fi
+    # Full ref names throughout: git resolves refs/tags/<name> before
+    # refs/remotes/<name>, and fetch follows any tag that points into the
+    # history it fetches, so a tag called origin/main would otherwise become
+    # the base, and the commits up to it would drop out of the diff and the
+    # signature check below.
     git fetch origin
-    git switch -C "$branch" "origin/$branch"
+    git switch -C "$branch" "refs/remotes/origin/$branch"
     if [[ $branch == dependabot/* ]]; then
         # Dependabot cannot write the two trailers every commit body must end
         # with. doNothing leaves a trailer that is already there alone.
         if ! git rebase --force-rebase -S \
             --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit -S --trailer "Developed-by: Aryan Ameri <info@ameri.me>" --trailer "Assisted-by: <Dependabot>"' \
-            origin/main; then
+            refs/remotes/origin/main; then
             git rebase --abort
             echo "ERROR: rebase failed and was aborted; if it conflicted," >&2
             echo "let the bot rebase its branch" >&2
             exit 1
         fi
     else
-        if ! git rebase --force-rebase -S origin/main; then
+        if ! git rebase --force-rebase -S refs/remotes/origin/main; then
             git rebase --abort
             echo "ERROR: rebase failed and was aborted; if it conflicted," >&2
             echo "let the bot rebase its branch" >&2
@@ -197,18 +217,29 @@ resign branch:
         fi
     fi
     # Proves the rebase changed none of the bot's content.
-    git range-diff origin/main "origin/$branch" HEAD
-    # The actual content about to be signed and pushed.
-    git diff --stat origin/main HEAD
-    git diff origin/main HEAD
-    git log --format='%h %G? %an / %cn %s' origin/main..HEAD
+    git range-diff refs/remotes/origin/main "refs/remotes/origin/$branch" HEAD
+    # The actual content about to be signed and pushed. --text and no
+    # external diff or textconv, so the bot's own .gitattributes cannot
+    # reduce the full diff to "Binary files differ".
+    git diff --stat --text --no-ext-diff --no-textconv refs/remotes/origin/main HEAD
+    git diff --text --no-ext-diff --no-textconv refs/remotes/origin/main HEAD
+    git log --format='%h %G? %an / %cn %s' refs/remotes/origin/main..HEAD
     # grep must read all its input: with -q it exits at the first match,
     # git's write then dies of SIGPIPE, and pipefail reads that as a pass.
-    if git log --format='%G?' origin/main..HEAD | grep -v '^G$' >/dev/null; then
+    if git log --format='%G?' refs/remotes/origin/main..HEAD | grep -v '^G$' >/dev/null; then
         echo "ERROR: a commit is not signed by a key in your allowed signers" >&2
         exit 1
     fi
-    git push --force-with-lease origin "HEAD:$branch"
+    # Only an answer of exactly y pushes; anything else, or no answer at all,
+    # stops here. A pushed commit under your signature stays reachable on
+    # origin even if it is never merged.
+    printf 'Push the re-signed branch to its PR? [y/N] ' >&2
+    answer=
+    if ! read -r answer || [[ $answer != y ]]; then
+        echo "Not confirmed: nothing was pushed" >&2
+        exit 1
+    fi
+    git push --force-with-lease origin "HEAD:refs/heads/$branch"
 
 # Edit a SOPS-encrypted file
 secrets-edit file:
