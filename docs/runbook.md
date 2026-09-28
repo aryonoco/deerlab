@@ -7,7 +7,7 @@
 - Written for someone holding only this repository, under time pressure, with nobody to ask: it records what is silent when it goes wrong
 - Read [What is not proven](#what-is-not-proven) before trusting any procedure here in a real disaster
 - `<svc>` is a service name, which is also its username; `<uid>` is its uid. Substitute `<placeholders>` and `{{ inventory_variable }}` from the decrypted inventory, and never paste a real value back into this file
-- Addresses, ports, accounts, buckets, endpoints and credentials are encrypted in the inventory. The domain and its hostnames are encrypted too, but a public CA publishes every issued hostname to Certificate Transparency: indirection, not secrecy. Never build a control on them being hidden
+- Addresses, ports, accounts, buckets, endpoints and credentials are encrypted in the inventory. The public domains and their hostnames are encrypted too — `deerlab_domain` for most services, `vikunja_hostname` for Vikunja — but a public CA publishes every issued hostname to Certificate Transparency: indirection, not secrecy. Never build a control on them being hidden
 
 ## Contents
 
@@ -20,6 +20,7 @@
 [Backups](#backups) · [Restore](#restore) ·
 [Rebuilding a host from nothing](#rebuilding-a-host-from-nothing) ·
 [Bootstrapping a host](#bootstrapping-a-host) · [Adding a service](#adding-a-service) ·
+[Vikunja](#vikunja) ·
 [Rotating a secret](#rotating-a-secret) ·
 [SSH from a machine with several keys](#ssh-from-a-machine-with-several-keys) ·
 [Break-glass](#break-glass) · [What is not proven](#what-is-not-proven)
@@ -79,6 +80,7 @@ flowchart LR
 - Host ports 80/443 reach Caddy through an nftables redirect to 8080/8443. Caddy still listens on 80 and 443 inside its namespace, so its own redirects and ACME challenges work unchanged
 - Tunnel: kernel WireGuard via `systemd-networkd`, one `.netdev` and one `.network` per host. **Both peers carry `Endpoint=`**, an explicit `ListenPort` and `PersistentKeepalive=25`, so either can initiate and neither depends on the other being up first
 - Caddy proxies plain HTTP over it: WireGuard already supplies confidentiality, integrity and peer authentication
+- The edge serves more than one registrable domain: most sites are hostnames under `deerlab_domain`, and Vikunja has its own, `vikunja_hostname`. Every certificate comes from the same ACME account, so a new domain needs only DNS records pointing at the edge, plus, if the domain publishes a CAA record, one that allows the CA
 - Backends publish on the wildcard address, never the tunnel address — a unit binding the tunnel address races the interface at boot and fails hard on Podman 5.4.2. **The firewall, not the bind address, scopes a backend to the tunnel**
 - One `podman_services` entry derives the service user, its 65536-wide subordinate ID range, its firewall egress chain, its slice limits, its Quadlet units, its Podman secrets, and its backup unit and timer
 - **Subordinate ID ranges are arithmetic, not allocated:** `podman_user_subid_base + (uid - podman_user_uid_base) * podman_user_subid_count`, from `roles/podman_user/templates/subid.j2`. A rebuilt host derives the same mapping from the same inventory, which is what makes a restore portable
@@ -231,7 +233,9 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 
 | Symptom | Why |
 | --- | --- |
-| Stopping any service leaves it `failed` and pages you | A primary or worker Quadlet carries `Restart=always`, and Podman exits non-zero on `SIGTERM`, so an explicit `systemctl --user stop` ends `ActiveState=failed` and trips `OnFailure=`. Do not chase it. `Restart=always` does not resurrect after an explicit stop, so the stop holds |
+| Stopping any service except FreshRSS and Vikunja leaves it `failed` and pages you | A primary or worker Quadlet carries `Restart=always`, and Podman exits non-zero on `SIGTERM`, so an explicit `systemctl --user stop` ends `ActiveState=failed` and trips `OnFailure=`. Do not chase it. `Restart=always` does not resurrect after an explicit stop, so the stop holds. FreshRSS and Vikunja are the exceptions. FreshRSS ends `inactive` on a stop (recorded at its deploy). Vikunja's record sets `stop_signal: SIGINT`, it shuts down cleanly and exits 0, and a stop ends `inactive` without a page (measured in a systemd 257 / Podman 5.4.2 lab) |
+| An occasional HTTP 500 `database is locked` from Vikunja | Two writes overlapped. On 2.6.0 Vikunja opens a deferred SQLite transaction, and upgrading it to a write fails at once instead of waiting. Accepted, not worked around (spec 2026-09-24); the client shows an error and the user retries, and a CalDAV client retries at its next sync. A burst of them, or one that keeps recurring, is not this |
+| One alert as Vikunja starts for the first time or after an upgrade, then `active` about 5 s later | Its health probe runs Vikunja's own migration, and Podman 5.4.2 fires the first probe as the container starts, so the probe can race the server's migration and win. The server then exits with `Migration failed: index … already exists`, the start fails and pages once, and `Restart=always` starts it again with nothing left to migrate. In a systemd 257 / Podman 5.4.2 lab the server lost naturally in 1 of 55 first boots, and each forced loss came back `active` by itself about 5 s later, with the database complete. A second alert within minutes is not this |
 | A job's unit `inactive` between runs | A job is `Type=oneshot` with `Restart=no` and no `Notify=healthy`: `inactive` between runs is its normal state, and `activating` while one runs. A run that exits non-zero, including one killed by Podman's `--timeout`, enters `failed` and pages through `OnFailure=` — that one *is* an incident |
 | Red backup dead-man **and** a Pushover alert | May mean "snapshot fine, repository unverifiable": `restic check` runs *after* the snapshot is committed and a check failure fails the unit, so `ExecStartPost` — the dead-man ping — is skipped. Read the journal before concluding the snapshot did not happen |
 | `just plan` reports one change on a converged host | The pip task, not drift. See [Delivery](#delivery) |
@@ -259,6 +263,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 - **FreshRSS is the sharpest case: nothing that reports its health reads the database at all.** With `db.sqlite` replaced by random bytes, `cli/health.php` exits 0, `cli/user-info.php` exits 0, `actualize_script.php` exits 0 and prints `admin OK`, and `/api/` and `/i/` both return 200, because `p/api/index.php` calls `initSystem()` and never queries the database. Its container health check and the edge's `/api/` check are liveness only, and neither request is an acceptance test after a FreshRSS restore: read content you recognise
   - `cli/actualize-user.php` is **not** a usable canary: it exits 1 on a healthy database when there was nothing to refresh
   - `cli/db-optimize.php` does detect the corruption, but runs `VACUUM` and is too heavy to poll
+- **Vikunja's checks cannot see a missing database.** Its container probe, `vikunja healthcheck`, fails when the database cannot be opened and when the files directory is not writable. Over a *deleted* database, though, it creates a new, empty one and exits 0, and the server does the same at every start. The edge's `/health` is liveness only. What notices is the nightly backup: its `presence_query` fails when the `users` table is empty, and pages. After any Vikunja restore, the acceptance test is `user list` showing the household's accounts (see [Vikunja](#vikunja)), then a person reading tasks they recognise
 
 ## Backups
 
@@ -271,11 +276,12 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 2. `ExecStartPre`: clear `/var/lib/<svc>/backup/staging/` and recreate it empty, only once every source has passed step 1. Otherwise a renamed path's or a deleted user's old copy would be archived into every later snapshot, where a careless restore could resurrect it. A run that fails validation leaves the previous staging copy in place; clearing is safe either way because restic holds the history
 3. Online SQLite `.backup` of each database into staging **at its path relative to the volume's `_data` root** — `users/alice/db.sqlite` stages at `staging/users/alice/db.sqlite` — inside `podman unshare` so subordinate-owned files are readable. Mirrored, not flattened, because every FreshRSS user's database is named `db.sqlite`
 4. `PRAGMA integrity_check` on each staged copy, **tested** rather than merely run: `sqlite3` exits 0 on a corrupt database
+   - Then `presence_query`, where the entry has one, against the same staged copy; it must print exactly `1`. A database deleted and silently re-created empty — Vikunja does this at every start — passes step 1 and the integrity check, and would otherwise upload as the newest snapshot and ping the dead-man green. With it the unit fails and pages instead, and restic never runs
 5. `podman unshare restic backup` of the staging directory plus each named volume's `_data`
 6. `restic check` — structural, no `--read-data`
 7. `ExecStartPost`: the dead-man ping
 
-- `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root
+- `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root. An entry may add `presence_query`, one plain `SELECT` that must print exactly `1` against the staged copy, such as Vikunja's `SELECT count(*) > 0 FROM users`. The play refuses anything else, because the query is written into an `sh -c` line in the unit: a quote, `%`, `$`, `;`, a backslash or a newline would break the quoting or be expanded by systemd
 - A service with no database skips steps 1–4
 - The edge's Caddy data volume is backed up the same way, so a rebuild does not burn ACME rate limits reissuing certificates
 
@@ -362,11 +368,13 @@ R /usr/bin/restic snapshots --compact
 - Run **as root on the services host**. This form of the sequence has never been drilled: see [What is not proven](#what-is-not-proven)
 - **Paste it into a root shell rather than pushing it through Ansible.** Pushed, it passes through three shells (yours, Ansible's `/bin/sh -c`, and the inner `sh -c`), and `$d` eaten by the outer shell makes the copy target `/<db file>` at the filesystem root, where it silently succeeds. If you must push it, keep the script in a file and use `-a "$(cat step.sh)"`
 - `<db file>` is the database's `path` from the service's `backup.sqlite` entry — baikal's is `Specific/db/db.sqlite` — and means that same relative path in the staging copy and under the live volume's `_data`. For a glob entry, substitute one matched path: FreshRSS's `users/*/db.sqlite` becomes `users/<user>/db.sqlite`
+- **Vikunja:** `<db file>` is `vikunja.sqlite`, `<volume>` is `db` and `<port>` is 8084. Step 1 ends `inactive`, not `failed`. Step 3's `GET /login` proves nothing here, because it is a web-app route that answers 200 whatever the database holds. Run `user list` instead, as in [Vikunja](#vikunja)
 - **Staging has had two layouts.** Backup units from before `sqlite` became a list staged a flat `staging/<basename>`; later ones stage the relative path. There was no single cut-over instant, so check the snapshot you chose rather than its date: `R /usr/bin/restic ls <snapshot> /var/lib/<svc>/backup/staging`. The database file itself directly under `staging/` is the older layout; the first directory of its `path` there is the newer one
 - Put the snapshot chosen in pre-flight (c) — `latest` or an ID — in place of `<snapshot>` in the `restic restore` line. From an older-layout snapshot, also put the basename in the `r=` line and in that line's `--include` path; the live side keeps the full path. A database at the volume root, such as linkding's `db.sqlite3`, stages at the same path in both layouts
 
 ```sh
-# 1. Stop the service. It will end `failed` and page you. Expected.
+# 1. Stop the service. Most end `failed` and page you; FreshRSS and
+#    Vikunja end `inactive`. Expected.
 systemctl --user --machine=<svc>@ stop <svc>.service
 systemctl --user --machine=<svc>@ show <svc>.service -p ActiveState --value
 
@@ -428,7 +436,8 @@ V=/var/lib/<svc>/.local/share/containers/storage/volumes
 export XDG_RUNTIME_DIR=/run/user/<uid>
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus
 
-# 1. Stop the service. Ends `failed`, pages you. Expected.
+# 1. Stop the service. Most end `failed` and page you; FreshRSS and
+#    Vikunja end `inactive`. Expected.
 # For a service with workloads, stopping the primary also stops every worker,
 # any job mid-run and every job timer (PartOf=). Do NOT stop them separately
 # and do NOT restore with a worker still running: it writes to the same SQLite
@@ -558,7 +567,8 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
    - `env:` values are written quoted, so a value may contain spaces. Never put a secret there — Quadlet units are world-readable `0644`. That is what `secrets:` is for
    - Limits live in `inventory/group_vars/all/limits.yml`, not in the service record. Every container needs an entry under `containers:` keyed by its unit basename (`linkding`, `linkding-worker`, `freshrss-refresh`), and the `slice:` budget must be at least their sum — `podman_user` asserts it and fails the play rather than silently throttling a container
    - A worker's entry needs `start_timeout`, which becomes systemd's `TimeoutStartSec=`. A job's needs `runtime_max` instead, which becomes Podman's own `--timeout` in the generated `podman run`, through `[Container] PodmanArgs=` — not a systemd directive, because on Podman 5.4.2 `RuntimeMaxSec=` is ignored for `Type=oneshot` and `TimeoutStartSec=` marks the unit timed out while the container runs on to completion. A run the timeout kills fails the unit and pages. Keep `runtime_max` plus the job's `jitter` strictly below the schedule interval — FreshRSS's refresh is 600 + 60 < 900. `RandomizedDelaySec=` is redrawn at every elapse, so a run that starts late and is killed only at `runtime_max` can outlast the next window, which systemd then skips silently; nothing asserts it
-   - `egress:` must be `any`, `web` or `platform`, and is asserted twice: `base_firewall` and `podman_user` each check it against their own prefixed option, but both options source from the single `deerlab_egress_classes` list, so a role still asserts its own inputs. A fourth class means editing that one definition, plus a branch in `nftables.conf.j2`. There is no class that denies everything: the service **user** pulls its own image, runs restic against the object store and posts to Pushover when a unit fails, so DNS and 443 are floors. `platform` is `web` without port 80, and says the application itself never calls out
+   - `egress:` must be `any`, `web`, `platform` or `mail`, and is asserted twice: `base_firewall` and `podman_user` each check it against their own prefixed option, but both options source from the single `deerlab_egress_classes` list, so a role still asserts its own inputs. Another class means editing that one definition, plus a branch in `nftables.conf.j2`. There is no class that denies everything: the service **user** pulls its own image, runs restic against the object store and posts to Pushover when a unit fails, so DNS and 443 are floors. `platform` is `web` without port 80, and says the application itself never calls out. `mail` is `platform` plus TCP 465, for an application that sends mail through a relay over implicit TLS. Unlike `platform`, it does not say the application never calls out: Vikunja's webhooks reach public addresses on 443 and 465. Like the others it is port-based, so 465 is open to any public address for that service user
+   - `stop_signal:` renders `StopSignal=` for an image that ignores SIGTERM or dies uncleanly on it — Vikunja's web command traps only SIGINT and exits 143 on SIGTERM. The play refuses anything but `SIG` followed by capitals and digits. A workload inherits it
 2. **Start from nothing and add back.** Drop all capabilities, set `read_only: true` and `no_new_privileges: true`, then add back only what the image proves it needs, one at a time, recording in a comment beside the definition what failed and how. That is how the current lists were arrived at, and why one capability that "looked required" is not in one of them
 3. Add a site block to `caddy_caddyfile` in `inventory/group_vars/edge/main.yml` pointing at `http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:<port>`, with an active health check whose URI actually reads the database (FreshRSS has no cheap endpoint that does, so its `/api/` check is deliberately liveness only), and create the DNS records
 4. Create a push monitor for the backup on the external uptime monitor and add its URL to `deerlab_deadman_urls.backup`, with a heartbeat interval covering the schedule *plus its jitter* (`RandomizedDelaySec=1800`). Create object-store credentials scoped to the service's own prefix, and add `backup_<service>_restic_password`, `backup_<service>_s3_access_key` and `backup_<service>_s3_secret_key` to the matching `secrets.sops.yaml`
@@ -573,11 +583,40 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - A future Baikal release that needs real DDL above the 0.10.0 threshold shows up as a **failing image build**, not as a broken `svc1`: the Baikal image repository's `test/upstream-migrations.sh` asserts upstream's `VersionUpgrade::upgrade()` thresholds against the real unpacked source at build time
 - Proving a *new edge*: point `caddy_acme_ca` at the CA's staging directory URL first — staging's failure limits are far higher, so a wrong DNS record or an unreachable port 80 costs nothing. Empty selects the production CA
 
+## Vikunja
+
+- Served at its own domain, `vikunja_hostname`, not under `deerlab_domain`. Service user `vikunja`, uid 2005, host port 8084. Volumes: `vikunja-db`, holding the SQLite database `vikunja.sqlite`, and `vikunja-files`, holding attachments, backgrounds, avatars and exports
+- **Run a Vikunja command as the service user, with both user-manager variables set, from `/`:**
+
+  ```sh
+  cd / && runuser -u vikunja -- env XDG_RUNTIME_DIR=/run/user/2005 \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/2005/bus \
+    podman exec -it vikunja /app/vikunja/vikunja <command>
+  ```
+
+- **Accounts.** Registration opens only while the household signs up, then `VIKUNJA_SERVICE_ENABLEREGISTRATION` in the record closes it. After that, create an account with `user create -u <name> -e <email>`; it prompts for the password, and the account is active at once. **Never pass `-p`**: that puts the password in `/proc/<pid>/cmdline`, where any local account can read it. `user list` shows the accounts
+- With the mailer on, a new registration must confirm its email address before it can log in, so registration depends on mail working. Check `testmail` first
+- **A forgotten password:** use the reset link sent by email, or run `user reset-password <user id> --direct` with `-it`, which prompts for the new one. It takes the numeric ID that `user list` shows, not the username. Never pass `-p` here either
+- **Mail** goes through the relay on 465, the one port egress class `mail` adds. `testmail <address>` sends a test message. A failure there, while other hosts can reach the relay, means the class, the mailer host or From address, or the credentials, not Vikunja
+- **Upgrading.** Migrations run at every start, and nothing refuses an older image on a newer schema, so the only rollback is a restore. Before promoting a Vikunja bump, run the backup by hand and confirm it succeeded:
+
+  ```sh
+  systemctl --user --machine=vikunja@ start deerlab-backup-vikunja.service
+  systemctl --user --machine=vikunja@ show deerlab-backup-vikunja.service -p Result --value   # need success
+  ```
+
+  - The container's health probe runs Vikunja's own migration too, and Podman 5.4.2 fires the first probe as the container starts, so on a first boot and on an upgrade it races the server's migration. When the server loses, one alert and then `active` about 5 s later is expected (see [Expected, not incidents](#expected-not-incidents)). In a systemd 257 / Podman 5.4.2 lab, a 2.5.0 to 2.6.0 upgrade with data came up healthy with the data intact, and every forced loss recovered by itself with the database complete. That is evidence, not proof
+  - Every Vikunja CLI command runs the migration as well, `user list` included, so do not run one while the unit is starting
+- **Security fixes ship only in minor releases, which also migrate the schema** (65 advisories between February and August 2026). Watch `github.com/go-vikunja/vikunja/releases`
+- **The unauthenticated rate limit** is 10 requests a minute per client address, and it covers login and registration
+- `/health` is not rate-limited
+
 ## Rotating a secret
 
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
 - WireGuard keys rotate the same way, and **both hosts must be updated in the same commit** — a half-rotated tunnel is a broken tunnel, and the services host has no other route in
 - **FreshRSS's admin password is create-only.** `create-user.php` exits 3 once the account exists, so changing `freshrss_admin_password` and promoting appears to succeed and changes nothing. Change it in the FreshRSS UI, or with FreshRSS's `cli/update-user.php --user <user> --password <password>`; `cli/user-info.php` only reports. Prefer the UI: `update-user.php` takes the password as a command-line argument, which any local account can read from `/proc/<pid>/cmdline` while it runs
+- **Vikunja's `vikunja_service_secret`** signs access tokens, link-share tokens and API-token keys. Rotating it invalidates the link-share and access tokens in flight. The share links survive, and so do sessions: refresh tokens are stored hashed in the database, so nobody is logged out
 - After changing the recipient list in `.sops.yaml`, run `just secrets-rekey`; it re-encrypts every tracked `*.sops.yaml` for the recipients currently listed
 - sops matches creation rules against the **absolute** path, which is why the `secrets/` rule is anchored `(^|/)secrets/…` and not `^secrets/…`. An anchor that matches nothing makes `updatekeys` report "already up to date" and leaves the credential shared, with a green result
 - Rotation is not a substitute for treating an exposure as an exposure. Ciphertext here is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total
@@ -611,3 +650,5 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **Retention has never actually deleted a snapshot.** Every repository is well inside `--keep-within 30d`, so `forget --prune` has only ever been a no-op beyond index maintenance. That the operator credential *can* delete is untested; that the per-service credentials can delete their own locks is tested
 - **Scale is unproven.** The repositories are hundreds of kilobytes. Nothing here says anything about restore duration, timeout headroom or hot-copy risk at gigabytes
 - **linkding's snapshots grow the repository without bound.** `data/assets/` gains an HTML copy of every bookmarked page, the `backup` role archives whole volumes with no exclude, and snapshots are **not** regenerable — unlike favicons, which the UI can refetch. The repositories were hundreds of kilobytes when the scale caveat above was written; this is the service that will falsify it first
+- **Vikunja's migration race, and its recovery by `Restart=always`, are measured only in a lab.** `svc1` has not been seen doing either
+- **`presence_query` has failed only in a lab.** A real empty-database page has never been induced on `svc1`
