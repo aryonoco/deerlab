@@ -147,7 +147,10 @@ caddy_caddyfile: |
       # /metrics shows memory and uptime without a login. Either may be
       # wanted later; delete a path from this matcher to re-enable it.
       # /metrics* also catches /metrics/, which the server answers too.
-      @refused path /openid/* /metrics*
+      # /account/bootstrap: the password is set, and whoever calls it first
+      # on an emptied store would own the server. Set it from the host
+      # instead (runbook, Actual).
+      @refused path /openid/* /metrics* /account/bootstrap
       respond @refused 404
       reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8085 {
           # Reads the auth table through the server's open database handle,
