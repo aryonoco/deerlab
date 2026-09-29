@@ -130,7 +130,7 @@ caddy_caddyfile: |
       }
   }
 
-  budget.{{ deerlab_domain }} {
+  {{ actual_hostname }} {
       log {
           output stdout
           # Actual sends its session token in a custom X-Actual-Token

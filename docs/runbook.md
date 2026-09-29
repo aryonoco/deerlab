@@ -7,7 +7,7 @@
 - Written for someone holding only this repository, under time pressure, with nobody to ask: it records what is silent when it goes wrong
 - Read [What is not proven](#what-is-not-proven) before trusting any procedure here in a real disaster
 - `<svc>` is a service name, which is also its username; `<uid>` is its uid. Substitute `<placeholders>` and `{{ inventory_variable }}` from the decrypted inventory, and never paste a real value back into this file
-- Addresses, ports, accounts, buckets, endpoints and credentials are encrypted in the inventory. The public domains and their hostnames are encrypted too — `deerlab_domain` for most services, `vikunja_hostname` for Vikunja — but a public CA publishes every issued hostname to Certificate Transparency: indirection, not secrecy. Never build a control on them being hidden
+- Addresses, ports, accounts, buckets, endpoints and credentials are encrypted in the inventory. The public domains and their hostnames are encrypted too — `deerlab_domain` for most services, `vikunja_hostname` for Vikunja and `actual_hostname` for Actual — but a public CA publishes every issued hostname to Certificate Transparency: indirection, not secrecy. Never build a control on them being hidden
 
 ## Contents
 
@@ -80,7 +80,7 @@ flowchart LR
 - Host ports 80/443 reach Caddy through an nftables redirect to 8080/8443. Caddy still listens on 80 and 443 inside its namespace, so its own redirects and ACME challenges work unchanged
 - Tunnel: kernel WireGuard via `systemd-networkd`, one `.netdev` and one `.network` per host. **Both peers carry `Endpoint=`**, an explicit `ListenPort` and `PersistentKeepalive=25`, so either can initiate and neither depends on the other being up first
 - Caddy proxies plain HTTP over it: WireGuard already supplies confidentiality, integrity and peer authentication
-- The edge serves more than one registrable domain: most sites are hostnames under `deerlab_domain`, and Vikunja has its own, `vikunja_hostname`. Every certificate comes from the same ACME account, so a new domain needs only DNS records pointing at the edge, plus, if the domain publishes a CAA record, one that allows the CA
+- The edge serves more than one registrable domain: most sites are hostnames under `deerlab_domain`, and Vikunja and Actual have their own, `vikunja_hostname` and `actual_hostname`. Every certificate comes from the same ACME account, so a new domain needs only DNS records pointing at the edge, plus, if the domain publishes a CAA record, one that allows the CA
 - Backends publish on the wildcard address, never the tunnel address — a unit binding the tunnel address races the interface at boot and fails hard on Podman 5.4.2. **The firewall, not the bind address, scopes a backend to the tunnel**
 - One `podman_services` entry derives the service user, its 65536-wide subordinate ID range, its firewall egress chain, its slice limits, its Quadlet units, its Podman secrets, and its backup unit and timer
 - **Subordinate ID ranges are arithmetic, not allocated:** `podman_user_subid_base + (uid - podman_user_uid_base) * podman_user_subid_count`, from `roles/podman_user/templates/subid.j2`. A rebuilt host derives the same mapping from the same inventory, which is what makes a restore portable
@@ -641,7 +641,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 
 ## Actual
 
-- Actual Budget, served at `budget.<deerlab_domain>`. Service user `actual`, uid 2006, host port 8085. One volume, `actual-data`, mounted at `/data`:
+- Actual Budget, served at its own domain, `actual_hostname`, not under `deerlab_domain`. Service user `actual`, uid 2006, host port 8085. One volume, `actual-data`, mounted at `/data`:
   - `.migrate`, the record of which server migrations have run;
   - `server-files/account.sqlite`: the password hash, the session token, the budget registry, and any bank-sync credential;
   - `user-files/`: each budget's last full upload (`file-<id>.blob`) and its change log since then (`group-<id>.sqlite`)
@@ -687,8 +687,8 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
   Otherwise restore the whole volume, and lay the staged copies over the raw ones before the first start, so that the server never starts on a mismatched pair: run [Restore B](#b-rebuild-a-services-volumes-from-a-snapshot) steps 1–4, then [Restore A](#a-restore-a-database-into-a-live-service)'s step 2 for each database while the service is still stopped, then Restore B step 5. A start in between can migrate the raw copies forward, leaving the older staged copy under a `.migrate` that records migrations it never ran. Afterwards, every device opens the budget once, so that its newer changes push back. If a device shows "Syncing has been reset", upload from the device holding the newest data, and choose Revert on the others; Revert discards their unsynced changes. In a lab, a start with `.migrate` missing failed and paged (`SqliteError: no such column: password`), and had rewritten `.migrate` by then: after any such start, restore both again from one snapshot, in the order above. `just restore-drill actual` checks the raw copies in a snapshot as well as the staged ones, and a raw `group-<id>.sqlite` copied while a device was syncing can fail it on a good snapshot: trust the staged copy. Restoring `account.sqlite` also restores the password hash and sessions of the snapshot: if the password was changed or devices were revoked since, set the password and revoke every device again
 - **A restore cannot roll back the budget's content.** Every device holding newer changes pushes them back at its next sync, without asking. Before a risky change, such as a bulk edit or an import, export the budget from the app's settings; importing that export is the way back
 - **Bank sync is not configured.** A bank-sync server can be added from the app's settings later, with no change here: the service's egress class already allows its calls. Its access credential would be stored in `account.sqlite`, outside end-to-end encryption, and so in every backup
-- **Refused at the edge:** `/openid/*` and `/metrics*` while unused; `/metrics*` also covers `/metrics/`, which the server answers too. Each is one path in the `@refused` matcher of the `budget.` site block, in `inventory/group_vars/edge/main.yml`
-- **The edge's logs leave out the session token.** Actual sends it in a custom `X-Actual-Token` header, which Caddy does not redact by itself. The `budget.` block's access log and the Caddyfile's default logger, which writes the error lines, each delete it with a filter. Keep both filters in any change to the Caddyfile
+- **Refused at the edge:** `/openid/*` and `/metrics*` while unused; `/metrics*` also covers `/metrics/`, which the server answers too. Each is one path in the `@refused` matcher of the `{{ actual_hostname }}` site block, in `inventory/group_vars/edge/main.yml`
+- **The edge's logs leave out the session token.** Actual sends it in a custom `X-Actual-Token` header, which Caddy does not redact by itself. The `{{ actual_hostname }}` block's access log and the Caddyfile's default logger, which writes the error lines, each delete it with a filter. Keep both filters in any change to the Caddyfile
 
 ## Rotating a secret
 
