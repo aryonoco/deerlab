@@ -688,7 +688,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **A restore cannot roll back the budget's content.** Every device holding newer changes pushes them back at its next sync, without asking. Before a risky change, such as a bulk edit or an import, export the budget from the app's settings; importing that export is the way back
 - **Bank sync is not configured.** A bank-sync server can be added from the app's settings later, with no change here: the service's egress class already allows its calls. Its access credential would be stored in `account.sqlite`, outside end-to-end encryption, and so in every backup
 - **Refused at the edge:** `/openid/*` and `/metrics*` while unused; `/metrics*` also covers `/metrics/`, which the server answers too. Each is one path in the `@refused` matcher of the `budget.` site block, in `inventory/group_vars/edge/main.yml`
-- **The edge's access log leaves out the session token.** Actual sends it in a custom `X-Actual-Token` header, which Caddy does not redact by itself, so the `budget.` block's `log` deletes it with a filter. Keep that filter in any change to the block
+- **The edge's logs leave out the session token.** Actual sends it in a custom `X-Actual-Token` header, which Caddy does not redact by itself. The `budget.` block's access log and the Caddyfile's default logger, which writes the error lines, each delete it with a filter. Keep both filters in any change to the Caddyfile
 
 ## Rotating a secret
 

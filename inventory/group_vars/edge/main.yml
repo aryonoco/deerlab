@@ -22,6 +22,17 @@ caddy_caddyfile: |
       servers {
           protocols h1 h2 h3
       }
+      log default {
+          output stderr
+          # Caddy's error lines carry a failed request's headers, so a 5xx on
+          # the budget site would record Actual's X-Actual-Token session token
+          # there. The site's own log filter covers only its access log;
+          # other sites never send the header.
+          format filter {
+              request>headers>X-Actual-Token delete
+              wrap json
+          }
+      }
   }
 
   # Internal health listener, never published.
@@ -125,7 +136,8 @@ caddy_caddyfile: |
           # Actual sends its session token in a custom X-Actual-Token
           # header, which Caddy does not redact the way it redacts Cookie
           # and Authorization. Every device shares that one token and it
-          # never expires, so it stays out of the journal.
+          # never expires, so it stays out of the journal; the default
+          # logger in the global options drops it from error lines too.
           format filter {
               request>headers>X-Actual-Token delete
               wrap json
