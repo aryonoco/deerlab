@@ -4,12 +4,12 @@
 [Unit]
 Description=Notify Pushover that %i failed
 {# A budget for each failing unit: every unit that fails starts its own     #}
-{# instance of this template, and each instance may start three times an    #}
-{# hour. A service whose health probe keeps failing restarts about every    #}
-{# two minutes without tripping its own start limit, and would otherwise    #}
-{# page about 29 times an hour until someone fixed it (measured in a        #}
-{# systemd 257 lab). Past the budget a page is dropped, and the instance    #}
-{# is left failed with start-limit-hit.                                     #}
+{# instance of this template, and each instance may start three times in an #}
+{# hour, counted from its first start. A service whose health probe keeps   #}
+{# failing restarts about every two minutes without tripping its own start  #}
+{# limit, and paged at every restart until someone fixed it (measured in a  #}
+{# systemd 257 lab). Past the budget a page is dropped, and the instance is #}
+{# left failed with start-limit-hit.                                        #}
 StartLimitIntervalSec=1h
 StartLimitBurst=3
 
