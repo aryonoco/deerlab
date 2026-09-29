@@ -20,7 +20,7 @@
 [Backups](#backups) · [Restore](#restore) ·
 [Rebuilding a host from nothing](#rebuilding-a-host-from-nothing) ·
 [Bootstrapping a host](#bootstrapping-a-host) · [Adding a service](#adding-a-service) ·
-[Vikunja](#vikunja) ·
+[Vikunja](#vikunja) · [Actual](#actual) ·
 [Rotating a secret](#rotating-a-secret) ·
 [SSH from a machine with several keys](#ssh-from-a-machine-with-several-keys) ·
 [Break-glass](#break-glass) · [What is not proven](#what-is-not-proven)
@@ -287,6 +287,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
   - `cli/actualize-user.php` is **not** a usable canary: it exits 1 on a healthy database when there was nothing to refresh
   - `cli/db-optimize.php` does detect the corruption, but runs `VACUUM` and is too heavy to poll
 - **Vikunja's checks cannot see a missing database.** Its container probe, `vikunja healthcheck`, fails when the database cannot be opened and when the files directory is not writable. Over a *deleted* database, though, it creates a new, empty one and exits 0, and the server does the same at every start. The edge's `/health` is liveness only. What notices is the nightly backup: its `presence_query` fails when the `users` table is empty, and pages. After any Vikunja restore, the acceptance test is `user list` showing the household's accounts (see [Vikunja](#vikunja)), then a person reading tasks they recognise
+- **Actual's container probe opens the account database afresh on every check**, like Baikal's, and asks the server a question it answers from that database, with a 5 s timeout. So a deleted or unreadable `account.sqlite`, or a hung server, is caught within two minutes and pages. A fault that survives a restart keeps the service restarting about every two minutes, and it pages within the budget described in [Alerts, and what only looks like a fault](#alerts-and-what-only-looks-like-a-fault). Once the fault is fixed, a start already under way can still time out and page once more; the next start comes up healthy by itself. It passes before any password is set, and it proves neither a password nor a budget: the nightly backup's `presence_query` pages for those. The edge's check reads through the server's open handle, so on its own it would miss a file deleted under a running server. After an Actual restore, the acceptance test is to log in, open the budget with the encryption passphrase, and have a person read recent transactions they recognise
 
 ## Backups
 
@@ -296,6 +297,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 
 1. `ExecStartPre`, for every `sqlite` entry: `podman unshare test -s <live database>`. `sqlite3` opens its source with `OPEN_CREATE`, so a merely *wrong* path does not fail — it creates an empty 4096-byte database, copies that into staging, passes the integrity check, uploads it and pings the dead-man, and nothing downstream can tell that from a healthy backup. `-s`, not `-f`, because a zero-length file is exactly the case to refuse
    - A `path` containing `*` is a glob, expanded by `sh` inside `podman unshare` when the unit runs, not by Ansible at apply time. Every match gets the same `test -s`, and **a glob matching nothing fails the unit**, for the same `OPEN_CREATE` reason
+   - The one exception is an entry with `allow_empty: true`, for files that legitimately come and go: Actual's per-budget change logs, `user-files/group-*.sqlite`, which a sync reset deletes until a device syncs again. Every file that does match is still refused if empty; only the count goes, so a glob that matches nothing for a bad reason passes too
 2. `ExecStartPre`: clear `/var/lib/<svc>/backup/staging/` and recreate it empty, only once every source has passed step 1. Otherwise a renamed path's or a deleted user's old copy would be archived into every later snapshot, where a careless restore could resurrect it. A run that fails validation leaves the previous staging copy in place; clearing is safe either way because restic holds the history
 3. Online SQLite `.backup` of each database into staging **at its path relative to the volume's `_data` root** — `users/alice/db.sqlite` stages at `staging/users/alice/db.sqlite` — inside `podman unshare` so subordinate-owned files are readable. Mirrored, not flattened, because every FreshRSS user's database is named `db.sqlite`
 4. `PRAGMA integrity_check` on each staged copy, **tested** rather than merely run: `sqlite3` exits 0 on a corrupt database
@@ -304,7 +306,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 6. `restic check` — structural, no `--read-data`
 7. `ExecStartPost`: the dead-man ping
 
-- `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root. An entry may add `presence_query`, one plain `SELECT` that must print exactly `1` against the staged copy, such as Vikunja's `SELECT count(*) > 0 FROM users`. The play refuses anything else, because the query is written into an `sh -c` line in the unit: a quote, `%`, `$`, `;`, a backslash or a newline would break the quoting or be expanded by systemd
+- `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root. An entry may add `presence_query`, one plain `SELECT` that must print exactly `1` against the staged copy, such as Vikunja's `SELECT count(*) > 0 FROM users`. The play refuses anything else, because the query is written into an `sh -c` line in the unit: a quote, `%`, `$`, `;`, a backslash or a newline would break the quoting or be expanded by systemd. A glob entry may instead add `allow_empty: true` (see [Backups](#backups), step 1); the play refuses it on a fixed path, as anything but a boolean, and beside `presence_query`, since "may be absent" and "must hold data" contradict
 - A service with no database skips steps 1–4
 - The edge's Caddy data volume is backed up the same way, so a rebuild does not burn ACME rate limits reissuing certificates
 
@@ -392,6 +394,7 @@ R /usr/bin/restic snapshots --compact
 - **Paste it into a root shell rather than pushing it through Ansible.** Pushed, it passes through three shells (yours, Ansible's `/bin/sh -c`, and the inner `sh -c`), and `$d` eaten by the outer shell makes the copy target `/<db file>` at the filesystem root, where it silently succeeds. If you must push it, keep the script in a file and use `-a "$(cat step.sh)"`
 - `<db file>` is the database's `path` from the service's `backup.sqlite` entry — baikal's is `Specific/db/db.sqlite` — and means that same relative path in the staging copy and under the live volume's `_data`. For a glob entry, substitute one matched path: FreshRSS's `users/*/db.sqlite` becomes `users/<user>/db.sqlite`
 - **Vikunja:** `<db file>` is `vikunja.sqlite`, `<volume>` is `db` and `<port>` is 8084. Step 1 ends `inactive`, not `failed`. Step 3's `GET /login` proves nothing here, because it is a web-app route that answers 200 whatever the database holds. Run `user list` instead, as in [Vikunja](#vikunja)
+- **Actual:** `<db file>` is `server-files/account.sqlite`, or one `user-files/group-<id>.sqlite` from the snapshot's staging; `<volume>` is `data` and `<port>` is 8085. `/data/.migrate` must match the live one, or the server crash-loops (measured in a lab): compare them first, as in [Actual](#actual), and use Restore B for the whole volume if they differ. Step 1 ends `failed, and pages`. Step 3's `GET /login` proves nothing here, because it is a web-app route; follow the acceptance test in [The health check does not prove the data is good](#the-health-check-does-not-prove-the-data-is-good)
 - **Staging has had two layouts.** Backup units from before `sqlite` became a list staged a flat `staging/<basename>`; later ones stage the relative path. There was no single cut-over instant, so check the snapshot you chose rather than its date: `R /usr/bin/restic ls <snapshot> /var/lib/<svc>/backup/staging`. The database file itself directly under `staging/` is the older layout; the first directory of its `path` there is the newer one
 - Put the snapshot chosen in pre-flight (c) — `latest` or an ID — in place of `<snapshot>` in the `restic restore` line. From an older-layout snapshot, also put the basename in the `r=` line and in that line's `--include` path; the live side keeps the full path. A database at the volume root, such as linkding's `db.sqlite3`, stages at the same path in both layouts
 
@@ -636,12 +639,63 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - Vikunja trusts the edge's `X-Forwarded-For`, so it logs and rate-limits each client by its own address, not the edge's
 - `/health` is not rate-limited
 
+## Actual
+
+- Actual Budget, served at `budget.<deerlab_domain>`. Service user `actual`, uid 2006, host port 8085. One volume, `actual-data`, mounted at `/data`:
+  - `.migrate`, the record of which server migrations have run;
+  - `server-files/account.sqlite`: the password hash, the session token, the budget registry, and any bank-sync credential;
+  - `user-files/`: each budget's last full upload (`file-<id>.blob`) and its change log since then (`group-<id>.sqlite`)
+
+  The container runs as the image's own `actual` user, 1001
+- The household shares one budget behind one server password, and the budget is end-to-end encrypted. **The encryption passphrase is in the password manager, and nothing recovers the budget without it**, backups included
+- **Run a command as the service user, with both user-manager variables set, from `/`:**
+
+  ```sh
+  cd / && runuser -u actual -- env XDG_RUNTIME_DIR=/run/user/2006 \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/2006/bus \
+    podman exec -it actual <command>
+  ```
+
+- **The server password.** It was set in the browser at deploy. A later change, or a password on an emptied store, is set from the host: run `node /app/scripts/reset-password.js` through the form above. It prompts `Enter a password, then press enter:`, then `Enter the password again, then press enter:`. **Wait for each prompt, then type or paste the password, then press Enter as a separate keystroke**: in a lab, a password sent the instant the first prompt appeared was echoed in clear, and the prompt checks only the first byte of each chunk of input for Enter, so a paste that carries its own Enter does not submit. It never takes the password as an argument. Afterwards, revoke every device
+- **Revoke every device.** Every device shares one session token, it never expires, and **a password change does not revoke it**, whatever `reset-password.js` prints. Deleting the sessions is the only revocation. Run this after every password change and after any suspected leak; each device then logs in again and gets a new token. It prints how many sessions it deleted:
+
+  ```sh
+  cd / && runuser -u actual -- env XDG_RUNTIME_DIR=/run/user/2006 \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/2006/bus \
+    podman exec actual node -e "const D=require('/app/node_modules/better-sqlite3');console.log(new D('/data/server-files/account.sqlite').prepare('DELETE FROM sessions').run().changes)"
+  ```
+
+- **Clients.** The web app, installed to the home screen on phones; on iPhone that also exempts it from Safari deleting a site's data after 7 days unused. The desktop app is not recommended: upstream warns that it drifts out of step with a self-hosted server. Clearing a browser's site data deletes that device's login, its copy of the encryption key and its unsynced changes
+- **Upgrading.** Every start migrates, and an older server refuses a newer database (`Missing migration file`, exit 1), so the only rollback is a restore. Renovate opens an Actual PR on any day, labelled `backup-first`. Before promoting one, run the backup by hand and confirm it succeeded:
+
+  ```sh
+  systemctl --user --machine=actual@ start deerlab-backup-actual.service
+  systemctl --user --machine=actual@ show deerlab-backup-actual.service -p Result --value   # need success
+  ```
+
+  - Each browser keeps running the old frontend until someone clicks "Update now" in the app's notice. A newer client can migrate the budget itself, and older ones then show "Update required" until they update
+- **Restore.** `.migrate` and `server-files/account.sqlite` are one unit. Restore A applies only when the same migrations have run in the snapshot as in the live volume. `.migrate` also lists migrations that have not run, with a null timestamp, so compare only those that have:
+
+  ```sh
+  v=/var/lib/actual/.local/share/containers/storage/volumes/actual-data/_data
+  ran='import json, sys; print("\n".join(m["title"] for m in json.load(sys.stdin)["migrations"] if m["timestamp"]))'
+  R /usr/bin/restic dump <snapshot> $v/.migrate | python3 -c "$ran" > /tmp/actual-migrate.snapshot
+  cd / && runuser -u actual -- env XDG_RUNTIME_DIR=/run/user/2006 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/2006/bus \
+    podman unshare cat $v/.migrate | python3 -c "$ran" | diff /tmp/actual-migrate.snapshot - && echo same
+  ```
+
+  Otherwise use Restore B for the whole volume, then lay the staged copies over the raw ones with Restore A's swap. Afterwards, every device opens the budget once, so that its newer changes push back. If a device shows "Syncing has been reset", upload from the device holding the newest data, and choose Revert on the others; Revert discards their unsynced changes. A start against a `.migrate` that does not match the database fails and pages (`SqliteError`), and it has rewritten `.migrate` by then: restore both again from one snapshot with Restore B. `just restore-drill actual` checks the raw copies in a snapshot as well as the staged ones, and a raw `group-<id>.sqlite` copied while a device was syncing can fail it on a good snapshot: trust the staged copy.
+- **A restore cannot roll back the budget's content.** Every device holding newer changes pushes them back at its next sync, without asking. Before a risky change, such as a bulk edit or an import, export the budget from the app's settings; importing that export is the way back
+- **Bank sync is not configured.** A SimpleFIN server can be added from the app later, with no change here: the service's egress class already allows its calls. Its access credential would be stored in `account.sqlite`, outside end-to-end encryption, and so in every backup
+- **Refused at the edge:** `/openid/*` and `/metrics*` while unused; `/metrics*` also covers `/metrics/`, which the server answers too. Each is one path in the `@refused` matcher of the `budget.` site block, in `inventory/group_vars/edge/main.yml`
+
 ## Rotating a secret
 
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
 - WireGuard keys rotate the same way, and **both hosts must be updated in the same commit** — a half-rotated tunnel is a broken tunnel, and the services host has no other route in
 - **FreshRSS's admin password is create-only.** `create-user.php` exits 3 once the account exists, so changing `freshrss_admin_password` and promoting appears to succeed and changes nothing. Change it in the FreshRSS UI, or with FreshRSS's `cli/update-user.php --user <user> --password <password>`; `cli/user-info.php` only reports. Prefer the UI: `update-user.php` takes the password as a command-line argument, which any local account can read from `/proc/<pid>/cmdline` while it runs
 - **Vikunja's `vikunja_service_secret`** signs access tokens, link-share tokens and API-token keys. Rotating it invalidates the link-share and access tokens in flight. The share links survive, and so do sessions: refresh tokens are stored hashed in the database, so nobody is logged out
+- **Actual has no service secret.** Its server password lives in its own database: change it with `reset-password.js`, then revoke every device, as in [Actual](#actual)
 - After changing the recipient list in `.sops.yaml`, run `just secrets-rekey`; it re-encrypts every tracked `*.sops.yaml` for the recipients currently listed
 - sops matches creation rules against the **absolute** path, which is why the `secrets/` rule is anchored `(^|/)secrets/…` and not `^secrets/…`. An anchor that matches nothing makes `updatekeys` report "already up to date" and leaves the credential shared, with a green result
 - Rotation is not a substitute for treating an exposure as an exposure. Ciphertext here is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total
@@ -675,3 +729,6 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **Scale is unproven.** The repositories are hundreds of kilobytes. Nothing here says anything about restore duration, timeout headroom or hot-copy risk at gigabytes
 - **linkding's snapshots grow the repository without bound.** `data/assets/` gains an HTML copy of every bookmarked page, the `backup` role archives whole volumes with no exclude, and snapshots are **not** regenerable — unlike favicons, which the UI can refetch. The repositories were hundreds of kilobytes when the scale caveat above was written; this is the service that will falsify it first
 - **Vikunja's migration race, and its recovery by `Restart=always`, are measured only in a lab.** `svc1` has not been seen doing either
+- **Actual's resource figures were measured on arm64**, in Docker, not on `svc1`; the deploy records `svc1`'s own
+- **A torn Actual budget upload has never been produced.** The server rewrites a budget's blob in place, so a kill mid-upload could leave it truncated; existing devices never re-download it, but a new device would fail until one resets sync
+- **Actual's clients across a version skew have not been exercised.** The "Update now" and "Update required" behaviour is read from source, not seen
