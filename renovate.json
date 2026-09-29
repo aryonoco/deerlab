@@ -89,6 +89,22 @@
       ]
     },
     {
+      "description": "Actual: monthly releases carry security fixes, and there is no downgrade",
+      "matchPackageNames": ["docker.io/actualbudget/actual-server"],
+      "sourceUrl": "https://github.com/actualbudget/actual",
+      "schedule": ["at any time"],
+      "addLabels": ["stateful", "backup-first"],
+      "prBodyNotes": [
+        "**Before promoting:** run `deerlab-backup-actual.service` by hand and confirm `Result=success`. An older Actual server refuses a newer database; the only rollback is a restore. See docs/runbook.md, Actual, Upgrading."
+      ]
+    },
+    {
+      "description": "Actual's tags are CalVer: its 'major' is only the year turning over",
+      "matchPackageNames": ["docker.io/actualbudget/actual-server"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": false
+    },
+    {
       "description": "The operator's Ansible and the hosts' Ansible move together",
       "matchManagers": ["mise", "pip_requirements"],
       "matchPackageNames": ["ansible"],
