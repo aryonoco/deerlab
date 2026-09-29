@@ -142,12 +142,15 @@ Restart=no
 Restart=always
 RestartSec=5
 TimeoutStartSec={{ podman_service_container_limits.start_timeout | default(300) }}
-{# Refills this unit's paging budget in notify-failure@.service once it has   #}
-{# started, which with Notify=healthy means healthy, so deliberate stops,     #}
+{% if podman_service_container_spec.health is defined %}
+{# Refills this unit's paging budget in notify-failure@.service once it is    #}
+{# healthy: with Notify=healthy this runs only then, so deliberate stops,     #}
 {# restores and restarts do not spend it. A loop that never reaches healthy   #}
-{# never refills, and stays capped at three pages an hour. The leading -      #}
-{# keeps a failed reset from failing the start.                               #}
+{# never refills, and stays capped at three pages an hour. A unit without a   #}
+{# health check would run this at every container start, so it gets none. The #}
+{# leading - keeps a failed reset from failing the start.                     #}
 ExecStartPost=-/usr/bin/systemctl --user reset-failed notify-failure@%n.service
+{% endif %}
 {% endif %}
 MemoryMax={{ podman_service_container_limits.memory }}
 CPUQuota={{ podman_service_container_limits.cpu }}
