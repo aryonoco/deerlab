@@ -122,7 +122,14 @@ caddy_caddyfile: |
   budget.{{ deerlab_domain }} {
       log {
           output stdout
-          format json
+          # Actual sends its session token in a custom X-Actual-Token
+          # header, which Caddy does not redact the way it redacts Cookie
+          # and Authorization. Every device shares that one token and it
+          # never expires, so it stays out of the journal.
+          format filter {
+              request>headers>X-Actual-Token delete
+              wrap json
+          }
       }
       # Refused while unused: /openid/config tests passwords for anyone, and
       # /metrics shows memory and uptime without a login. Either may be
