@@ -68,3 +68,12 @@ deerlab_service_limits:
       # plus the process: measured at 50 MiB idle and 75 MiB with a health
       # probe running.
       vikunja: { memory: 768M, cpu: "100%", tasks: 256, pids: 128, start_timeout: 120 }
+
+  actual:
+    slice: { memory: 512M, cpu: "100%", tasks: 128 }
+    containers:
+      # Measured on arm64: 60-80 MiB idle under a limit. Each login's
+      # argon2id hash takes 46 MiB and several can run at once, a probe run
+      # adds about 70 MiB, and an upload of up to 50 MB is buffered in
+      # memory. Two concurrent logins OOM-killed it at 128 MiB.
+      actual: { memory: 512M, cpu: "100%", tasks: 128, pids: 64, start_timeout: 120 }

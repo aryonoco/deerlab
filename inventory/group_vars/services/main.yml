@@ -571,3 +571,93 @@ podman_services:
         # empty database passes every other check.
         - { volume: db, path: vikunja.sqlite, presence_query: "SELECT count(*) > 0 FROM users" }
       volumes: [db, files]
+
+  actual:
+    uid: 2006
+    # The official Debian build, from Docker Hub because it records push
+    # times, which Renovate's cooldown needs. ghcr.io/actualbudget/actual
+    # serves the same index digest.
+    image: docker.io/actualbudget/actual-server:26.9.0@sha256:552beab3dec8c93d46b8b9245612d63c3f123b8a45063a474f53e229b17621d3
+    # The image sets no USER, so it would run as root, and root with no
+    # capabilities cannot write the /data the image gives to actual:1001.
+    # Pinned to that user. Upstream neither documents nor tests non-root, so
+    # re-test on every bump.
+    user: 1001
+    group: 1001
+    publish:
+      - "8085:5006"
+    volumes:
+      # One volume: /data/.migrate and server-files/account.sqlite are one
+      # restore unit, and losing .migrate crash-loops the server. chown
+      # renders :U: a fresh volume is root-owned, and the first migration's
+      # mkdir then fails with EACCES.
+      - { name: data, mount: /data, chown: true }
+    env:
+      # Explicit: the reset-password CLI resolves the data directory itself
+      # and looks in /app unless this is set.
+      ACTUAL_DATA_DIR: /data
+      # No such file exists in the read-only image, so no config file is
+      # read. Unset, the server loads /data/config.json whenever one exists,
+      # so a file written into the volume, or carried in by a restore, could
+      # change the login method or the trusted proxies at the next start.
+      ACTUAL_CONFIG_PATH: /app/config.json
+      # IPv4 explicitly. The default :: logs "Listening" and exits 0 on a
+      # kernel without IPv6; the edge arrives over the IPv4 tunnel.
+      ACTUAL_HOSTNAME: 0.0.0.0
+      # The edge only, so the login limiter (5 failures per 15 minutes)
+      # keys on each real client. No spaces: a space after a comma makes the
+      # server exit 0 with nothing listening.
+      ACTUAL_TRUSTED_PROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32"
+      # Keeps ANSI colour codes out of the request log in journald.
+      NO_COLOR: "1"
+      # Deliberately ABSENT, and must stay absent:
+      # - ACTUAL_LOGIN_METHOD, ACTUAL_ALLOWED_LOGIN_METHODS,
+      #   ACTUAL_TRUSTED_AUTH_PROXIES and every ACTUAL_OPENID_*: one shared
+      #   password, no header auth, no OpenID;
+      # - ACTUAL_CORS_PROXY_ENABLED and ACTUAL_GITHUB_TOKEN;
+      # - ACTUAL_TOKEN_EXPIRATION: the next login revives the same token, so
+      #   it buys nothing. Revoke by deleting the sessions (runbook);
+      # - DEBUG: actual-sensitive:* prints secrets, and bank-sync secret
+      #   values are logged under actual:*;
+      # - NODE_ENV: the image sets production; development drops the rate
+      #   limiter.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # No stop_signal and no entrypoint. tini forwards signals and the server
+    # handles none, so SIGTERM ends it at once with 143. Without tini, node
+    # as PID 1 ignores SIGTERM and SIGINT alike.
+    health:
+      # Opens account.sqlite afresh, read-only and only if it exists, reads
+      # auth, then asks the server a question it answers from the database,
+      # with a 5 s timeout. It fails on a deleted or unreadable database, a
+      # hung server and one not listening, and passes before the password is
+      # set, which Notify=healthy needs. It proves neither a password nor a
+      # budget; the backup's presence_query does. Backticks, so neither YAML
+      # nor JSON needs escaped quotes; the fold joins lines with spaces.
+      cmd: >-
+        ["node","-e","const D=require(`/app/node_modules/better-sqlite3`);
+        const db=new D(`/data/server-files/account.sqlite`,{readonly:true,fileMustExist:true});
+        db.prepare(`SELECT count(*) FROM auth`).get(); db.close();
+        fetch(`http://127.0.0.1:5006/account/needs-bootstrap`,{signal:AbortSignal.timeout(5000)})
+        .then(r=>r.json()).then(j=>process.exit(j.status===`ok`?0:1),()=>process.exit(1))"]
+      interval: 30s
+      start_period: 60s
+    # The server calls out only for bank sync, which is not configured; the
+    # user still needs 443 for restic and the dead-man.
+    egress: platform
+    backup:
+      sqlite:
+        # Prints 1 only with a password set and at least one live budget
+        # that is end-to-end encrypted. Pages on a lost or re-created store,
+        # on no budget and on encryption lost, and on the first night until
+        # the household has created the budget.
+        - volume: data
+          path: server-files/account.sqlite
+          presence_query: >-
+            SELECT (SELECT count(*) FROM auth) > 0 AND (SELECT count(*) FROM
+            files WHERE deleted = 0 AND encrypt_keyid IS NOT NULL) > 0
+        # Each budget's change log since its last full upload. A sync reset,
+        # turning on encryption among them, deletes it until a device syncs.
+        - { volume: data, path: "user-files/group-*.sqlite", allow_empty: true }
+      volumes: [data]
