@@ -53,6 +53,22 @@
          | rejectattr('presence_query', 'regex', 'SELECT [A-Za-z0-9_ ().,*<>=!]+', match_type='fullmatch')
          | map(attribute='path') | list }}
 
+# allow_empty lets a glob match nothing, for files that legitimately come and
+# go. It means nothing on a fixed path, and beside presence_query it would
+# say both "may be absent" and "must hold data", so both are refused. One
+# item per entry, so the message names every misplaced one.
+- name: Refuse misplaced allow_empty for {{ backup_name }}
+  ansible.builtin.assert:
+    that:
+      - item.allow_empty is boolean
+      - "'*' in item.path"
+      - item.presence_query is not defined
+    fail_msg: "sqlite entry {{ item.path }} of {{ backup_name }}: allow_empty must be a boolean, on a glob path, without presence_query"
+    quiet: true
+  loop: "{{ backup_spec.sqlite | default([]) | selectattr('allow_empty', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Write the restic environment of {{ backup_name }}
   ansible.builtin.copy:
     content: |
