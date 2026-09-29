@@ -119,6 +119,29 @@ caddy_caddyfile: |
       }
   }
 
+  budget.{{ deerlab_domain }} {
+      log {
+          output stdout
+          format json
+      }
+      # Refused while unused: /openid/config tests passwords for anyone, and
+      # /metrics shows memory and uptime without a login. Either may be
+      # wanted later; delete a path from this matcher to re-enable it.
+      @refused path /openid/* /metrics
+      respond @refused 404
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8085 {
+          # Reads the auth table through the server's open database handle,
+          # so a file deleted under a running server answers until a
+          # restart; the container probe opens the file afresh.
+          health_uri /account/needs-bootstrap
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
 podman_services:
   caddy:
     uid: 2000
