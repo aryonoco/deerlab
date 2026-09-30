@@ -169,7 +169,7 @@ caddy_caddyfile: |
 podman_services:
   caddy:
     uid: 2000
-    image: docker.io/library/caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d
+    image: docker.io/library/caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52
     # Host ports 80 and 443 are redirected to these by the firewall.
     publish:
       - "8080:80"
