@@ -11,7 +11,7 @@ collections:
   - name: ansible.posix
     version: "2.2.2"
   - name: community.sops
-    version: "2.4.0"
+    version: "2.5.0"
   - name: containers.podman
     version: "1.20.2"
   # Not used directly: community.general depends on it. Pinned so that every
