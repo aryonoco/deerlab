@@ -5,6 +5,7 @@
   "schedule": ["* * * * 1"],
   "updateNotScheduled": false,
   "prHourlyLimit": 0,
+  "prConcurrentLimit": 0,
   "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "pip_requirements"],
   "semanticCommits": "disabled",
   "commitMessagePrefix": "deps:",
