@@ -100,6 +100,11 @@
       ]
     },
     {
+      "description": "Actual has more tags than Docker Hub will list, so Renovate gets no push times for it and the cooldown would hold every release forever",
+      "matchPackageNames": ["docker.io/actualbudget/actual-server"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
       "description": "Actual's tags are CalVer: its 'major' is only the year turning over",
       "matchPackageNames": ["docker.io/actualbudget/actual-server"],
       "matchUpdateTypes": ["major"],
