@@ -71,7 +71,7 @@
       "schedule": ["at any time"],
       "addLabels": ["stateful", "backup-first"],
       "prBodyNotes": [
-        "**Before promoting:** run `deerlab-backup-vikunja.service` by hand and confirm `Result=success`. Vikunja migrates its schema on every start; the only rollback is a restore. See docs/runbook.md, Vikunja, Upgrading."
+        "**The host backs Vikunja up before it switches image,** and the pull fails if that backup does. After the pull, confirm `deerlab-backup-vikunja.service` shows `Result=success` and ran after the pull started. Vikunja migrates its schema on every start; the only rollback is a restore. See docs/runbook.md, Vikunja, Upgrading."
       ]
     },
     {
@@ -96,7 +96,7 @@
       "schedule": ["at any time"],
       "addLabels": ["stateful", "backup-first"],
       "prBodyNotes": [
-        "**Before promoting:** run `deerlab-backup-actual.service` by hand and confirm `Result=success`. An older Actual server refuses a newer database; the only rollback is a restore. See docs/runbook.md, Actual, Upgrading."
+        "**The host backs Actual up before it switches image,** and the pull fails if that backup does. After the pull, confirm `deerlab-backup-actual.service` shows `Result=success` and ran after the pull started. An older Actual server refuses a newer database; the only rollback is a restore. See docs/runbook.md, Actual, Upgrading."
       ]
     },
     {
