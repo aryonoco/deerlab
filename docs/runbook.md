@@ -130,7 +130,7 @@ flowchart LR
 
 | Recipe | Effect |
 | --- | --- |
-| `just ci` | the whole pipeline locally. CI runs the same on every PR and every push to `main`, and Promote ships only a commit CI passed on a push to `main` |
+| `just ci` | the whole pipeline locally. CI runs the same on every PR to `main` and every push to `main`, and Promote ships only a commit CI passed on a push to `main` |
 | `just plan HOST` | check-and-diff `site.yml` against a real host |
 | `just apply HOST` | push directly; bootstrap and break-glass only |
 | `just bootstrap HOST` | first run on a fresh image, as root, pull timer held off |
@@ -140,8 +140,8 @@ flowchart LR
 
 - Timer: `OnCalendar=*:0/30`, `RandomizedDelaySec=300`, `Persistent=true`. It checks out `release` and applies `site.yml --limit <itself>`, without checking the head commit's signature
 - Pull sooner with `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
-- `Promote` fast-forwards `release` to the commit CI passed on, not to whatever `main` points at when it runs, and only for a **push** to `main`. It is the only thing that pushes `release`
-- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run in this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
+- `Promote` fast-forwards `release` to the commit CI passed on, not to whatever `main` points at when it runs, and only for a **push** to `main`. It is the only workflow that pushes `release`
+- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run from this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
 - **`just plan` reports exactly one change on a converged host**: `base_pull : Install Ansible into its virtual environment`, because `ansible.builtin.pip` cannot tell whether requirements are satisfied without invoking pip, which check mode forbids. **Anything beyond that one change is real drift**
 - **`just plan` requires an already-bootstrapped host.** `podman_service` runs `podman info` as each service user, and that user does not exist until a real run has created it. Check mode against a fresh image fails; use `just bootstrap`
 - **Collections are pinned exactly** in `requirements.yml`, and `deps.yml` installs every pin into the checkout's `collections/`, ignoring the copies the `ansible` pip package bundles. A pull loads its collections before `deps.yml` runs, so a collection bump takes effect on the **second pull after promotion**. `just plan` never installs them, because check mode skips the command: after a collection bump, run `just setup` before `just plan`
@@ -152,7 +152,7 @@ flowchart LR
 - **The App's private key is a repository secret** (`RENOVATE_APP_PRIVATE_KEY`, with `RENOVATE_APP_CLIENT_ID` beside it). Any workflow run in this repository can read it, including runs on branches and pull requests from this repository. Because the App holds `contents: write` and `workflows: write`, whoever holds the key can push to `main`, and so to `release`, and so run code as root on both hosts. There are no branch rules, by choice. A minted token holds `workflows: write`, so within its hour it can push a workflow that reads `RENOVATE_APP_PRIVATE_KEY`, which turns one hour of access into the long-lived key. The key is a repository secret by the operator's choice: an environment secret limited to `main` would keep it from branch and pull request runs, but not from a push straight to `main`
 - Renovate opens one PR per dependency on Mondays, except Vikunja's and Actual's, which open on any day. `ansible` and `sops` each get a single PR covering both files that pin them. The Dependency Dashboard issue lists everything pending, and a major waits there until you tick it
 - Renovate also manages the pinned GitHub Actions, holding each release back 7 days. Every action stays pinned by commit SHA, with its version beside it. Dependabot is not used. If a Renovate bump of `actions/create-github-app-token` or `renovatebot/github-action` breaks token minting or the run, Renovate cannot open its own fix: revert that bump by hand, as a normal PR with "Rebase and merge"
-- Renovate's PRs run CI without anyone approving them. After each push to `main`, Renovate rebases the PRs that are now behind it
+- Renovate's PRs run CI without anyone approving them. After each push to `main`, Renovate rebases the PRs that are now behind it. It opens new PRs only inside its schedule, but an open PR can be rebased, or move to a newer release, on any day: read the PR again before you merge it
 - **Landing one:**
   1. Read the PR and its notes. A Vikunja or Actual bump is backed up by the host itself before it switches image ([Backups](#backups)); afterwards, check that backup ran ([Vikunja](#vikunja), [Actual](#actual)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
   2. Read the merge box before you click. No check is required, so the button works on a red or pending PR, and a green PR was tested against `main` as it was when the PR was last updated
@@ -710,6 +710,12 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 
 ## Rotating a secret
 
+- **The Renovate App's private key** is a GitHub repository secret, not a SOPS file ([Bot pull requests](#bot-pull-requests)). To rotate or revoke it:
+  1. On the App's settings page, under Credentials, generate a new private key. GitHub requires a new key to exist before the last old one can be deleted
+  2. From your own terminal, `gh secret set RENOVATE_APP_PRIVATE_KEY < new.pem`
+  3. Delete the old key on the App's page. The `.pem` you downloaded is a second copy of the key and nothing needs it after `gh secret set`: delete it
+  4. Audit what changed while the old key was live: the recent history of `main` and `release`, and `.github/workflows/`
+  5. A token already minted expires within an hour of being minted
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
 - WireGuard keys rotate the same way, and **both hosts must be updated in the same commit** — a half-rotated tunnel is a broken tunnel, and the services host has no other route in
 - **FreshRSS's admin password is create-only.** `create-user.php` exits 3 once the account exists, so changing `freshrss_admin_password` and promoting appears to succeed and changes nothing. Change it in the FreshRSS UI, or with FreshRSS's `cli/update-user.php --user <user> --password <password>`; `cli/user-info.php` only reports. Prefer the UI: `update-user.php` takes the password as a command-line argument, which any local account can read from `/proc/<pid>/cmdline` while it runs

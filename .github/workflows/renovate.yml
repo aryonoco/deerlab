@@ -4,17 +4,20 @@
 # Runs self-hosted Renovate against this repository on a GitHub App token.
 # The first step mints an installation token for this repository alone, valid
 # for an hour, narrowed to the five permissions Renovate uses. The App's
-# private key is a repository secret, so any workflow run in this repository
-# can read it, branch and pull request runs included. Renovate also manages
+# private key is a repository secret, so any workflow run from this repository
+# can read it: branches pushed to it, and pull requests from them. Renovate
+# also manages
 # the pinned actions in .github/workflows/, which needs the workflows
 # permission that the job's own GITHUB_TOKEN can never hold.
 
 name: Renovate
 
 on:
-  # Daily, so a Vikunja release (schedule "at any time" in renovate.json)
-  # opens within a day. Everything else is held to Monday by renovate.json's
-  # own schedule, which Renovate evaluates in Australia/Sydney.
+  # Daily, so a Vikunja or Actual release (schedule "at any time" in
+  # renovate.json) opens within a day. Renovate opens every other new PR only
+  # on Monday, by renovate.json's own schedule, which it evaluates in
+  # Australia/Sydney. An open PR can be rebased, or moved to a newer release,
+  # on any day (updateNotScheduled).
   schedule:
     - cron: "17 5 * * *"
       timezone: "Australia/Sydney"
