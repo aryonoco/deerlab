@@ -16,7 +16,8 @@
 
 # Pulled before anything of the service is written, and before the gate
 # below. Pulling switches nothing: every unit carries Pull=never and a
-# digest-pinned Image=.
+# digest-pinned Image=. The check is a pure read that also runs under check
+# mode, where the gate needs to know whether the image is really here.
 - name: Check for the image of {{ podman_service_name }}
   ansible.builtin.command:
     cmd: "podman image exists {{ podman_service_spec.image }}"
@@ -26,6 +27,7 @@
   register: podman_service_image_exists
   changed_when: false
   failed_when: podman_service_image_exists.rc not in [0, 1]
+  check_mode: false
 
 - name: Pull the image of {{ podman_service_name }}
   ansible.builtin.command:
@@ -33,8 +35,10 @@
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
+  register: podman_service_pull
   when: podman_service_image_exists.rc == 1
   changed_when: true
+  failed_when: podman_service_pull.rc != 0
 
 # The gate's signals read what is deployed and what is running, never whether
 # this run pulled: a backup that failed must leave its signal standing for the
@@ -55,23 +59,22 @@
   ansible.builtin.set_fact:
     podman_service_deployed_image: >-
       {{ podman_service_deployed_unit_content.content | default('') | b64decode
-         | regex_search('^Image=(.*)$', '\1', multiline=True) | default([''], true) | first }}
+         | regex_findall('^Image=(.*)$', multiline=True) | first | default('') }}
 
 # A run that passed the gate and rewrote the units, then died before its
-# restart, leaves the old container running under a current unit. rc 125 is
-# no such image or container, and so no signal. Both are pure reads, so they
-# also run under check mode, where the gate must still read true.
-- name: Read the image ID of the record of {{ podman_service_name }}
+# restart, leaves the old container running under a current unit. These are
+# pure reads, so they also run under check mode, where the gate must still
+# read true. Existence is asked first, so a failed inspect is a real Podman
+# fault and fails the run instead of quietly dropping the signal.
+- name: Check for the container of {{ podman_service_name }}
   ansible.builtin.command:
-    cmd: >-
-      podman image inspect --format '{{ "{{" }}.Id{{ "}}" }}'
-      {{ podman_service_spec.image }}
+    cmd: "podman container exists {{ podman_service_name }}"
   become: true
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
-  register: podman_service_record_image_id
+  register: podman_service_container_exists
   changed_when: false
-  failed_when: podman_service_record_image_id.rc not in [0, 125]
+  failed_when: podman_service_container_exists.rc not in [0, 1]
   check_mode: false
 
 - name: Read the image ID of the running {{ podman_service_name }}
@@ -83,8 +86,26 @@
   become_user: "{{ podman_service_name }}"
   environment: "{{ podman_service_env }}"
   register: podman_service_running_image_id
+  when: podman_service_container_exists.rc == 0
   changed_when: false
-  failed_when: podman_service_running_image_id.rc not in [0, 125]
+  failed_when: podman_service_running_image_id.rc != 0
+  check_mode: false
+
+# Outside check mode the pull above guarantees the image. Under check mode
+# the pull is skipped, so a bump's image may not be here yet; the read is
+# then skipped, and the deployed unit's Image= alone carries the signal.
+- name: Read the image ID of the record of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: >-
+      podman image inspect --format '{{ "{{" }}.Id{{ "}}" }}'
+      {{ podman_service_spec.image }}
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_record_image_id
+  when: podman_service_image_exists.rc == 0 or not ansible_check_mode
+  changed_when: false
+  failed_when: podman_service_record_image_id.rc != 0
   check_mode: false
 
 - name: Decide on a backup before the image switch of {{ podman_service_name }}
@@ -97,8 +118,8 @@
               or podman_service_ids_differ) }}
   vars:
     podman_service_ids_differ: >-
-      {{ podman_service_record_image_id.rc == 0
-         and podman_service_running_image_id.rc == 0
+      {{ podman_service_running_image_id is not skipped
+         and podman_service_record_image_id is not skipped
          and podman_service_running_image_id.stdout != podman_service_record_image_id.stdout }}
 
 # roles/backup installs the unit and runs before this role, so it exists
