@@ -121,23 +121,6 @@
 - name: Flush handlers before enabling the timer
   ansible.builtin.meta: flush_handlers
 
-# Signature verification is gone. A later change removes this task and the
-# next one, once both hosts have run them. They run after the reload so a
-# run that dies earlier never leaves the old unit loaded without its signers.
-- name: Remove the retired allowed signers
-  ansible.builtin.file:
-    path: /etc/deerlab/allowed_signers
-    state: absent
-
-- name: Remove the retired signature settings
-  community.general.git_config:
-    name: "{{ item }}"
-    scope: global
-    state: absent
-  loop:
-    - gpg.format
-    - gpg.ssh.allowedSignersFile
-
 # | bool first: a CLI -e base_pull_enabled=false is a non-empty string, which
 # ternary would otherwise treat as truthy and start the timer anyway. The
 # module's own "enabled" argument does not need this because systemd_service
