@@ -143,7 +143,7 @@ idempotency host:
     fi
     echo "Idempotent"
 
-# Fast-forward main to a green branch and push, refusing a head the hosts would reject
+# Fast-forward main to a green branch and push, refusing a head that does not verify
 merge branch:
     gh pr checks {{ quote(branch) }} --watch
     git switch main
@@ -156,10 +156,9 @@ merge branch:
     # resign whose push you declined leaves re-signed commits there that the
     # pull request never held and its checks never ran on.
     git fetch origin
-    # The same check ansible-pull --verify-commit runs against the release head,
-    # made before the merge, so a head that fails it is never merged into main.
-    # A bot's commits carry GitHub's web-flow signature rather than a key in
-    # allowed_signers: run just resign on the branch first.
+    # Verify the head before the merge, so a head that fails is never merged
+    # into main. A bot's commits carry GitHub's web-flow signature rather than
+    # your key: run just resign on the branch first.
     git verify-commit {{ quote("refs/remotes/origin/" + branch) }}
     git merge --ff-only {{ quote("refs/remotes/origin/" + branch) }}
     # Again on the head about to be pushed.
@@ -168,7 +167,7 @@ merge branch:
 
 # Re-sign a Renovate or Dependabot branch under your own key and, once you
 # answer y, push it back to its pull request, so that just merge can land it.
-# A bot's commits carry GitHub's web-flow signature, which the hosts refuse.
+# A bot's commits carry GitHub's web-flow signature rather than your key.
 # Read the diff this prints before you answer: it is exactly the content your
 # signature goes on, and the only review between the bot's content and that
 # signature. Nothing is pushed until you answer y. The range-diff proves the

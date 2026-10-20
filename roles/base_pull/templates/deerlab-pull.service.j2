@@ -13,8 +13,7 @@ TimeoutStartSec={{ base_pull_timeout }}
 Environment=SOPS_AGE_KEY_FILE={{ base_pull_age_key_file }}
 Environment=ANSIBLE_NOCOLOR=1
 # System-scope units get no $HOME by default, so git cannot find the
-# global config this role writes (safe.directory) and refuses the checkout
-# as owned by someone else.
+# global config this role writes (safe.directory).
 Environment=HOME=/root
 WorkingDirectory={{ base_pull_dir }}
 LoadCredential=deadman.conf:/etc/deerlab/deadman-pull.conf
