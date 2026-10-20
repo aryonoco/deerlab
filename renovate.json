@@ -157,7 +157,7 @@
       "commitMessagePrefix": "tools:"
     },
     {
-      "description": "Subsystem: the workflows. Last, so it wins over the default deps: prefix",
+      "description": "Subsystem: the workflows",
       "matchFileNames": [".github/**"],
       "commitMessagePrefix": "ci:"
     }
