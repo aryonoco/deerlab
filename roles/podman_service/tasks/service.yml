@@ -12,6 +12,125 @@
       XDG_RUNTIME_DIR: "/run/user/{{ podman_service_item.value.uid }}"
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_service_item.value.uid }}/bus"
     podman_service_units: []
+    podman_service_backup_unit: "deerlab-backup-{{ podman_service_item.key }}.service"
+
+# Pulled before anything of the service is written, and before the gate
+# below. Pulling switches nothing: every unit carries Pull=never and a
+# digest-pinned Image=.
+- name: Check for the image of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman image exists {{ podman_service_spec.image }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_image_exists
+  changed_when: false
+  failed_when: podman_service_image_exists.rc not in [0, 1]
+
+- name: Pull the image of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman pull --quiet {{ podman_service_spec.image }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  when: podman_service_image_exists.rc == 1
+  changed_when: true
+
+# The gate's signals read what is deployed and what is running, never whether
+# this run pulled: a backup that failed must leave its signal standing for the
+# next pull.
+- name: Find the deployed unit of {{ podman_service_name }}
+  ansible.builtin.stat:
+    path: "{{ podman_service_unit_dir }}/{{ podman_service_name }}.container"
+  register: podman_service_deployed_unit
+
+- name: Read the deployed unit of {{ podman_service_name }}
+  ansible.builtin.slurp:
+    src: "{{ podman_service_unit_dir }}/{{ podman_service_name }}.container"
+  register: podman_service_deployed_unit_content
+  when: podman_service_deployed_unit.stat.exists
+
+# Empty on a first deploy, which has nothing to back up.
+- name: Read the deployed image of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_deployed_image: >-
+      {{ podman_service_deployed_unit_content.content | default('') | b64decode
+         | regex_search('^Image=(.*)$', '\1', multiline=True) | default([''], true) | first }}
+
+# A run that passed the gate and rewrote the units, then died before its
+# restart, leaves the old container running under a current unit. rc 125 is
+# no such image or container, and so no signal. Both are pure reads, so they
+# also run under check mode, where the gate must still read true.
+- name: Read the image ID of the record of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: >-
+      podman image inspect --format '{{ "{{" }}.Id{{ "}}" }}'
+      {{ podman_service_spec.image }}
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_record_image_id
+  changed_when: false
+  failed_when: podman_service_record_image_id.rc not in [0, 125]
+  check_mode: false
+
+- name: Read the image ID of the running {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: >-
+      podman container inspect --format '{{ "{{" }}.Image{{ "}}" }}'
+      {{ podman_service_name }}
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_running_image_id
+  changed_when: false
+  failed_when: podman_service_running_image_id.rc not in [0, 125]
+  check_mode: false
+
+- name: Decide on a backup before the image switch of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_running_stale: "{{ podman_service_ids_differ }}"
+    podman_service_upgrade: >-
+      {{ podman_service_spec.backup is defined
+         and ((podman_service_deployed_image | length > 0
+               and podman_service_deployed_image != podman_service_spec.image)
+              or podman_service_ids_differ) }}
+  vars:
+    podman_service_ids_differ: >-
+      {{ podman_service_record_image_id.rc == 0
+         and podman_service_running_image_id.rc == 0
+         and podman_service_running_image_id.stdout != podman_service_record_image_id.stdout }}
+
+# roles/backup installs the unit and runs before this role, so it exists
+# whenever a deployed service has a backup block.
+- name: Hold the image switch for a backup of {{ podman_service_name }}
+  when: podman_service_upgrade | bool
+  block:
+    # state: started counts an activating unit as running and returns at
+    # once, so a nightly run in progress would let the switch go ahead
+    # unconfirmed. Wait it out, within the pull's 20-minute limit.
+    - name: Wait for a running backup of {{ podman_service_name }}
+      ansible.builtin.systemd_service:
+        name: "{{ podman_service_backup_unit }}"
+        scope: user
+      become: true
+      become_user: "{{ podman_service_name }}"
+      environment: "{{ podman_service_env }}"
+      register: podman_service_backup_state
+      until: podman_service_backup_state.status.ActiveState != 'activating'
+      retries: 60
+      delay: 10
+
+    # Blocks until the oneshot ends, and fails when it fails. That ends the
+    # pull with nothing of this service rewritten, and the next pull retries.
+    - name: Back up before the image switch of {{ podman_service_name }}
+      ansible.builtin.systemd_service:
+        name: "{{ podman_service_backup_unit }}"
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ podman_service_name }}"
+      environment: "{{ podman_service_env }}"
 
 # ansible.builtin.copy will not create an intermediate directory, and a
 # config file's path may nest (config/Caddyfile). The bind mount in the same
@@ -62,25 +181,6 @@
     label: "{{ item.name }}"
   no_log: true
   register: podman_service_secrets
-
-- name: Check for the image of {{ podman_service_name }}
-  ansible.builtin.command:
-    cmd: "podman image exists {{ podman_service_spec.image }}"
-  become: true
-  become_user: "{{ podman_service_name }}"
-  environment: "{{ podman_service_env }}"
-  register: podman_service_image_exists
-  changed_when: false
-  failed_when: podman_service_image_exists.rc not in [0, 1]
-
-- name: Pull the image of {{ podman_service_name }}
-  ansible.builtin.command:
-    cmd: "podman pull --quiet {{ podman_service_spec.image }}"
-  become: true
-  become_user: "{{ podman_service_name }}"
-  environment: "{{ podman_service_env }}"
-  when: podman_service_image_exists.rc == 1
-  changed_when: true
 
 - name: Create the unit directory of {{ podman_service_name }}
   ansible.builtin.file:
@@ -158,7 +258,8 @@
       {{ (podman_service_units | selectattr('kind', 'equalto', 'primary') | selectattr('changed') | list | length > 0)
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
-         or (podman_service_secrets.changed | default(false)) }}
+         or (podman_service_secrets.changed | default(false))
+         or (podman_service_running_stale | bool) }}
     podman_service_reload: >-
       {{ (podman_service_units | selectattr('changed') | list | length > 0)
          or (podman_service_timers.changed | default(false))
