@@ -130,7 +130,7 @@ flowchart LR
 
 | Recipe | Effect |
 | --- | --- |
-| `just ci` | the whole pipeline locally; the only gate |
+| `just ci` | the whole pipeline locally. CI runs the same on every PR and every push to `main`, and Promote ships only a commit CI passed on a push to `main` |
 | `just plan HOST` | check-and-diff `site.yml` against a real host |
 | `just apply HOST` | push directly; bootstrap and break-glass only |
 | `just bootstrap HOST` | first run on a fresh image, as root, pull timer held off |
@@ -148,10 +148,10 @@ flowchart LR
 
 ### Bot pull requests
 
-- **Renovate** runs in GitHub Actions (`.github/workflows/renovate.yml`) daily at 05:17 Sydney time and after every push to `main`, on a token minted per run from a GitHub App. The App is installed on this repository only and holds these repository permissions: Contents, Pull requests, Issues, Commit statuses and Workflows, all read and write, plus Metadata read. The minted token is narrowed to the same five and lasts an hour
-- **The App's private key is a repository secret** (`RENOVATE_APP_PRIVATE_KEY`, with `RENOVATE_APP_CLIENT_ID` beside it). Any workflow run in this repository can read it, including runs on branches and pull requests from this repository. Because the App holds `contents: write` and `workflows: write`, whoever holds the key can push to `main`, and so to `release`, and so run code as root on both hosts. There are no branch rules, by choice
+- **Renovate** runs in GitHub Actions (`.github/workflows/renovate.yml`) daily at 05:17 Sydney time and after every push to `main`, on a token minted per run from a GitHub App. The App is installed on this repository only and holds these repository permissions: Contents, Pull requests, Issues, Commit statuses and Workflows, all read and write, plus Metadata read. The minted token is narrowed to the same five
+- **The App's private key is a repository secret** (`RENOVATE_APP_PRIVATE_KEY`, with `RENOVATE_APP_CLIENT_ID` beside it). Any workflow run in this repository can read it, including runs on branches and pull requests from this repository. Because the App holds `contents: write` and `workflows: write`, whoever holds the key can push to `main`, and so to `release`, and so run code as root on both hosts. There are no branch rules, by choice. A minted token holds `workflows: write`, so within its hour it can push a workflow that reads `RENOVATE_APP_PRIVATE_KEY`, which turns one hour of access into the long-lived key. The key is a repository secret by the operator's choice: an environment secret limited to `main` would keep it from branch and pull request runs, but not from a push straight to `main`
 - Renovate opens one PR per dependency on Mondays, except Vikunja's and Actual's, which open on any day. `ansible` and `sops` each get a single PR covering both files that pin them. The Dependency Dashboard issue lists everything pending, and a major waits there until you tick it
-- Renovate also manages the pinned GitHub Actions, holding each release back 7 days. Every action stays pinned by commit SHA, with its version beside it. Dependabot is not used
+- Renovate also manages the pinned GitHub Actions, holding each release back 7 days. Every action stays pinned by commit SHA, with its version beside it. Dependabot is not used. If a Renovate bump of `actions/create-github-app-token` or `renovatebot/github-action` breaks token minting or the run, Renovate cannot open its own fix: revert that bump by hand, as a normal PR with "Rebase and merge"
 - Renovate's PRs run CI without anyone approving them. After each push to `main`, Renovate rebases the PRs that are now behind it
 - **Landing one:**
   1. Read the PR and its notes. A Vikunja or Actual bump is backed up by the host itself before it switches image ([Backups](#backups)); afterwards, check that backup ran ([Vikunja](#vikunja), [Actual](#actual)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
