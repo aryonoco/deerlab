@@ -6,5 +6,5 @@
   roles:
     - role: podman_host
     - role: podman_user
-    - role: podman_service
     - role: backup
+    - role: podman_service
