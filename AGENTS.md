@@ -40,7 +40,7 @@ for Claude 5 Fable.
 - Ansible is the only executor. 
 - Tool versions are managed by mise — `mise.toml` is the single source of truth
 - Run `just ci` before committing
-- Never hardcode credentials. All secrets use SOPS + age; recipients are listed in `.sops.yaml`
+- Never hardcode credentials. All secrets use SOPS + age; recipients are listed in `.sops.yaml`. The one exception is the Renovate App's client ID and private key, which are GitHub repository secrets (`RENOVATE_APP_CLIENT_ID`, `RENOVATE_APP_PRIVATE_KEY`) because a workflow needs them. See `docs/runbook.md`, Bot pull requests
 - **This repository is public, and there are two categories here, not one.**
 
   *Encryption genuinely protects these — keep encrypting them with full rigour:*
@@ -86,8 +86,8 @@ for Claude 5 Fable.
 ## Delivery
 
 - Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, and applies `site.yml --limit <itself>` without checking the head commit's signature
-- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run in this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
-- The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only thing that pushes `release`
+- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run from this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
+- The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only workflow that pushes `release`
 - Renovate runs in GitHub Actions on a GitHub App token, daily and after every push to `main`, and also manages the Actions pins. Its PRs run CI themselves. Every PR, the operator's and Renovate's, lands with "Rebase and merge" on GitHub. Read the merge box first: no check is required. See `docs/runbook.md`, Bot pull requests
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 

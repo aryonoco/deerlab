@@ -31,7 +31,7 @@ jobs:
     steps:
       # The commit CI tested, not whatever main points at by the time this job
       # starts. A second commit landing in that window was promoted untested,
-      # and this job is the only thing that writes release.
+      # and this job is the only workflow that writes release.
       - name: Checkout the commit CI passed on
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
