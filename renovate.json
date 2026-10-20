@@ -3,10 +3,11 @@
   "extends": ["config:recommended"],
   "timezone": "Australia/Sydney",
   "schedule": ["* * * * 1"],
-  "updateNotScheduled": false,
+  "updateNotScheduled": true,
+  "rebaseWhen": "behind-base-branch",
   "prHourlyLimit": 0,
   "prConcurrentLimit": 0,
-  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "pip_requirements"],
+  "enabledManagers": ["custom.regex", "ansible-galaxy", "mise", "pip_requirements", "github-actions"],
   "semanticCommits": "disabled",
   "commitMessagePrefix": "deps:",
   "commitBody": "{{#if (equals updateType 'digest')}}Upstream rebuilt the tag, so the pinned digest is stale.{{else}}Upstream published a newer release.{{/if}}\n\n{{#each upgrades}}{{#unless @first}}\n{{/unless}}{{{depName}}}: {{#if (equals updateType 'digest')}}{{{currentValue}}} {{{currentDigestShort}}} -> {{{newDigestShort}}}{{else}}{{{displayFrom}}} -> {{{displayTo}}}{{/if}}\n  in {{{packageFile}}}{{/each}}",
@@ -57,6 +58,11 @@
     {
       "description": "Cooldown for the Python toolchain (runs as root on both hosts) and the collections",
       "matchDatasources": ["pypi", "galaxy-collection"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Cooldown for the pinned GitHub Actions; their tags carry dates",
+      "matchManagers": ["github-actions"],
       "minimumReleaseAge": "7 days"
     },
     {
@@ -149,6 +155,11 @@
       "description": "Subsystem: the operator's toolchain and the Ansible and sops the hosts install",
       "matchFileNames": ["mise.toml", "host-requirements.txt", "roles/base_pull/defaults/main.yml"],
       "commitMessagePrefix": "tools:"
+    },
+    {
+      "description": "Subsystem: the workflows. Last, so it wins over the default deps: prefix",
+      "matchFileNames": [".github/**"],
+      "commitMessagePrefix": "ci:"
     }
   ]
 }
