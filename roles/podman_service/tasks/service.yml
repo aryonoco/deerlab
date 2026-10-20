@@ -252,6 +252,9 @@
     podman_service_workload_spec: "{{ item.value }}"
   register: podman_service_timers
 
+# A stale container forces the reload as well as the restart. A run that wrote
+# the new unit and died before the reload left the old generated unit loaded,
+# and restarting that would bring the old image straight back.
 - name: Decide on a restart of {{ podman_service_name }}
   ansible.builtin.set_fact:
     podman_service_restart: >-
@@ -265,7 +268,8 @@
          or (podman_service_timers.changed | default(false))
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
-         or (podman_service_secrets.changed | default(false)) }}
+         or (podman_service_secrets.changed | default(false))
+         or (podman_service_running_stale | bool) }}
 
 # Broader than podman_service_restart on purpose: Quadlet regenerates a
 # .service unit only on a daemon-reload, so a workload-only change that skipped
