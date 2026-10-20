@@ -157,7 +157,7 @@ flowchart LR
 - Renovate needs **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests"** turned on. Without it, its runs cannot open PRs
 - A PR the bot opens or updates waits for approval before CI runs on it. Do not approve it: your push of the re-signed branch runs CI normally
 - **Landing one:**
-  1. Read the PR and its notes. A Vikunja or Actual bump needs the backup first ([Vikunja](#vikunja), [Actual](#actual)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
+  1. Read the PR and its notes. A Vikunja or Actual bump is backed up by the host itself before it switches image ([Backups](#backups)); afterwards, check that backup ran ([Vikunja](#vikunja), [Actual](#actual)). A Baikal bump cannot be undone. An image bump means re-testing its capability list
   2. `just resign BRANCH`. It refuses anything but a `renovate/` or `dependabot/` branch, refuses a dirty working tree, and stops if the bot's commits touch a path where you have an ignored file. It rebases the branch onto `origin/main` under your key, adds the two trailers to Dependabot's commits, prints the range-diff, the diff and the signature log, and fails unless every commit shows `G`. It then asks before it pushes the branch back to its PR, and whatever happens it returns you to the branch you started on
   3. Read the diff before you answer. It is exactly the content your signature goes on, and the only review between the bot's content and that signature. The range-diff above it shows the rebase changed nothing the bot wrote. Answer `y` to push it; anything else pushes nothing
   4. `just merge BRANCH`, then watch Promote
@@ -260,6 +260,10 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | A job's unit `inactive` between runs | A job is `Type=oneshot` with `Restart=no` and no `Notify=healthy`: `inactive` between runs is its normal state, and `activating` while one runs. A run that exits non-zero, including one killed by Podman's `--timeout`, enters `failed` and pages through `OnFailure=` — that one *is* an incident |
 | Red backup dead-man **and** a Pushover alert | May mean "snapshot fine, repository unverifiable": `restic check` runs *after* the snapshot is committed and a check failure fails the unit, so `ExecStartPost` — the dead-man ping — is skipped. Read the journal before concluding the snapshot did not happen |
 | A new service's first backup pages while its `presence_query` table is still empty | The query cannot tell a new, empty database from a lost one, so both fail it. Create the first account before the 03:00–03:30 UTC window, or expect one alert. Vikunja's first backup did exactly this on 2026-09-28 |
+| A pull failed because a pre-upgrade backup failed | The host backs a service up before it switches its image ([Backups](#backups)). If that backup fails, the backup unit's own `OnFailure=` pages and the pull's page arrives with it. The service keeps running its old image and nothing of it was rewritten. Fix the backup; the next pull retries and lands the bump |
+| A pull failed at the backup gate, with no page from the backup unit | The start did nothing: another run of the backup unit was already active, or the unit did not start. The pull's failure is the only page, and its journal shows the start task's `failed_when` with the unit's status. The next pull retries |
+| An image bump cannot land on a service with no data yet | The pre-upgrade backup runs the same `presence_query` as the nightly one, and it fails until the first account exists. Create the account, and the next pull lands the bump |
+| `just plan` sits for up to 10 minutes | The gate waits for a backup unit that is `activating`, and a nightly backup (03:00–03:30 UTC) is one. Run `just plan` outside that window |
 | `just plan` reports one change on a converged host | The pip task, not drift. See [Delivery](#delivery) |
 | A host briefly ahead of `release` after `just apply` | Reverted by the next pull, restarting the affected unit once. Resolves when the commit is promoted |
 
@@ -307,6 +311,16 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 
 - `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root. An entry may add `presence_query`, one plain `SELECT` that must print exactly `1` against the staged copy, such as Vikunja's `SELECT count(*) > 0 FROM users`. The play refuses anything else, because the query is written into an `sh -c` line in the unit: a quote, `%`, `$`, `;`, a backslash or a newline would break the quoting or be expanded by systemd. A glob entry may instead add `allow_empty: true` (see step 1 above); the play refuses it on a fixed path, as anything but a boolean, and beside `presence_query`, since "may be absent" and "must hold data" contradict
 - A service with no database skips steps 1–4
+
+### The backup before an image switch
+
+- **When it fires.** For a service with a `backup:` block, when `podman_service` finds either of two things: the deployed primary `.container`'s `Image=` differs from the record's `image:`, or the running primary container's image ID differs from the ID of the record's image. The second catches a run that wrote the units and died before its restart. When it fires, that run also reloads and restarts the service. A first deploy, which has no deployed unit, and a stopped container do not fire it or fail the run
+- **What it does.** The `backup` role runs before `podman_service` in both playbooks, so the unit exists. The gate waits, up to 10 minutes, while `deerlab-backup-<svc>.service` is `activating` (a nightly run in progress), then starts it and fails unless it actually started and succeeded
+- **What its success means.** The backup unit's own success: every step above, including `restic check` and the dead-man ping
+- **What a failure does.** It fails the task, which ends that host's pull. The pull unit's `OnFailure=` pages, and the backup unit's own `OnFailure=` pages as well when the backup itself failed. Nothing of that service was rewritten, so it keeps running its old image. Later services and later roles wait for the next pull, which retries the gate
+- **Under `--check`** (`just plan`), the gate reports a pending switch without starting a backup, and is skipped on a converged host. It can wait up to 10 minutes if a nightly backup is running
+- Because `backup` runs before `podman_service`, a failure in the `backup` role, such as a new service's repository initialisation, stops that pull before any service on the host is updated
+- Under `--check`, a commit that adds a `backup:` block and changes the image together fails the plan with "Could not find the requested service", because check mode installs no unit. The real run is unaffected
 - The edge's Caddy data volume is backed up the same way, so a rebuild does not burn ACME rate limits reissuing certificates
 
 | Hazard | Consequence |
@@ -624,16 +638,17 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - With the mailer on, a new registration must confirm its email address before it can log in, so registration depends on mail working. Check `testmail` first
 - **A forgotten password:** use the reset link sent by email, or run `user reset-password <user id> --direct` with `-it`, which prompts for the new one. It takes the numeric ID that `user list` shows, not the username. Never pass `-p` here either
 - **Mail** goes through the relay on 465, the one port egress class `mail` adds. `testmail <address>` sends a test message. A failure there, while other hosts can reach the relay, means the class, the mailer host or From address, or the credentials, not Vikunja
-- **Upgrading.** Migrations run at every start, and nothing refuses an older image on a newer schema, so the only rollback is a restore. Before promoting a Vikunja bump, run the backup by hand and confirm it succeeded:
+- **Upgrading.** Migrations run at every start, and nothing refuses an older image on a newer schema, so the only rollback is a restore. The host backs Vikunja up itself before it switches image ([Backups](#the-backup-before-an-image-switch)). After the pull, check that the backup ran:
 
   ```sh
-  systemctl --user --machine=vikunja@ start deerlab-backup-vikunja.service
   systemctl --user --machine=vikunja@ show deerlab-backup-vikunja.service -p Result --value   # need success
   ```
 
+  The unit's last run must also be newer than the pull's start
+
   - The container's health probe runs Vikunja's own migration too, and Podman 5.4.2 fires the first probe as the container starts, so on a first boot and on an upgrade it races the server's migration. When the server loses, one alert and then `active` about 5 s later is expected (see [Expected, not incidents](#expected-not-incidents)). In a systemd 257 / Podman 5.4.2 lab, a 2.5.0 to 2.6.0 upgrade with data came up healthy with the data intact, and every forced loss recovered by itself with the database complete. That is evidence, not proof
   - Every Vikunja CLI command runs the migration as well, `user list` included, so do not run one while the unit is starting
-- **Security fixes ship only in minor releases, which also migrate the schema** (65 advisories between February and August 2026). Renovate opens a Vikunja PR within a day of a release, on any day of the week, labelled `backup-first`; land it as [Bot pull requests](#bot-pull-requests) describes, after the backup below
+- **Security fixes ship only in minor releases, which also migrate the schema** (65 advisories between February and August 2026). Renovate opens a Vikunja PR within a day of a release, on any day of the week, labelled `backup-first`; land it as [Bot pull requests](#bot-pull-requests) describes, then check the backup as the Upgrading item above describes
 - **The unauthenticated rate limit** is 10 requests a minute per client address, and it covers login and registration
 - Vikunja trusts the edge's `X-Forwarded-For`, so it logs and rate-limits each client by its own address, not the edge's
 - `/health` is not rate-limited
@@ -665,12 +680,13 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
   ```
 
 - **Clients.** The web app, installed to the home screen on phones; on iPhone that also exempts it from Safari deleting a site's data after 7 days unused. The desktop app is not recommended: upstream warns that it drifts out of step with a self-hosted server. Clearing a browser's site data deletes that device's login, its copy of the encryption key and its unsynced changes
-- **Upgrading.** Every start migrates, and an older server refuses a newer database (`Missing migration file`, exit 1), so the only rollback is a restore. Renovate opens an Actual PR on any day, labelled `backup-first`. Before promoting one, run the backup by hand and confirm it succeeded:
+- **Upgrading.** Every start migrates, and an older server refuses a newer database (`Missing migration file`, exit 1), so the only rollback is a restore. Renovate opens an Actual PR on any day, labelled `backup-first`. The host backs Actual up itself before it switches image ([Backups](#the-backup-before-an-image-switch)). After the pull, check that the backup ran:
 
   ```sh
-  systemctl --user --machine=actual@ start deerlab-backup-actual.service
   systemctl --user --machine=actual@ show deerlab-backup-actual.service -p Result --value   # need success
   ```
+
+  The unit's last run must also be newer than the pull's start
 
   - Each browser keeps running the old frontend until someone clicks "Update now" in the app's notice. A newer client can migrate the budget itself, and older ones then show "Update required" until they update
 - **Restore.** `.migrate` and `server-files/account.sqlite` are one unit. Restore A applies only when the same migrations have run in the snapshot as in the live volume. `.migrate` also lists migrations that have not run, with a null timestamp, so compare only those that have:
