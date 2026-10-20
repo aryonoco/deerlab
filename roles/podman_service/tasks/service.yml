@@ -129,7 +129,7 @@
   block:
     # state: started counts an activating unit as running and returns at
     # once, so a nightly run in progress would let the switch go ahead
-    # unconfirmed. Wait it out, within the pull's 20-minute limit.
+    # unconfirmed. Wait it out, for up to 10 minutes.
     - name: Wait for a running backup of {{ podman_service_name }}
       ansible.builtin.systemd_service:
         name: "{{ podman_service_backup_unit }}"

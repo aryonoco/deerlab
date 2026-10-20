@@ -255,9 +255,9 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | Red backup dead-man **and** a Pushover alert | May mean "snapshot fine, repository unverifiable": `restic check` runs *after* the snapshot is committed and a check failure fails the unit, so `ExecStartPost` — the dead-man ping — is skipped. Read the journal before concluding the snapshot did not happen |
 | A new service's first backup pages while its `presence_query` table is still empty | The query cannot tell a new, empty database from a lost one, so both fail it. Create the first account before the 03:00–03:30 UTC window, or expect one alert. Vikunja's first backup did exactly this on 2026-09-28 |
 | A pull failed because a pre-upgrade backup failed | The host backs a service up before it switches its image ([Backups](#backups)). If that backup fails, the backup unit's own `OnFailure=` pages and the pull's page arrives with it. The service keeps running its old image and nothing of it was rewritten. Fix the backup; the next pull retries and lands the bump |
-| A pull failed at the backup gate, with no page from the backup unit | The start did nothing: another run of the backup unit was already active, or the unit did not start. The pull's failure is the only page, and its journal shows the start task's `failed_when` with the unit's status. The next pull retries |
+| A pull failed at the backup gate, with no page from the backup unit | Either a run of the backup unit was still `activating` when the gate's 10-minute wait ran out, and the failing task is "Wait for a running backup of <svc>"; or the start did nothing, because another run of the backup unit was already active or the unit did not start, and the journal shows the start task's `failed_when` with the unit's status. The pull's failure is the only page. The next pull retries |
 | An image bump cannot land on a service with no data yet | The pre-upgrade backup runs the same `presence_query` as the nightly one, and it fails until the first account exists. Create the account, and the next pull lands the bump |
-| `just plan` sits for up to 10 minutes | The gate waits for a backup unit that is `activating`, and a nightly backup (03:00–03:30 UTC) is one. Run `just plan` outside that window |
+| `just plan` sits for up to 10 minutes | Only when the plan holds an image switch for a service with a `backup:` block. The gate then waits while that service's backup unit is `activating`, as it is during a nightly backup (03:00–03:30 UTC). Run `just plan` outside that window |
 | `just plan` reports one change on a converged host | The pip task, not drift. See [Delivery](#delivery) |
 | A host briefly ahead of `release` after `just apply` | Reverted by the next pull, restarting the affected unit once. Resolves when the commit is promoted |
 
@@ -312,6 +312,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 - **What it does.** The `backup` role runs before `podman_service` in both playbooks, so the unit exists. The gate waits, up to 10 minutes, while `deerlab-backup-<svc>.service` is `activating` (a nightly run in progress), then starts it and fails unless it actually started and succeeded
 - **What its success means.** The backup unit's own success: every step above, including `restic check` and the dead-man ping
 - **What a failure does.** It fails the task, which ends that host's pull. The pull unit's `OnFailure=` pages, and the backup unit's own `OnFailure=` pages as well when the backup itself failed. Nothing of that service was rewritten, so it keeps running its old image. Later services and later roles wait for the next pull, which retries the gate
+- **It runs inside the pull's time limit.** The wait, the gate's own backup and the rest of the play all count against `TimeoutStartSec=20m` on `deerlab-pull.service`. A backup slow enough to reach that limit fails the pull mid-gate, with nothing of the service rewritten, and keeps running in the service's user manager; the next pull's gate waits for it as for a nightly run, then takes its own
 - **Under `--check`** (`just plan`), the gate reports a pending switch without starting a backup, and is skipped on a converged host. It can wait up to 10 minutes if a nightly backup is running
 - Because `backup` runs before `podman_service`, a failure in the `backup` role, such as a new service's repository initialisation, stops that pull before any service on the host is updated
 - Under `--check`, a commit that adds a `backup:` block to an already-deployed service fails `just plan` in the `backup` role, before `podman_service` runs. Check mode installs no unit, and the `backup` role's "Enable the backup timer of <svc>" uses `systemd_service` with `enabled: true`, which fails with "Could not find the requested service" when the unit is missing, check mode or not. The real run is unaffected
@@ -644,10 +645,12 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **Upgrading.** Migrations run at every start, and nothing refuses an older image on a newer schema, so the only rollback is a restore ([how](#the-backup-before-an-image-switch)). The host backs Vikunja up itself before it switches image ([Backups](#the-backup-before-an-image-switch)). After the pull, check that the backup ran:
 
   ```sh
-  systemctl --user --machine=vikunja@ show deerlab-backup-vikunja.service -p Result --value   # need success
+  journalctl -u deerlab-pull.service --since -24h -o cat --no-pager \
+    | grep -F -A1 'podman_service : Back up before the image switch of vikunja]' \
+    | grep -c '^changed:'   # need 1 or more
   ```
 
-  The unit's last run must also be newer than the pull's start
+  Every pull prints that task, as `skipping:` when no switch is pending. `changed:` means the backup ran and succeeded, because a failed one fails the task and the pull. Widen `--since` if the bump landed more than a day ago
 
   - The container's health probe runs Vikunja's own migration too, and Podman 5.4.2 fires the first probe as the container starts, so on a first boot and on an upgrade it races the server's migration. When the server loses, one alert and then `active` about 5 s later is expected (see [Expected, not incidents](#expected-not-incidents)). In a systemd 257 / Podman 5.4.2 lab, a 2.5.0 to 2.6.0 upgrade with data came up healthy with the data intact, and every forced loss recovered by itself with the database complete. That is evidence, not proof
   - Every Vikunja CLI command runs the migration as well, `user list` included, so do not run one while the unit is starting
@@ -686,10 +689,12 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **Upgrading.** Every start migrates, and an older server refuses a newer database (`Missing migration file`, exit 1), so the only rollback is a restore ([how](#the-backup-before-an-image-switch)). Renovate opens an Actual PR on any day, labelled `backup-first`. The host backs Actual up itself before it switches image ([Backups](#the-backup-before-an-image-switch)). After the pull, check that the backup ran:
 
   ```sh
-  systemctl --user --machine=actual@ show deerlab-backup-actual.service -p Result --value   # need success
+  journalctl -u deerlab-pull.service --since -24h -o cat --no-pager \
+    | grep -F -A1 'podman_service : Back up before the image switch of actual]' \
+    | grep -c '^changed:'   # need 1 or more
   ```
 
-  The unit's last run must also be newer than the pull's start
+  Read the result as in [Vikunja](#vikunja)'s Upgrading item
 
   - Each browser keeps running the old frontend until someone clicks "Update now" in the app's notice. A newer client can migrate the budget itself, and older ones then show "Update required" until they update
 - **Restore.** `.migrate` and `server-files/account.sqlite` are one unit. Restore A applies only when the same migrations have run in the snapshot as in the live volume. `.migrate` also lists migrations that have not run, with a null timestamp, so compare only those that have:
