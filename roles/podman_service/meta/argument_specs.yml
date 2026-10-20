@@ -13,7 +13,9 @@ argument_specs:
       Before a service with a backup block switches image, it starts that
       service's deerlab-backup-<name>.service, which roles/backup owns, and
       fails the run unless that backup runs and succeeds, before anything
-      of the service is rewritten.
+      of the service is rewritten. The records it deploys are checked by
+      podman_service_check, a dependency of this role that the playbooks
+      also run first.
     options:
       podman_service_services:
         type: dict
@@ -70,7 +72,7 @@ argument_specs:
         description: >
           Keys a workload never inherits from its parent service. This is
           the workload inheritance contract. Workloads must declare their
-          own kind and job scheduling policy; the validation forbidden-key
+          own kind and job scheduling policy; podman_service_check's forbidden-key
           list intentionally does not reject those mandatory workload keys.
       podman_service_unit_root:
         type: path

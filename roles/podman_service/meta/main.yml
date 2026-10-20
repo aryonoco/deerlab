@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-dependencies: []
+# Listing the record checks here keeps a play that names podman_service alone
+# from deploying an unchecked record. Ansible runs a role once per play, so
+# the playbooks' own entry still decides where it runs.
+dependencies:
+  - role: podman_service_check

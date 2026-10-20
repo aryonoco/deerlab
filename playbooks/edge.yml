@@ -4,6 +4,7 @@
 - name: Configure the edge host
   hosts: edge
   roles:
+    - role: podman_service_check
     - role: podman_host
     - role: podman_user
     - role: backup

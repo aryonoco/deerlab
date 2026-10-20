@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# These record checks live in a role of their own so they run first in the
+# edge and services plays. A dry run of a brand-new service then checks its
+# record before backup's first task that runs as the not yet created service
+# user stops it, and a real pull with a bad record fails before anything of
+# the play changes the host.
+- name: Validate the service definitions
+  ansible.builtin.assert:
+    that:
+      - podman_service_check_definition_spec.image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$')
+      - podman_service_check_definition_spec.publish is defined
+      - podman_service_check_definition_spec.health.cmd is defined
+      # Ansible evaluates `that:` in order and stops at the first false
+      # condition, so this guard has to run before the two indexing checks
+      # below - without it, a service missing from deerlab_service_limits
+      # dies as a raw Jinja KeyError instead of this assert's own fail_msg.
+      - podman_service_check_definition_name in podman_service_check_limits
+      - podman_service_check_definition_name in podman_service_check_limits[podman_service_check_definition_name].containers
+      - podman_service_check_limits[podman_service_check_definition_name].containers[podman_service_check_definition_name].pids is defined
+      - (podman_service_check_definition_spec.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
+      # fullmatch, not match: re.match's $ also matches before a trailing
+      # newline, and a newline here would split the unit file.
+      - >-
+        podman_service_check_definition_spec.stop_signal is not defined or
+        podman_service_check_definition_spec.stop_signal is regex('SIG[A-Z0-9]+', match_type='fullmatch')
+    fail_msg: >-
+      service {{ podman_service_check_definition_name }} needs a fully qualified digest-pinned image, publish,
+      health.cmd, an entry with a pids limit in deerlab_service_limits, no
+      CHANGE-ME secrets, and a stop_signal, if set, of the form SIGNAME
+    quiet: true
+  # A failed loop result contains its complete item, and the CHANGE-ME check
+  # fails exactly while real secrets are being staged. Loop over the service
+  # name alone so a validation failure cannot print the service's secret values.
+  loop: "{{ podman_service_check_services | list }}"
+  loop_control:
+    loop_var: podman_service_check_definition_name
+    label: "{{ podman_service_check_definition_name }}"
+  vars:
+    podman_service_check_definition_spec: "{{ podman_service_check_services[podman_service_check_definition_name] }}"
+
+# roles/podman_service/tasks/service.yml blocks a workload from INHERITING the
+# keys in podman_service_never_inherited - it does not stop a workload from
+# declaring a key itself. kind, schedule and persistent are mandatory or valid
+# workload keys, so they must not join the forbidden-key list below.
+# base_firewall builds every host's egress chains from map(attribute='publish')
+# over the top-level podman_services entries alone, so a workload's own
+# PublishPort= would open a port with no egress chain and no firewall rule
+# ever written for it: a silent bypass introduced by one misplaced key, not a
+# startup failure. A workload with no matching entry in deerlab_service_limits
+# fails instead with a raw Jinja error from deep inside podman_service; this
+# gives that a clean fail_msg.
+#
+# health is deliberately absent from this list: a worker may declare its own
+# health check rather than inherit the primary's, and only a job is refused
+# one, by the job-health check below. secrets stays on the list because the
+# secret-creation loop in podman_service iterates the parent spec only, so a
+# workload's own secrets entry would render a Secret= reference to a Podman
+# secret that was never created, and the container would fail to start. Keep
+# it here until that loop is taught to look at workloads too.
+- name: Validate the workload definitions
+  ansible.builtin.assert:
+    that:
+      - podman_service_check_workload_bad_kinds | length == 0
+      - podman_service_check_workload_forbidden_hits | length == 0
+      - podman_service_check_workload_missing_limits | length == 0
+      - podman_service_check_workload_bad_schedules | length == 0
+      - podman_service_check_workload_job_health | length == 0
+      - podman_service_check_workload_bad_persistent | length == 0
+      - podman_service_check_workload_missing_runtime_max | length == 0
+      - podman_service_check_workload_missing_start_timeout | length == 0
+      - podman_service_check_workload_bad_stop_signals | length == 0
+    fail_msg: >-
+      service {{ podman_service_check_workload_service_name }}: workloads with a missing or invalid kind
+      {{ podman_service_check_workload_bad_kinds }}; workloads declaring a parent-only
+      key {{ podman_service_check_workload_forbidden_hits }}; workloads missing a
+      deerlab_service_limits containers entry {{ podman_service_check_workload_missing_limits }};
+      jobs missing a schedule or workers declaring one
+      {{ podman_service_check_workload_bad_schedules }}; jobs declaring a health
+      check {{ podman_service_check_workload_job_health }}; workloads with invalid
+      persistent settings {{ podman_service_check_workload_bad_persistent }}; jobs
+      missing runtime_max in deerlab_service_limits
+      {{ podman_service_check_workload_missing_runtime_max }}; workers missing
+      start_timeout in deerlab_service_limits
+      {{ podman_service_check_workload_missing_start_timeout }}; workloads with a
+      stop_signal not of the form SIGNAME
+      {{ podman_service_check_workload_bad_stop_signals }}
+    quiet: true
+  # A failed loop result contains its complete item. Loop over the service name
+  # alone so a validation failure cannot print the service's secret values.
+  loop: "{{ podman_service_check_services | list }}"
+  loop_control:
+    loop_var: podman_service_check_workload_service_name
+    label: "{{ podman_service_check_workload_service_name }}"
+  vars:
+    podman_service_check_workload_spec: "{{ podman_service_check_services[podman_service_check_workload_service_name] }}"
+    podman_service_check_workload_kinds: [worker, job]
+    podman_service_check_workload_parent_only_keys:
+      - publish
+      - secrets
+      - backup
+      - uid
+      - egress
+      - workloads
+    podman_service_check_workload_bad_kinds: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
+         | rejectattr('value.kind', 'defined')
+         | map(attribute='key') | list
+         + (podman_service_check_workload_spec.workloads | default({}) | dict2items
+            | selectattr('value.kind', 'defined')
+            | rejectattr('value.kind', 'in', podman_service_check_workload_kinds)
+            | map(attribute='key') | list) }}
+    podman_service_check_workload_forbidden_hits: >-
+      {{ (podman_service_check_workload_spec.workloads | default({}) | dict2items | map(attribute='key') | list)
+         | zip(podman_service_check_workload_spec.workloads | default({}) | dict2items | map(attribute='value')
+               | map('list') | map('intersect', podman_service_check_workload_parent_only_keys) | list)
+         | rejectattr('1', 'equalto', [])
+         | list }}
+    podman_service_check_workload_missing_limits: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items | map(attribute='key')
+         | map('regex_replace', '^(.*)$', podman_service_check_workload_service_name ~ '-\1')
+         | difference(podman_service_check_limits[podman_service_check_workload_service_name].containers | default({}) | dict2items
+                      | selectattr('value.pids', 'defined') | map(attribute='key') | list) }}
+    podman_service_check_workload_bad_schedules: >-
+      {{ (podman_service_check_workload_spec.workloads | default({}) | dict2items
+          | selectattr('value.kind', 'defined')
+          | selectattr('value.kind', 'equalto', 'job')
+          | rejectattr('value.schedule', 'defined')
+          | map(attribute='key') | list)
+         + (podman_service_check_workload_spec.workloads | default({}) | dict2items
+            | selectattr('value.kind', 'defined')
+            | selectattr('value.kind', 'equalto', 'worker')
+            | selectattr('value.schedule', 'defined')
+            | map(attribute='key') | list) }}
+    podman_service_check_workload_job_health: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'job')
+         | selectattr('value.health', 'defined')
+         | map(attribute='key') | list }}
+    podman_service_check_workload_bad_persistent: >-
+      {{ ((podman_service_check_workload_spec.workloads | default({}) | dict2items
+           | selectattr('value.persistent', 'defined')
+           | rejectattr('value.persistent', 'boolean')
+           | map(attribute='key') | list)
+          + (podman_service_check_workload_spec.workloads | default({}) | dict2items
+             | selectattr('value.kind', 'defined')
+             | selectattr('value.kind', 'equalto', 'worker')
+             | selectattr('value.persistent', 'defined')
+             | map(attribute='key') | list)) | unique | list }}
+    podman_service_check_workload_missing_runtime_max: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'job')
+         | map(attribute='key')
+         | map('regex_replace', '^(.*)$', podman_service_check_workload_service_name ~ '-\1')
+         | difference(podman_service_check_limits[podman_service_check_workload_service_name].containers | default({}) | dict2items
+                      | selectattr('value.runtime_max', 'defined') | map(attribute='key') | list) }}
+    podman_service_check_workload_missing_start_timeout: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined')
+         | selectattr('value.kind', 'equalto', 'worker')
+         | map(attribute='key')
+         | map('regex_replace', '^(.*)$', podman_service_check_workload_service_name ~ '-\1')
+         | difference(podman_service_check_limits[podman_service_check_workload_service_name].containers | default({}) | dict2items
+                      | selectattr('value.start_timeout', 'defined') | map(attribute='key') | list) }}
+    # fullmatch, not match, for the reason given on the service's own check.
+    podman_service_check_workload_bad_stop_signals: >-
+      {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
+         | selectattr('value.stop_signal', 'defined')
+         | rejectattr('value.stop_signal', 'regex', 'SIG[A-Z0-9]+', match_type='fullmatch')
+         | map(attribute='key') | list }}
