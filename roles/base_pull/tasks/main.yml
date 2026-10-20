@@ -5,10 +5,9 @@
   ansible.builtin.assert:
     that:
       - base_pull_repo_url | length > 0
-      - base_pull_allowed_signers | length > 0
       - base_pull_deadman_url | length > 0
       - '"CHANGE-ME" not in base_pull_deadman_url'
-    fail_msg: base_pull needs the repository URL, allowed signers, and a dead-man URL
+    fail_msg: base_pull needs the repository URL and a dead-man URL
     quiet: true
 
 - name: Install age and the Python tooling
@@ -78,25 +77,31 @@
   ansible.builtin.debug:
     msg: "base_pull age public key for {{ inventory_hostname }}: {{ base_pull_age_public.stdout }}"
 
-- name: Write the allowed signers
-  ansible.builtin.copy:
-    content: "{{ base_pull_allowed_signers | join('\n') }}\n"
-    dest: /etc/deerlab/allowed_signers
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Configure git to verify SSH signatures
+- name: Configure git to trust the pull checkout
   community.general.git_config:
     name: "{{ item.name }}"
     value: "{{ item.value }}"
     scope: global
   loop:
-    - { name: gpg.format, value: ssh }
-    - { name: gpg.ssh.allowedSignersFile, value: /etc/deerlab/allowed_signers }
     - { name: safe.directory, value: "{{ base_pull_dir }}/checkout" }
   loop_control:
     label: "{{ item.name }}"
+
+# Signature verification is gone. A later change removes this task and the
+# next one, once both hosts have run them.
+- name: Remove the retired allowed signers
+  ansible.builtin.file:
+    path: /etc/deerlab/allowed_signers
+    state: absent
+
+- name: Remove the retired signature settings
+  community.general.git_config:
+    name: "{{ item }}"
+    scope: global
+    state: absent
+  loop:
+    - gpg.format
+    - gpg.ssh.allowedSignersFile
 
 - name: Write the dead-man curl configuration
   ansible.builtin.copy:

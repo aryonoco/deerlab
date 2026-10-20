@@ -18,9 +18,8 @@ deerlab_managed: "Managed by deerlab Ansible. Edit the repository, not this file
 # Who Ansible connects as. Deliberately separate from deerlab_admin_user, which
 # names the administrative account the roles create: `just bootstrap` overrides
 # ansible_user to root, and if the roles read that they would make root the
-# admin and then lock every account out. deerlab_admin_user itself, the keys
-# that may log in as it and the keys that may sign a release commit are all in
-# secrets.sops.yaml.
+# admin and then lock every account out. deerlab_admin_user itself and the keys
+# that may log in as it are in secrets.sops.yaml.
 ansible_user: "{{ deerlab_admin_user }}"
 
 deerlab_repo_url: https://github.com/aryonoco/deerlab.git

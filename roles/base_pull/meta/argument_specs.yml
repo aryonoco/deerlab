@@ -6,9 +6,8 @@ argument_specs:
     short_description: Pull-based delivery with ansible-pull
     description: >
       A pinned Ansible virtual environment, sops and age, a host age key
-      generated on first run, git configured to verify SSH-signed commits
-      against an allowed-signers file, and a timer that pulls the release
-      branch and applies this host's plays.
+      generated on first run, and a timer that pulls the release branch and
+      applies this host's plays.
     options:
       base_pull_repo_url:
         type: str
@@ -27,11 +26,6 @@ argument_specs:
         type: str
         default: "*:0/30"
         description: systemd OnCalendar expression.
-      base_pull_allowed_signers:
-        type: list
-        elements: str
-        required: true
-        description: Lines in ssh allowed_signers format.
       base_pull_deadman_url:
         type: str
         required: true

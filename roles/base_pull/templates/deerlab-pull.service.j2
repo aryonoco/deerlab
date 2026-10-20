@@ -13,10 +13,10 @@ TimeoutStartSec={{ base_pull_timeout }}
 Environment=SOPS_AGE_KEY_FILE={{ base_pull_age_key_file }}
 Environment=ANSIBLE_NOCOLOR=1
 # System-scope units get no $HOME by default, so git cannot find the
-# global config this role writes (allowedSignersFile included) and
-# --verify-commit fails as if nothing were configured at all.
+# global config this role writes (safe.directory) and refuses the checkout
+# as owned by someone else.
 Environment=HOME=/root
 WorkingDirectory={{ base_pull_dir }}
 LoadCredential=deadman.conf:/etc/deerlab/deadman-pull.conf
-ExecStart={{ base_pull_venv }}/bin/ansible-pull --url {{ base_pull_repo_url }} --checkout {{ base_pull_branch }} --directory {{ base_pull_dir }}/checkout --verify-commit --clean --connection local --inventory inventory/hosts.yml --limit {{ inventory_hostname }} playbooks/site.yml
+ExecStart={{ base_pull_venv }}/bin/ansible-pull --url {{ base_pull_repo_url }} --checkout {{ base_pull_branch }} --directory {{ base_pull_dir }}/checkout --clean --connection local --inventory inventory/hosts.yml --limit {{ inventory_hostname }} playbooks/site.yml
 ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/deadman.conf --data "pull ok"

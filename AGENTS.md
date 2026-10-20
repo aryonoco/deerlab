@@ -32,7 +32,7 @@ Assisted-by: <NAME_OF_LLM_MODEL>
 E.g. `Assisted-by: <Claude:claude-4.6-opus>` for Claude Opus 4.6; `<Claude:claude-5-fable>`
 for Claude 5 Fable.
 
-- Sign every commit. The hosts verify the `release` head against `deerlab_allowed_signers` and refuse anything else, including GitHub's web-flow signature on API-created commits such as Renovate's
+- Sign every commit. The hosts do not check signatures, but `just merge` and `just resign` still do
 - Write commit messages as if a human wrote them, and say why, not what
 
 
@@ -88,9 +88,10 @@ for Claude 5 Fable.
 
 ## Delivery
 
-- Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, verifies the head commit's SSH signature, and applies `site.yml --limit <itself>`
+- Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, and applies `site.yml --limit <itself>` without checking the head commit's signature
+- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. That reaches the operator's account, the credentials of any workflow with `contents: write` (Promote's `GITHUB_TOKEN` included) and any action running inside such a workflow. There are no branch rules, by choice
 - The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only thing that pushes `release`
-- Renovate runs daily in GitHub Actions on the job's own `GITHUB_TOKEN`, and Dependabot bumps the Actions. Their commits carry GitHub's web-flow signature, which the hosts refuse: land every bot PR with `just resign BRANCH`, then `just merge BRANCH`. See `docs/runbook.md`, Bot pull requests
+- Renovate runs daily in GitHub Actions on the job's own `GITHUB_TOKEN`, and Dependabot bumps the Actions. Their commits carry GitHub's web-flow signature, which `just merge` does not accept: land every bot PR with `just resign BRANCH`, then `just merge BRANCH`. See `docs/runbook.md`, Bot pull requests
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 
 ## Code Quality

@@ -3,7 +3,7 @@
 
 # deerlab runbook
 
-- Two Debian 13 VPSs, Ansible only. `edge1` runs Caddy; `svc1` runs each application as a rootless Podman Quadlet under its own system user; kernel WireGuard between them; delivery by `ansible-pull` from a signed `release` branch
+- Two Debian 13 VPSs, Ansible only. `edge1` runs Caddy; `svc1` runs each application as a rootless Podman Quadlet under its own system user; kernel WireGuard between them; delivery by `ansible-pull` from the `release` branch
 - Written for someone holding only this repository, under time pressure, with nobody to ask: it records what is silent when it goes wrong
 - Read [What is not proven](#what-is-not-proven) before trusting any procedure here in a real disaster
 - `<svc>` is a service name, which is also its username; `<uid>` is its uid. Substitute `<placeholders>` and `{{ inventory_variable }}` from the decrypted inventory, and never paste a real value back into this file
@@ -94,7 +94,6 @@ flowchart LR
 | Pull checkout | `/var/lib/deerlab/checkout` |
 | Pull's Ansible virtualenv | `/opt/deerlab/venv` |
 | Host's age identity | `/etc/deerlab/age.key` (0400 root) |
-| Allowed signers for `--verify-commit` | `/etc/deerlab/allowed_signers` |
 | Pushover credential, system scope | `/etc/deerlab/pushover.conf` |
 | Pushover credential, per service user | `/etc/deerlab/pushover/<svc>.conf` |
 | Quadlet units | `/etc/containers/systemd/users/<uid>/` |
@@ -124,7 +123,7 @@ flowchart LR
   ci -->|"success"| pm["Promote workflow:<br/>ff release to the exact sha CI passed on"]
   pm --> rel["release branch"]
   rel --> t["deerlab-pull.timer, every host"]
-  t --> ap["ansible-pull --verify-commit<br/>against /etc/deerlab/allowed_signers"]
+  t --> ap["ansible-pull<br/>applies release as root"]
   ap --> site["site.yml --limit self"]
   site --> dm["dead-man ping on success"]
 ```
@@ -141,12 +140,12 @@ flowchart LR
 | `just secrets-edit FILE`, `just secrets-rekey` | edit, or re-encrypt for the current recipients |
 | `just backup-prune SVC`, `just restore-drill SVC` | one argument, the service name |
 
-- Timer: `OnCalendar=*:0/30`, `RandomizedDelaySec=300`, `Persistent=true`. It checks out `release`, verifies the head commit's SSH signature against `/etc/deerlab/allowed_signers`, and applies `site.yml --limit <itself>`
+- Timer: `OnCalendar=*:0/30`, `RandomizedDelaySec=300`, `Persistent=true`. It checks out `release` and applies `site.yml --limit <itself>`, without checking the head commit's signature
 - Pull sooner with `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
 - `Promote` fast-forwards `release` to the commit CI passed on, not to whatever `main` points at when it runs, and only for a **push** to `main`. It is the only thing that pushes `release`
-- GitHub's own merge buttons rewrite or re-sign commits and the hosts would reject the result. Hence `just merge`, which fast-forwards from your machine so your signature stays on the head
-- Commits a bot creates, Renovate's and Dependabot's, carry GitHub's web-flow GPG signature rather than a key in `deerlab_allowed_signers`, and the hosts refuse them. Every bot change lands through [Bot pull requests](#bot-pull-requests)
-- The gate that matters is on the host, not on GitHub. There are no server-side branch rules: GitHub calls a commit verified if *any* registered key signed it, while `ansible-pull --verify-commit` demands a key from the allowed-signers file. An unverifiable commit halts delivery and pages, whatever GitHub accepted
+- GitHub's own merge buttons rewrite or re-sign commits. `just merge` fast-forwards from your machine so your signature stays on the head
+- Commits a bot creates, Renovate's and Dependabot's, carry GitHub's web-flow GPG signature rather than your key. Every bot change lands through [Bot pull requests](#bot-pull-requests)
+- **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. That reaches the operator's account, the credentials of any workflow with `contents: write` (Promote's `GITHUB_TOKEN` included) and any action running inside such a workflow. There are no branch rules, by choice
 - **`just plan` reports exactly one change on a converged host**: `base_pull : Install Ansible into its virtual environment`, because `ansible.builtin.pip` cannot tell whether requirements are satisfied without invoking pip, which check mode forbids. **Anything beyond that one change is real drift**
 - **`just plan` requires an already-bootstrapped host.** `podman_service` runs `podman info` as each service user, and that user does not exist until a real run has created it. Check mode against a fresh image fails; use `just bootstrap`
 - **Collections are pinned exactly** in `requirements.yml`, and `deps.yml` installs every pin into the checkout's `collections/`, ignoring the copies the `ansible` pip package bundles. A pull loads its collections before `deps.yml` runs, so a collection bump takes effect on the **second pull after promotion**. `just plan` never installs them, because check mode skips the command: after a collection bump, run `just setup` before `just plan`
