@@ -6,9 +6,8 @@
 # for an hour, narrowed to the five permissions Renovate uses. The App's
 # private key is a repository secret, so any workflow run from this repository
 # can read it: branches pushed to it, and pull requests from them. Renovate
-# also manages
-# the pinned actions in .github/workflows/, which needs the workflows
-# permission that the job's own GITHUB_TOKEN can never hold.
+# also manages the pinned actions in .github/workflows/, which needs the
+# workflows permission that the job's own GITHUB_TOKEN can never hold.
 
 name: Renovate
 

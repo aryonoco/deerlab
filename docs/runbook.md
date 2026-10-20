@@ -713,7 +713,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **The Renovate App's private key** is a GitHub repository secret, not a SOPS file ([Bot pull requests](#bot-pull-requests)). To rotate or revoke it:
   1. On the App's settings page, under Credentials, generate a new private key. GitHub requires a new key to exist before the last old one can be deleted
   2. From your own terminal, `gh secret set RENOVATE_APP_PRIVATE_KEY < new.pem`
-  3. Delete the old key on the App's page. The `.pem` you downloaded is a second copy of the key and nothing needs it after `gh secret set`: delete it
+  3. Delete the old key on the App's page. The `.pem` you downloaded is a second copy of the key and nothing needs it after `gh secret set`
   4. Audit what changed while the old key was live: the recent history of `main` and `release`, and `.github/workflows/`
   5. A token already minted expires within an hour of being minted
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
