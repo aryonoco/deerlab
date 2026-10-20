@@ -58,7 +58,10 @@
 # secret-creation loop in podman_service iterates the parent spec only, so a
 # workload's own secrets entry would render a Secret= reference to a Podman
 # secret that was never created, and the container would fail to start. Keep
-# it here until that loop is taught to look at workloads too.
+# it here until that loop is taught to look at workloads too. image is on
+# the list because podman_service pulls, and its backup gate compares, only
+# the primary's image: a workload's own would reach its unit unpulled, and
+# would switch with no backup taken first.
 - name: Validate the workload definitions
   ansible.builtin.assert:
     that:
@@ -103,6 +106,7 @@
       - uid
       - egress
       - workloads
+      - image
     podman_service_check_workload_bad_kinds: >-
       {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
          | rejectattr('value.kind', 'defined')
