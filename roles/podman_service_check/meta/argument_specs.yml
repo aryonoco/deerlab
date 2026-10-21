@@ -7,8 +7,8 @@ argument_specs:
     description: >
       Asserts that each service record has a fully qualified digest-pinned
       image, publish, health.cmd, an entry with a pids limit in
-      deerlab_service_limits, no CHANGE-ME secrets and a well-formed
-      stop_signal, and that its workloads follow the rules on kind,
+      deerlab_service_limits, no CHANGE-ME secrets, a well-formed
+      stop_signal and success_exit_status, and that its workloads follow the rules on kind,
       parent-only keys, schedule, health, persistent, runtime_max,
       start_timeout and stop_signal. It reads nothing on the host and needs
       no privileges, so it runs in full under check mode. The playbooks run

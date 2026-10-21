@@ -152,6 +152,13 @@ TimeoutStartSec={{ podman_service_container_limits.start_timeout | default(300) 
 ExecStartPost=-/usr/bin/systemctl --user reset-failed notify-failure@%n.service
 {% endif %}
 {% endif %}
+{% if podman_service_container_spec.success_exit_status is defined %}
+{# For a server whose normal stop is an exit code systemd counts as failed:  #}
+{# Actual and RSSHub exit 143 on SIGTERM, so every stop and every restart    #}
+{# the role makes would page. Restart=always still restarts on that code.   #}
+{# Rendered only when set, so every other unit is unchanged.                #}
+SuccessExitStatus={{ podman_service_container_spec.success_exit_status | join(' ') }}
+{% endif %}
 MemoryMax={{ podman_service_container_limits.memory }}
 CPUQuota={{ podman_service_container_limits.cpu }}
 TasksMax={{ podman_service_container_limits.tasks }}
