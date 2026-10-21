@@ -60,8 +60,8 @@ argument_specs:
         type: list
         elements: str
         description: >-
-          Resolver addresses web-, platform- and mail-class services may
-          reach on port 53.
+          Resolver addresses web-, platform-, mail- and public-class
+          services may reach on port 53.
       base_firewall_egress_classes:
         type: list
         elements: str
@@ -71,6 +71,8 @@ argument_specs:
           without 80, for a service whose application makes no outbound calls
           but whose service user still pulls its image, runs restic and posts
           to Pushover. mail is platform plus 465, for an application that sends
-          its own mail through a relay over implicit TLS. A value outside this
+          its own mail through a relay over implicit TLS. public is any TCP
+          port outside the private ranges and the host's own addresses, for
+          a service whose routes reach sites on arbitrary ports. A value outside this
           list is refused rather than rendered, because the template's fallback
           drops everything including the backup and the alert about it.
