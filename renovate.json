@@ -117,6 +117,21 @@
       "dependencyDashboardApproval": false
     },
     {
+      "description": "RSSHub builds daily with dated tags that are not docker versions, and has more tags than Docker Hub will list, so it gets no push times and no cooldown",
+      "matchPackageNames": ["docker.io/diygod/rsshub"],
+      "versioning": "regex:^chromium-bundled-(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$",
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
+      "prBodyNotes": [
+        "RSSHub builds from master daily and has no stable line. After the pull, re-test the capability list and fetch one browser route through the edge. See docs/runbook.md, RSSHub."
+      ]
+    },
+    {
+      "description": "RSSHub's tags are dates: its 'major' is only the year turning over",
+      "matchPackageNames": ["docker.io/diygod/rsshub"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": false
+    },
+    {
       "description": "The operator's Ansible and the hosts' Ansible move together",
       "matchManagers": ["mise", "pip_requirements"],
       "matchPackageNames": ["ansible"],
