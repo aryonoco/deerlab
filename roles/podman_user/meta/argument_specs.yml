@@ -17,7 +17,7 @@ argument_specs:
         description: >
           The podman_services dictionary. Keys are service names. Each
           value needs uid (int, 2000 or higher) and egress (any, web,
-          platform or mail).
+          platform, mail or public).
       podman_user_limits:
         type: dict
         required: true
