@@ -627,6 +627,9 @@ podman_services:
     # No stop_signal and no entrypoint. tini forwards signals and the server
     # handles none, so SIGTERM ends it at once with 143. Without tini, node
     # as PID 1 ignores SIGTERM and SIGINT alike.
+    # 143 is that stop, not a fault: without this every stop and every
+    # restart the role makes, an image bump's among them, would page.
+    success_exit_status: [143]
     health:
       # Opens account.sqlite afresh, read-only and only if it exists, reads
       # auth, then asks the server a question it answers from the database,
@@ -716,8 +719,10 @@ podman_services:
     capabilities: []
     read_only: true
     no_new_privileges: true
-    # No stop_signal: dumb-init forwards SIGTERM and the server exits 143, so
-    # a stop ends failed and pages, as most services do.
+    # No stop_signal: dumb-init forwards SIGTERM and the server exits 143.
+    # That is the stop, not a fault: without this every stop and every
+    # restart the role makes, each weekly image bump's among them, would page.
+    success_exit_status: [143]
     health:
       # Liveness only: it proves the HTTP server answers. A browser broken
       # by a bump goes unseen; browser routes then answer 503 and FreshRSS

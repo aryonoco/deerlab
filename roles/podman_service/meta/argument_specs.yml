@@ -38,7 +38,10 @@ argument_specs:
           entrypoint (str, renders Entrypoint=), exec (str, overrides the
           image command), stop_signal (str matching SIG[A-Z0-9]+, renders
           StopSignal= for an image that ignores or dies on SIGTERM; a
-          workload inherits it), volumes entries taking
+          workload inherits it), success_exit_status (list of integers
+          from 1 to 255, renders SuccessExitStatus= for a server whose
+          normal stop exits with one of them; a workload inherits it and
+          may not declare its own), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
           the container user, health being optional, and
           workloads (dict of name to a partial spec, each rendering an
