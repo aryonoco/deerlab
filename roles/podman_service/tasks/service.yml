@@ -405,3 +405,50 @@
     fail_msg: "{{ podman_service_name }} fell back to cgroupfs or a non-overlay driver; check DBUS_SESSION_BUS_ADDRESS and dbus-user-session"
     quiet: true
   when: podman_service_info.stdout | default('') | length > 0
+
+# The store keeps only the image the units name. This runs after the restart,
+# and a failed gate has ended the run before it. A revert pulls the old digest
+# from the registry again. An image a container still uses is left for a later
+# pull. The record's ID is unknown only under check mode before a bump's image
+# is pulled, and nothing counts as superseded then.
+- name: List the images of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: podman images --quiet --no-trunc
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  register: podman_service_images
+  changed_when: false
+  failed_when: podman_service_images.rc != 0
+  check_mode: false
+
+# podman images prints IDs with a sha256: prefix and image inspect without, and
+# one ID can be listed once per tag.
+- name: Find the superseded images of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_superseded: >-
+      {{ (podman_service_images.stdout_lines
+          | map('regex_replace', '^sha256:', '') | unique
+          | reject('equalto', podman_service_record_image_id.stdout | regex_replace('^sha256:', ''))
+          | list)
+         if podman_service_record_image_id is not skipped else [] }}
+
+- name: Report the superseded images of {{ podman_service_name }}
+  ansible.builtin.debug:
+    msg: "Would remove {{ podman_service_superseded | join(', ') }}"
+  changed_when: true
+  when: ansible_check_mode and podman_service_superseded | length > 0
+
+# rc 2 is an image in use by a container, left for a later pull; rc 1 is one
+# already gone. Neither is a failure.
+- name: Remove the superseded images of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman image rm {{ item }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_superseded }}"
+  register: podman_service_image_rm
+  changed_when: podman_service_image_rm.rc == 0
+  failed_when: podman_service_image_rm.rc not in [0, 1, 2]
+  when: not ansible_check_mode
