@@ -787,5 +787,4 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **RSSHub's figures were measured on arm64 and in a lab, not on `svc1`**: 1.74 GiB peak for three single renders at the 3G limit; the deploy records `svc1`'s own
 - **An OOM kill inside RSSHub's cgroup has never been seen.** At a lab-only 600M limit it swapped instead of killing anything, so what a kill at the limit does to a render, or to the unit, is not shown
 - **The `public` class's host-local drop (`fib daddr type local`) was tested on OrbStack's kernel only**, not Debian 13's. The ruleset template validates with `nft --check` before writing, so a kernel that refuses it fails the pull with nothing written
-- **RSSHub has not run behind the `public` chain.** Its lab ran with no ruleset loaded, and the chain was tested with a fixture service. The browser route checked through the edge after the deploy is the first proof
 - **Actual's clients across a version skew have not been exercised.** The "Update now" and "Update required" behaviour is read from source, not seen
