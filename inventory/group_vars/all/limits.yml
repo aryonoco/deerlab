@@ -84,7 +84,7 @@ deerlab_service_limits:
       # Measured on arm64: about 300 MiB idle; one browser render peaks near
       # 950 MiB and 170 pids with about two cores busy; four at once, 2.7
       # GiB and 540 pids. RSSHub sets no limit on concurrent browsers. Swap
-      # is not capped, so at the limit it swaps to zram and slows down: under
-      # a 600M limit in a lab, six renders at once all answered, with 1.1
-      # GiB swapped and nothing killed.
+      # is not capped, so at the limit it swaps to zram: under a 600M limit
+      # in a lab, six renders at once all answered, with 1.1 GiB swapped and
+      # nothing killed.
       rsshub: { memory: 3G, cpu: "200%", tasks: 2048, pids: 1024, start_timeout: 120 }

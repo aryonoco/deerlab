@@ -27,7 +27,7 @@ table inet deerlab {
 {# own addresses need a drop of their own: a packet for any of them leaves #}
 {# by lo, and the input chain accepts lo, so a request-forgery bug could #}
 {# otherwise reach sshd and every backend a neighbour publishes on the #}
-{# wildcard address. UDP stays DNS-only, as in every class. #}
+{# wildcard address. UDP stays DNS-only, as in web, platform and mail. #}
     fib daddr type local counter drop
     meta l4proto tcp accept
 {% else %}
