@@ -27,9 +27,13 @@ caddy_caddyfile: |
           # Caddy's error lines carry a failed request's headers, so a 5xx on
           # the budget site would record Actual's X-Actual-Token session token
           # there. The site's own log filter covers only its access log;
-          # other sites never send the header.
+          # other sites never send the header. Error lines carry the request
+          # URI too, and RSSHub's access key rides in its query string, so
+          # query strings go from every site's error lines.
           format filter {
               request>headers>X-Actual-Token delete
+              request>uri regexp [?].*$ ?REDACTED
+              request>headers>Referer regexp [?].*$ ?REDACTED
               wrap json
           }
       }
@@ -162,6 +166,33 @@ caddy_caddyfile: |
           health_timeout 5s
           health_status 200
           # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
+  rsshub.{{ deerlab_domain }} {
+      log {
+          output stdout
+          # RSSHub's access key rides in the query string (?key=), and Caddy
+          # logs query strings. A regexp, not the query filter: the query
+          # filter logs a URI it cannot parse unchanged. The whole query goes.
+          format filter {
+              request>uri regexp [?].*$ ?REDACTED
+              request>headers>Referer regexp [?].*$ ?REDACTED
+              resp_headers>Location regexp [?].*$ ?REDACTED
+              wrap json
+          }
+      }
+      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8086 {
+          # RSSHub builds absolute URLs from its own socket, so its 301s say
+          # http://; a reader that saved one would send the key in clear.
+          header_down Location ^http:// https://
+          # Exempt from the key, and 200 only with DISALLOW_ROBOT; liveness
+          # only, like the container probe.
+          health_uri /robots.txt
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
           lb_try_duration 30s
       }
   }

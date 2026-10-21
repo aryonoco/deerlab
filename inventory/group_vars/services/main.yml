@@ -661,3 +661,71 @@ podman_services:
         # turning on encryption among them, deletes it until a device syncs.
         - { volume: data, path: "user-files/group-*.sqlite", allow_empty: true }
       volumes: [data]
+
+  rsshub:
+    uid: 2007
+    # The chromium-bundled variant, because about 109 route namespaces need a
+    # browser. Docker Hub, not ghcr.io: ghcr.io deletes RSSHub builds after 30
+    # days, which would break a rebuild or a revert. RSSHub builds daily from
+    # master and has no releases, so the dated tag is the version.
+    image: docker.io/diygod/rsshub:chromium-bundled-2026-10-20@sha256:1e542dde24e48974263378468125bd14d2b088d3ae07bec61bb69d6ff9487f37
+    # The image sets no USER, so it would run as root. Any uid works, since
+    # nothing is mounted; this is the image's own node user.
+    user: 1000
+    group: 1000
+    publish:
+      - "8086:1200"
+    # No volumes and no backup: key. The cache is in memory and nothing else
+    # persists, so a restore is a redeploy.
+    tmpfs:
+      # Patchright's per-launch profile and artefact directories, Chromium's
+      # crashpad database and font and NSS caches, npm's logs and Node's
+      # compile cache. Nothing in it is executed. It counts against memory.
+      - "/tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777"
+    env:
+      # Required: under the read-only home every browser launch dies with
+      # "chrome_crashpad_handler: --database is required".
+      HOME: /tmp
+      # Otherwise winston tries to write /app/logs/, failing silently on the
+      # read-only root. stdout reaches the journal.
+      NO_LOGFILES: "true"
+      # Stated so that a change of upstream default cannot move it.
+      CACHE_TYPE: memory
+      # By default / is exempt from the access key and lists the paths most
+      # requested, so which feeds are read. This also unregisters /metrics.
+      DEBUG_INFO: "false"
+      # Makes /robots.txt, which the access key does not guard, answer 200:
+      # both health checks probe it, so the key appears in neither.
+      DISALLOW_ROBOT: "true"
+      # Routes that fetch a URL or host the caller names, such as /rss/:url
+      # and any Mastodon or Lemmy host. Only key holders can reach them, and
+      # the egress class keeps them off private ranges and svc1 itself.
+      ALLOW_USER_SUPPLY_UNSAFE_DOMAIN: "true"
+      # The operator's choice over the image's Asia/Shanghai: a route that
+      # parses a date with no zone reads it as Melbourne time.
+      TZ: Australia/Melbourne
+      # Deliberately ABSENT: REMOTE_CONFIG, SENTRY, HONEYBADGER_API_KEY and
+      # OPENAI_API_KEY, each of which sends data to a third party.
+    secrets:
+      # RSSHub accepts the key only as ?key= in the URL. A Podman secret,
+      # because the Quadlet file is world-readable; never in HealthCmd.
+      - { name: access-key, value: "{{ rsshub_access_key }}", type: env, target: ACCESS_KEY }
+    # RSSHub launches its browser with --no-sandbox and ignores certificate
+    # errors, both hard-coded upstream, so Chromium's own sandbox is always
+    # off. These and the egress chain are what contain a renderer.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # No stop_signal: dumb-init forwards SIGTERM and the server exits 143, so
+    # a stop ends failed and pages, as most services do.
+    health:
+      # Liveness only: it proves the HTTP server answers. A browser broken
+      # by a bump goes unseen; browser routes then answer 503 and FreshRSS
+      # shows a feed error.
+      cmd: curl --fail --silent --output /dev/null http://127.0.0.1:1200/robots.txt
+      interval: 30s
+      start_period: 60s
+    # Any TCP port to public addresses: routes reach IMAP on 993 and sites on
+    # ports other than 80 and 443. Private ranges and svc1's own addresses
+    # stay closed.
+    egress: public
