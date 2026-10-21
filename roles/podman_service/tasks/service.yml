@@ -439,6 +439,21 @@
   changed_when: true
   when: ansible_check_mode and podman_service_superseded | length > 0
 
+# podman image rm refuses, with rc 125, to remove by ID an image that has more
+# than one name, so take its names off first. The role's own tag@digest pulls
+# never give an image two, but a pull, tag or load by hand would.
+- name: Untag the superseded images of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman untag {{ item }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_superseded }}"
+  register: podman_service_image_untag
+  changed_when: false
+  failed_when: podman_service_image_untag.rc != 0
+  when: not ansible_check_mode
+
 # rc 2 is an image in use by a container, left for a later pull; rc 1 is one
 # already gone. Neither is a failure.
 - name: Remove the superseded images of {{ podman_service_name }}
