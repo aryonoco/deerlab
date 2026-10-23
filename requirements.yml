@@ -13,7 +13,7 @@ collections:
   - name: community.sops
     version: "2.5.0"
   - name: containers.podman
-    version: "1.21.1"
+    version: "1.21.2"
   # Not used directly: community.general depends on it. Pinned so that every
   # site runs the same copy of it too.
   - name: community.library_inventory_filtering_v1
