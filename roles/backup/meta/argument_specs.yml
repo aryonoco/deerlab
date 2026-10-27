@@ -51,3 +51,9 @@ argument_specs:
         type: str
         default: 1h
         description: TimeoutStartSec for the oneshot unit, which is otherwise unlimited.
+      backup_presence_query_enabled:
+        type: bool
+        default: true
+        description: >
+          Whether the backup unit runs each database's presence_query. Only
+          the CI lab turns it off, because its fresh data cannot satisfy one.
