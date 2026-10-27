@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Stand-ins for inventory/group_vars/edge/secrets.sops.yaml,
+# encrypted per run to the lab's throwaway age key. Every key that file
+# holds, and no real value.
+backup_caddy_restic_password: lab-stand-in-restic
+backup_caddy_s3_access_key: lab-access
+backup_caddy_s3_secret_key: lab-secret-key
