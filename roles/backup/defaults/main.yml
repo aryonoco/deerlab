@@ -13,6 +13,11 @@ backup_unit_dir: /etc/systemd/user
 # only a stuck run trips it.
 backup_timeout: 1h
 
+# Only the CI lab turns this off: its minutes-old data has no Vikunja account
+# and no encrypted Actual budget, so every gate backup there would fail. The
+# query is still proven nightly on the hosts.
+backup_presence_query_enabled: true
+
 # backup_s3_bucket has no default on purpose. It identifies where the estate
 # keeps its data, so it lives encrypted in the inventory and the role reads it
 # as a required option; a default here would be a plaintext copy of it.

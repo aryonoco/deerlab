@@ -62,13 +62,13 @@ ExecStartPre=/usr/bin/install -d -m 0700 %h/backup/staging
 # cd first so the glob yields a path relative to the volume root: staging
 # mirrors it, because every per-user database is named db.sqlite and a basename
 # rule would have two users overwrite each other in staging.
-ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; cd {{ root }}; for f in {{ db.path }}; do{% if db.allow_empty | default(false) %} [ -e "$f" ] || continue;{% endif %} /usr/bin/install -d -m 0700 "%h/backup/staging/$(dirname "$f")"; /usr/bin/sqlite3 "$f" ".backup %h/backup/staging/$f"; test "$(/usr/bin/sqlite3 "%h/backup/staging/$f" "PRAGMA integrity_check")" = ok;{% if db.presence_query is defined %} test "$(/usr/bin/sqlite3 "%h/backup/staging/$f" "{{ db.presence_query }}")" = 1;{% endif %} done'
+ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; cd {{ root }}; for f in {{ db.path }}; do{% if db.allow_empty | default(false) %} [ -e "$f" ] || continue;{% endif %} /usr/bin/install -d -m 0700 "%h/backup/staging/$(dirname "$f")"; /usr/bin/sqlite3 "$f" ".backup %h/backup/staging/$f"; test "$(/usr/bin/sqlite3 "%h/backup/staging/$f" "PRAGMA integrity_check")" = ok;{% if db.presence_query is defined and backup_presence_query_enabled | bool %} test "$(/usr/bin/sqlite3 "%h/backup/staging/$f" "{{ db.presence_query }}")" = 1;{% endif %} done'
 {% else %}
 ExecStart=/usr/bin/podman unshare /bin/sh -c 'set -e; /usr/bin/install -d -m 0700 "%h/backup/staging/$(dirname {{ db.path }})"; /usr/bin/sqlite3 {{ root }}/{{ db.path }} ".backup %h/backup/staging/{{ db.path }}"'
 # A copy that cannot be read back is worse than no copy, because it still pings
 # the dead-man. sqlite3 exits 0 on a corrupt database, so the result is tested.
 ExecStart=/usr/bin/sh -c 'test "$(/usr/bin/sqlite3 %h/backup/staging/{{ db.path }} "PRAGMA integrity_check")" = ok'
-{% if db.presence_query is defined %}
+{% if db.presence_query is defined and backup_presence_query_enabled | bool %}
 # A database deleted and silently re-created empty passes test -s and the
 # integrity check, uploads as the newest snapshot and pings the dead-man
 # green. The presence query must print exactly 1 against the staged copy.
