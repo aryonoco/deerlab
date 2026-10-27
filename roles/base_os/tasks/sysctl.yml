@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Apply kernel parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-deerlab.conf
+    sysctl_set: true
+    reload: true
+  loop: >-
+    {{ (base_os_sysctl | combine(base_os_sysctl_extra)) | dict2items
+       | rejectattr('key', 'in', base_os_sysctl_skip) }}
+  loop_control:
+    label: "{{ item.key }}"

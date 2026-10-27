@@ -139,6 +139,10 @@ base_os_sysctl:
 
 base_os_sysctl_extra: {}
 
+# Keys left out of the two dicts above. Only the CI lab sets it, for keys a
+# container's network namespace does not have.
+base_os_sysctl_skip: []
+
 base_os_journald_max_use: 512M
 base_os_journald_retention: 90day
 
