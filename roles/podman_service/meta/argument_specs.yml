@@ -26,9 +26,14 @@ argument_specs:
           (list of host:container[/udp]), volumes (list of {name, mount}),
           mounts (list of {src, dst, ro}), tmpfs (list of strings),
           env (dict), secrets (list of {name, value, type, target}),
-          config_files (list of {path, content, mode, banner}, banner
+          config_files (list of {path, content, mode, banner, upstream}, banner
           being the format's comment marker, which prefixes the file
-          with the managed header), capabilities (list),
+          with the managed header, and upstream, optional, being
+          {path, edits} for a file copied from the image: path is the
+          absolute path of the original inside the image, edits a list of
+          {from, to} exact-line replacements, and content must equal the
+          original after the edits, which podman_service_verify checks),
+          capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
           egress (any|web|platform|mail|public), backup ({sqlite, volumes}, sqlite
@@ -51,9 +56,13 @@ argument_specs:
           (renders OnCalendar=), may set jitter (renders
           RandomizedDelaySec=, default 60) and persistent (renders
           Persistent=, boolean, default false), and may not set health.
-          A worker rejects schedule and persistent. A workload inherits
+          A worker rejects schedule and persistent. checks (list) holds
+          the working-use checks podman_service_verify runs after the
+          service starts; podman_service_verify's argument spec documents
+          their fields, and podman_service_check validates them. Only the
+          primary's record may hold it. A workload inherits
           every key of its parent except publish, secrets, health,
-          workloads, backup, uid, egress, kind, schedule and persistent,
+          workloads, backup, uid, egress, kind, schedule, persistent and checks,
           and overrides any of them; env is merged with the workload
           winning, and a volume's chown is never inherited. The exclusion
           list is the contract - an enumeration of what IS inherited goes
@@ -72,6 +81,7 @@ argument_specs:
           - kind
           - schedule
           - persistent
+          - checks
         description: >
           Keys a workload never inherits from its parent service. This is
           the workload inheritance contract. Workloads must declare their

@@ -3,3 +3,25 @@
 
 podman_service_check_services: "{{ podman_services }}"
 podman_service_check_limits: "{{ deerlab_service_limits }}"
+
+# What a check gets for a field it leaves out. podman_service_verify reads the
+# same values, so the budget below is computed on what actually runs.
+podman_service_check_check_defaults:
+  timeout: 5
+  retries: 0
+  delay: 5
+
+# The keys each check type accepts, beyond the common ones. send is the
+# request a log check makes. A key not listed for its type is refused, which
+# catches a typo such as stauts that would otherwise be silently ignored.
+podman_service_check_check_keys:
+  common: [name, type, where, timeout, retries, delay]
+  http: [via, host, method, path, query, headers, body, body_format, status, body_regex, body_version]
+  exec: [container, cmd, stdin, stdout_regex]
+  unit: [workload, start]
+  log: [send]
+  send: [via, host, method, path, query, headers, status]
+
+# Seconds. The sum of every check's worst case, over the checks a pull runs on
+# one host. The two browser checks need about a minute each.
+podman_service_check_verify_budget: 300

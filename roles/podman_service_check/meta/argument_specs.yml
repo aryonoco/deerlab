@@ -10,7 +10,10 @@ argument_specs:
       deerlab_service_limits, no CHANGE-ME secrets, a well-formed
       stop_signal and success_exit_status, and that its workloads follow the rules on kind,
       parent-only keys, schedule, health, persistent, runtime_max,
-      start_timeout and stop_signal. It reads nothing on the host and needs
+      start_timeout and stop_signal. It also validates each service's
+      working-use checks and config_files upstream entries against the
+      schema podman_service_verify documents, and keeps the checks a pull
+      runs on one host within a time budget. It reads nothing on the host and needs
       no privileges, so it runs in full under check mode. The playbooks run
       it first, and podman_service lists it as a dependency, so a play that
       names podman_service alone still runs it; Ansible runs it once per
@@ -29,3 +32,32 @@ argument_specs:
         description: >
           The deerlab_service_limits dictionary; see podman_service's
           podman_service_limits for its shape.
+      podman_service_check_check_defaults:
+        type: dict
+        default:
+          timeout: 5
+          retries: 0
+          delay: 5
+        description: >
+          The timeout, retries and delay, in seconds and attempts, a check
+          gets when it leaves one out. podman_service_verify reads the same
+          values.
+      podman_service_check_check_keys:
+        type: dict
+        default:
+          common: [name, type, where, timeout, retries, delay]
+          http: [via, host, method, path, query, headers, body, body_format, status, body_regex, body_version]
+          exec: [container, cmd, stdin, stdout_regex]
+          unit: [workload, start]
+          log: [send]
+          send: [via, host, method, path, query, headers, status]
+        description: >
+          The keys each check type accepts beyond the common ones, and the
+          keys of a log check's send request. Any other key is refused.
+      podman_service_check_verify_budget:
+        type: int
+        default: 300
+        description: >
+          Seconds. The most that the checks a pull runs on one host (where
+          both or host) may take together, every check failing at every
+          retry: (retries + 1) * timeout + retries * delay, summed.
