@@ -14,11 +14,18 @@ base_os_sysctl_extra:
 # far higher, so a wrong DNS record or an unreachable port 80 costs nothing.
 caddy_acme_ca: ""
 
+# True only in the CI lab, where Caddy's internal CA issues at once and no
+# public CA is ever asked.
+caddy_local_certs: false
+
 caddy_caddyfile: |
   {
       admin off
       email {{ deerlab_acme_email }}
       {{ ('acme_ca ' ~ caddy_acme_ca) if caddy_acme_ca else '' }}
+  {% if caddy_local_certs %}
+      local_certs
+  {% endif %}
       servers {
           protocols h1 h2 h3
       }
