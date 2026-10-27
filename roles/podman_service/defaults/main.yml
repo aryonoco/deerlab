@@ -25,3 +25,4 @@ podman_service_never_inherited:
   - kind
   - schedule
   - persistent
+  - checks

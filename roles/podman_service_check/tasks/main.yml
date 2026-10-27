@@ -119,6 +119,7 @@
       - workloads
       - image
       - success_exit_status
+      - checks
     podman_service_check_workload_bad_kinds: >-
       {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
          | rejectattr('value.kind', 'defined')
@@ -187,3 +188,206 @@
          | selectattr('value.stop_signal', 'defined')
          | rejectattr('value.stop_signal', 'regex', 'SIG[A-Z0-9]+', match_type='fullmatch')
          | map(attribute='key') | list }}
+
+# The fields each check type takes are documented in podman_service_verify's
+# argument spec, the role that runs the checks. Every rule below is a check
+# the verify role would otherwise have to survive at run time, on the host,
+# after a deploy. The message names checks and the rule they break, never a
+# value: a check's query, headers and stdin may carry a secret.
+- name: Validate the working-use checks of each service
+  ansible.builtin.assert:
+    that:
+      - podman_service_check_checks_shape_ok
+      - podman_service_check_checks_bad | length == 0
+    fail_msg: >-
+      service {{ podman_service_check_checks_service_name }}:
+      {{ ('invalid checks ' ~ (podman_service_check_checks_bad | join(', ')))
+         if podman_service_check_checks_shape_ok
+         else 'checks must be a list of mappings' }}
+    quiet: true
+  # Loop over the service name alone, as above, so a failure cannot print a
+  # value from the record.
+  loop: "{{ podman_service_check_services | list }}"
+  loop_control:
+    loop_var: podman_service_check_checks_service_name
+    label: "{{ podman_service_check_checks_service_name }}"
+  vars:
+    podman_service_check_checks_spec: "{{ podman_service_check_services[podman_service_check_checks_service_name] }}"
+    podman_service_check_checks_list: "{{ podman_service_check_checks_spec.checks | default([]) }}"
+    podman_service_check_checks_shape_ok: >-
+      {{ podman_service_check_checks_list is sequence
+         and podman_service_check_checks_list is not string
+         and podman_service_check_checks_list is not mapping
+         and podman_service_check_checks_list | reject('mapping') | list | length == 0 }}
+    podman_service_check_checks_tag: >-
+      {{ podman_service_check_checks_spec.image | default('')
+         | regex_replace('^[^@]*:([^:/@]+)@.*$', '\1') }}
+    podman_service_check_checks_workers: >-
+      {{ podman_service_check_checks_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined') | selectattr('value.kind', 'equalto', 'worker')
+         | map(attribute='key') | list }}
+    podman_service_check_checks_jobs: >-
+      {{ podman_service_check_checks_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'defined') | selectattr('value.kind', 'equalto', 'job')
+         | map(attribute='key') | list }}
+    # Each entry is "<check name> (<rule>)".
+    podman_service_check_checks_bad: >-
+      {%- set d = podman_service_check_check_defaults -%}
+      {%- set keys = podman_service_check_check_keys -%}
+      {%- set ns = namespace(out=[]) -%}
+      {%- set names = podman_service_check_checks_list | selectattr('name', 'defined')
+                      | map(attribute='name') | map('string') | list -%}
+      {%- for c in podman_service_check_checks_list -%}
+      {%- set n = c.name | string if c.name is defined else '(unnamed)' -%}
+      {%- set t = c.type | default('http') -%}
+      {%- set where = c.where | default('both') -%}
+      {%- set rules = namespace(out=[]) -%}
+      {%- if c.name is not defined or c.name is not string or c.name is not regex('[a-z0-9-]+', match_type='fullmatch') -%}
+      {%- set rules.out = rules.out + ['name'] -%}
+      {%- elif n is regex('image(-.*)?|upstream-.*', match_type='fullmatch') -%}
+      {%- set rules.out = rules.out + ['reserved name'] -%}
+      {%- elif names | select('equalto', n) | list | length > 1 -%}
+      {%- set rules.out = rules.out + ['duplicate name'] -%}
+      {%- endif -%}
+      {%- if where not in ['both', 'host', 'ci'] -%}{%- set rules.out = rules.out + ['where'] -%}{%- endif -%}
+      {%- set timing = namespace(ok=true) -%}
+      {%- for k, lo, hi in [['timeout', 1, 120], ['retries', 0, 3], ['delay', 1, 30]] -%}
+      {%- set v = c[k] | default(d[k]) -%}
+      {%- if v is not integer or v < lo or v > hi -%}
+      {%- set rules.out = rules.out + [k] -%}{%- set timing.ok = false -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- if timing.ok -%}
+      {%- set to = c.timeout | default(d.timeout) -%}
+      {%- set r = c.retries | default(d.retries) -%}
+      {%- if (r + 1) * to + r * (c.delay | default(d.delay)) > 120 -%}
+      {%- set rules.out = rules.out + ['worst case'] -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- if t not in ['http', 'exec', 'unit', 'log'] -%}
+      {%- set rules.out = rules.out + ['type'] -%}
+      {%- else -%}
+      {%- if c | list | difference(keys.common + keys[t]) | length > 0 -%}
+      {%- set rules.out = rules.out + ['unknown key'] -%}
+      {%- endif -%}
+      {%- set has_send = c.send is defined and c.send is mapping -%}
+      {%- set requests = [c] if t == 'http' else ([c.send] if t == 'log' and has_send else []) -%}
+      {%- if t == 'log' and not has_send -%}{%- set rules.out = rules.out + ['send'] -%}{%- endif -%}
+      {%- for h in requests -%}
+      {%- if t == 'log' and h | list | difference(keys.send) | length > 0 -%}
+      {%- set rules.out = rules.out + ['unknown key'] -%}
+      {%- endif -%}
+      {%- set via = h.via | default('local') -%}
+      {%- if via not in ['local', 'edge'] -%}{%- set rules.out = rules.out + ['via'] -%}{%- endif -%}
+      {%- if (via == 'edge') != (h.host is defined) or (h.host is defined and h.host is not string) -%}
+      {%- set rules.out = rules.out + ['host'] -%}
+      {%- endif -%}
+      {%- if h.method | default('GET') is not string -%}{%- set rules.out = rules.out + ['method'] -%}{%- endif -%}
+      {%- if h.path is not defined or h.path is not string or h.path is not match('/') -%}{%- set rules.out = rules.out + ['path'] -%}{%- endif -%}
+      {%- for k in ['query', 'headers'] -%}
+      {%- if h[k] is defined -%}
+      {%- if h[k] is not mapping or h[k] | dict2items | rejectattr('key', 'string') | list | length > 0
+             or h[k].values() | reject('string') | list | length > 0 -%}
+      {%- set rules.out = rules.out + [k] -%}
+      {%- elif 'CHANGE-ME' in h[k].values() -%}
+      {%- set rules.out = rules.out + ['placeholder'] -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- set status = h.status | default([200]) -%}
+      {%- if status is not sequence or status is string or status is mapping or status | length == 0
+             or status | reject('integer') | list | length > 0
+             or status | select('lt', 100) | list | length > 0
+             or status | select('gt', 599) | list | length > 0 -%}
+      {%- set rules.out = rules.out + ['status'] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- if t == 'http' -%}
+      {%- if c.body is defined and c.body is not mapping -%}{%- set rules.out = rules.out + ['body'] -%}{%- endif -%}
+      {%- if (c.body is defined) != (c.body_format is defined)
+             or (c.body_format is defined and c.body_format not in ['json', 'form-urlencoded']) -%}
+      {%- set rules.out = rules.out + ['body_format'] -%}
+      {%- endif -%}
+      {%- if c.body_regex is defined and c.body_regex is not string -%}{%- set rules.out = rules.out + ['body_regex'] -%}{%- endif -%}
+      {%- if c.body_version is defined and (c.body_version is not boolean
+             or (c.body_version and podman_service_check_checks_tag is not match('[0-9]+(\.[0-9]+)*'))) -%}
+      {%- set rules.out = rules.out + ['body_version'] -%}
+      {%- endif -%}
+      {%- elif t == 'exec' -%}
+      {%- if c.container is defined and c.container not in podman_service_check_checks_workers -%}
+      {%- set rules.out = rules.out + ['container'] -%}
+      {%- endif -%}
+      {%- if c.cmd is not defined or c.cmd is not sequence or c.cmd is string or c.cmd is mapping or c.cmd | length == 0
+             or c.cmd | reject('string') | list | length > 0 -%}
+      {%- set rules.out = rules.out + ['cmd'] -%}
+      {%- endif -%}
+      {%- if c.stdin is defined and c.stdin is not string -%}
+      {%- set rules.out = rules.out + ['stdin'] -%}
+      {%- elif c.stdin | default('') == 'CHANGE-ME' -%}
+      {%- set rules.out = rules.out + ['placeholder'] -%}
+      {%- endif -%}
+      {%- if c.stdout_regex is defined and c.stdout_regex is not string -%}{%- set rules.out = rules.out + ['stdout_regex'] -%}{%- endif -%}
+      {%- elif t == 'unit' -%}
+      {%- if c.workload is not defined or c.workload not in podman_service_check_checks_jobs -%}
+      {%- set rules.out = rules.out + ['workload'] -%}
+      {%- endif -%}
+      {%- if c.start is defined and c.start is not boolean -%}
+      {%- set rules.out = rules.out + ['start'] -%}
+      {%- elif where != ('ci' if c.start | default(false) else 'host') -%}
+      {%- set rules.out = rules.out + ['where'] -%}
+      {%- endif -%}
+      {%- elif t == 'log' and has_send -%}
+      {%- if c.send.path is not defined or c.send.path is not string or '__MARKER__' not in c.send.path -%}
+      {%- set rules.out = rules.out + ['marker'] -%}
+      {%- endif -%}
+      {%- if ((c.send.query | default({}) if c.send.query | default({}) is mapping else {}).values() | list
+              + (c.send.headers | default({}) if c.send.headers | default({}) is mapping else {}).values() | list)
+             | select('string') | select('search', '__SENTINEL__') | list | length == 0 -%}
+      {%- set rules.out = rules.out + ['sentinel'] -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- for rule in rules.out | unique -%}
+      {%- set ns.out = ns.out + [n ~ ' (' ~ rule ~ ')'] -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {%- for f in podman_service_check_checks_spec.config_files | default([]) | selectattr('upstream', 'defined') -%}
+      {%- set u = f.upstream -%}
+      {%- set slug = f.path | default('') | basename | lower | regex_replace('[^a-z0-9]+', '-') -%}
+      {%- if u is not mapping or u | list | difference(['path', 'edits']) | length > 0
+             or u.path is not defined or u.path is not string or u.path is not match('/')
+             or (u.edits is defined and (u.edits is not sequence or u.edits is string or u.edits is mapping
+                 or u.edits | reject('mapping') | list | length > 0
+                 or u.edits | map('list') | map('sort') | reject('equalto', ['from', 'to']) | list | length > 0
+                 or u.edits | map(attribute='from') | reject('string') | list | length > 0
+                 or u.edits | map(attribute='to') | reject('string') | list | length > 0)) -%}
+      {%- set ns.out = ns.out + ['upstream-' ~ slug ~ ' (upstream)'] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out }}
+
+# Every check's worst case, every retry of it failing, summed over the checks
+# a pull runs on this host. The pull's own timeout is far larger; this keeps
+# a broken deploy from holding the next pull back by more than minutes.
+- name: Keep the verification within its budget
+  ansible.builtin.assert:
+    that:
+      - podman_service_check_verify_total <= podman_service_check_verify_budget
+    fail_msg: >-
+      the checks a pull runs on this host can take {{ podman_service_check_verify_total }} s,
+      over the budget of {{ podman_service_check_verify_budget }} s
+    success_msg: >-
+      the checks a pull runs on this host take at most {{ podman_service_check_verify_total }} s
+      of a budget of {{ podman_service_check_verify_budget }} s
+  vars:
+    podman_service_check_verify_total: >-
+      {%- set d = podman_service_check_check_defaults -%}
+      {%- set ns = namespace(total=0) -%}
+      {%- for svc in podman_service_check_services.values() -%}
+      {%- for c in svc.checks | default([]) if c.where | default('both') in ['both', 'host'] -%}
+      {%- set to = c.timeout | default(d.timeout) -%}
+      {%- set r = c.retries | default(d.retries) -%}
+      {%- set ns.total = ns.total + (r + 1) * to + r * (c.delay | default(d.delay)) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.total }}
