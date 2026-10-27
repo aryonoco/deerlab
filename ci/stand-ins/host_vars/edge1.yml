@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Stand-ins for inventory/host_vars/edge1/secrets.sops.yaml,
+# encrypted per run to the lab's throwaway age key. Every key that file
+# holds, and no real value.
+base_wireguard_private_key: lab-stand-in
+ansible_host: 198.51.100.1
+base_wireguard_ipv4: 10.99.0.1
+base_wireguard_ipv6: fd99::1
+base_wireguard_public_endpoint: 198.51.100.1:51820

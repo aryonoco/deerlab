@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Caddy's internal CA issues every site's certificate at once, and no public
+# CA is ever asked. acme_ca points at nothing for a base commit that predates
+# caddy_local_certs.
+caddy_local_certs: true
+caddy_acme_ca: https://acme.invalid/directory
+
+# The internal CA's root, which the edge's checks trust.
+podman_service_verify_ca_path: /var/lib/caddy/.local/share/containers/storage/volumes/caddy-data/_data/caddy/pki/authorities/local/root.crt

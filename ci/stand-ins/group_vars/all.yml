@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Stand-ins for inventory/group_vars/all/secrets.sops.yaml,
+# encrypted per run to the lab's throwaway age key. Every key that file
+# holds, and no real value.
+deerlab_domain: example.test
+deerlab_acme_email: lab@example.test
+deerlab_root_password_hash: lab-stand-in
+deerlab_deadman_urls:
+  pull:
+    edge1: https://deadman.example.test/pull-edge1
+    svc1: https://deadman.example.test/pull-svc1
+  backup:
+    caddy: https://deadman.example.test/backup-caddy
+    wallabag: https://deadman.example.test/backup-wallabag
+    linkding: https://deadman.example.test/backup-linkding
+    baikal: https://deadman.example.test/backup-baikal
+    freshrss: https://deadman.example.test/backup-freshrss
+    vikunja: https://deadman.example.test/backup-vikunja
+    actual: https://deadman.example.test/backup-actual
+base_wireguard_preshared_key: lab-stand-in
+backup_s3_bucket: s3:https://s3.example.test/lab
+deerlab_pushover_token: lab-stand-in
+deerlab_pushover_user: lab-stand-in
+deerlab_admin_user: labadmin
+deerlab_wg_port: 51820
+deerlab_wg_ipv4_prefix: 10.99.0.0/24
+deerlab_wg_ipv6_prefix: fd99::/64
+deerlab_admin_ssh_keys:
+  - ssh-ed25519 AAAAlabstandin lab@example.test
+vikunja_hostname: tasks.example.test
+actual_hostname: budget.example.test

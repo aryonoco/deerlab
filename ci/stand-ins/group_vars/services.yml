@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Stand-ins for inventory/group_vars/services/secrets.sops.yaml,
+# encrypted per run to the lab's throwaway age key. Every key that file
+# holds, and no real value.
+wallabag_symfony_secret: lab-stand-in
+linkding_superuser_name: labadmin
+linkding_superuser_password: lab-stand-in
+baikal_admin_password: lab-stand-in
+freshrss_admin_user: labadmin
+freshrss_admin_password: lab-stand-in
+vikunja_service_secret: lab-stand-in
+vikunja_mailer_host: mail.example.test
+vikunja_mailer_username: labadmin
+vikunja_mailer_password: lab-stand-in
+vikunja_mailer_from: lab@example.test
+backup_wallabag_restic_password: lab-stand-in-restic
+backup_wallabag_s3_access_key: lab-access
+backup_wallabag_s3_secret_key: lab-secret-key
+backup_linkding_restic_password: lab-stand-in-restic
+backup_linkding_s3_access_key: lab-access
+backup_linkding_s3_secret_key: lab-secret-key
+backup_baikal_restic_password: lab-stand-in-restic
+backup_baikal_s3_access_key: lab-access
+backup_baikal_s3_secret_key: lab-secret-key
+backup_freshrss_restic_password: lab-stand-in-restic
+backup_freshrss_s3_access_key: lab-access
+backup_freshrss_s3_secret_key: lab-secret-key
+backup_vikunja_restic_password: lab-stand-in-restic
+backup_vikunja_s3_access_key: lab-access
+backup_vikunja_s3_secret_key: lab-secret-key
+backup_actual_restic_password: lab-stand-in-restic
+backup_actual_s3_access_key: lab-access
+backup_actual_s3_secret_key: lab-secret-key
+rsshub_access_key: lab-stand-in-rsshub

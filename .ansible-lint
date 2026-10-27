@@ -23,5 +23,9 @@ exclude_paths:
   - .git/
   - .venv/
   - collections/
+  # ansible-lint's own copy of the collections, which it follows into when a
+  # play names a collection's role statically (ci/sops.yml). Third-party code,
+  # like collections/.
+  - .ansible/
   - "*.sops.yaml"
   - secrets/

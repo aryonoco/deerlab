@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The CI lab's fixture front: TLS from Caddy's internal CA, whose root the
+# lab trusts, in front of a throwaway rclone S3 server. Nothing here holds
+# data past the run.
+{
+	admin off
+	local_certs
+	skip_install_trust
+}
+
+s3.example.test {
+	reverse_proxy deerlab-lab-s3:8080
+}
+
+deadman.example.test {
+	respond 200
+}
