@@ -96,16 +96,11 @@
 
 # Phase 5 — Kernel
 
-- name: Apply kernel parameters
-  ansible.posix.sysctl:
-    name: "{{ item.key }}"
-    value: "{{ item.value }}"
-    sysctl_file: /etc/sysctl.d/90-deerlab.conf
-    sysctl_set: true
-    reload: true
-  loop: "{{ (base_os_sysctl | combine(base_os_sysctl_extra)) | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
+# An entry point of its own, so the CI lab can apply the hosts' kernel
+# parameters without the rest of this role. A static import keeps the task
+# name, and so the output of just plan, unchanged.
+- name: Configure the kernel parameters
+  ansible.builtin.import_tasks: sysctl.yml
 
 # blacklist and install /bin/false stop future loads. A module the provider's
 # image already had resident stays resident, so this takes effect on reboot

@@ -42,6 +42,13 @@ argument_specs:
         type: dict
         default: {}
         description: Additional kernel parameters for a host or group.
+      base_os_sysctl_skip:
+        type: list
+        elements: str
+        default: []
+        description: >
+          Keys left out of base_os_sysctl and base_os_sysctl_extra. Only the
+          CI lab sets it, for keys a container's network namespace lacks.
       base_os_kernel_cmdline:
         type: str
         description: Extra parameters appended to GRUB_CMDLINE_LINUX_DEFAULT.
@@ -84,3 +91,22 @@ argument_specs:
           Mount /proc with hidepid=invisible and a proc exemption group.
           Unsupported by systemd upstream; test a lingering user manager
           before enabling.
+  sysctl:
+    short_description: The hosts' kernel parameters alone
+    description: >
+      Applies base_os_sysctl and base_os_sysctl_extra, less the keys in
+      base_os_sysctl_skip, to /etc/sysctl.d/90-deerlab.conf and the running
+      kernel. The main entry point imports it; the CI lab runs it alone.
+    options:
+      base_os_sysctl:
+        type: dict
+        description: Kernel parameters applied on every host.
+      base_os_sysctl_extra:
+        type: dict
+        default: {}
+        description: Additional kernel parameters for a host or group.
+      base_os_sysctl_skip:
+        type: list
+        elements: str
+        default: []
+        description: Keys left out of the two dicts above.
