@@ -846,7 +846,7 @@ podman_services:
     # browser. Docker Hub, not ghcr.io: ghcr.io deletes RSSHub builds after 30
     # days, which would break a rebuild or a revert. RSSHub builds daily from
     # master and has no releases, so the dated tag is the version.
-    image: docker.io/diygod/rsshub:chromium-bundled-2026-10-27@sha256:237b078f282461255472b962806270e6aade5ee44c4b3cf5e30b5a15c18d4045
+    image: docker.io/diygod/rsshub:chromium-bundled-2026-10-28@sha256:b0671651e9295b9c9fe4a05e41f1155e114cd3a9f2e9036850f332a45550fe03
     # The image sets no USER, so it would run as root. Any uid works, since
     # nothing is mounted; this is the image's own node user.
     user: 1000
