@@ -8,23 +8,33 @@
 # can read it: branches pushed to it, and pull requests from them. Renovate
 # also manages the pinned actions in .github/workflows/, which needs the
 # workflows permission that the job's own GITHUB_TOKEN can never hold.
+#
+# Renovate merges its own PRs, through the API with Rebase and merge, once
+# every check on one has passed, the CI lab's included: one merge per run.
+# GitHub's auto-merge stays off, so DEERLAB_AUTOMERGE is the only switch.
+# See docs/runbook.md, Bot pull requests.
 
 name: Renovate
 
 on:
-  # Daily, so a Vikunja or Actual release (schedule "at any time" in
-  # renovate.json) opens within a day. Renovate opens every other new PR only
-  # on Monday, by renovate.json's own schedule, which it evaluates in
-  # Australia/Sydney. An open PR can be rebased, or moved to a newer release,
-  # on any day (updateNotScheduled).
+  # Every 3 hours, as a heartbeat: GitHub has started this repository's
+  # scheduled runs hours late, so the two triggers below do the real work.
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "17 */3 * * *"
       timezone: "Australia/Sydney"
   workflow_dispatch:
   # After every merge, so Renovate rebases the PRs that are now behind main.
   # Runs queue one at a time and GitHub keeps only the newest pending one.
   push:
     branches: [main]
+  # When CI finishes on one of Renovate's branches, so a green PR merges
+  # now and the next follows, instead of each waiting for the schedule.
+  # There is no job-level if: a skipped run would still take the one
+  # pending slot and cancel a useful run.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: ["renovate/**"]
 
 permissions: {}
 
@@ -66,3 +76,10 @@ jobs:
           RENOVATE_ONBOARDING: "false"
           RENOVATE_REQUIRE_CONFIG: required
           RENOVATE_PLATFORM_COMMIT: enabled
+          # The kill switch, failing closed: Renovate merges only while the
+          # repository variable DEERLAB_AUTOMERGE is "enabled", compared
+          # without regard to case; unset, empty or anything else forces
+          # automerge off. force overrides
+          # renovate.json and every packageRule. It acts from the next run
+          # and cannot recall a merge already made.
+          RENOVATE_FORCE: ${{ case(vars.DEERLAB_AUTOMERGE == 'enabled', '', '{"automerge":false}') }}
