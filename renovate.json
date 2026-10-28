@@ -2,8 +2,11 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "timezone": "Australia/Sydney",
-  "schedule": ["* * * * 1"],
-  "updateNotScheduled": true,
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "rebase",
+  "platformAutomerge": false,
+  "ignoreTests": false,
   "rebaseWhen": "behind-base-branch",
   "prHourlyLimit": 0,
   "prConcurrentLimit": 0,
@@ -35,6 +38,16 @@
       "packageNameTemplate": "getsops/sops",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "The CI lab's base and fixture images (LAB_*_IMAGE: registry/repo:tag@sha256:digest)",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "LAB_[A-Z]+_IMAGE:\\s*\"?(?<depName>[a-z0-9.-]+(?:/[a-z0-9._-]+)+):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\"?"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
     }
   ],
   "packageRules": [
@@ -43,11 +56,6 @@
       "matchManagers": ["custom.regex"],
       "matchDatasources": ["docker"],
       "labels": ["dependencies", "images"]
-    },
-    {
-      "description": "Every major waits for a tick on the Dependency Dashboard",
-      "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": true
     },
     {
       "description": "Cooldown only where the registry supplies a push time: Docker Hub. ghcr.io has none and would pend forever",
@@ -61,9 +69,20 @@
       "minimumReleaseAge": "7 days"
     },
     {
+      "description": "Cooldown for GitHub releases: the hosts' sops and every mise tool",
+      "matchDatasources": ["github-releases", "github-tags"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
       "description": "Cooldown for the pinned GitHub Actions; their tags carry dates",
       "matchManagers": ["github-actions"],
       "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "The lab is Debian 13 because the hosts are",
+      "matchPackageNames": ["docker.io/library/debian"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     },
     {
       "description": "Caddy's image label points at caddy-docker, which publishes no releases",
@@ -74,10 +93,9 @@
     {
       "description": "Vikunja: security fixes ship only in minors, and every start migrates the schema",
       "matchPackageNames": ["ghcr.io/go-vikunja/vikunja"],
-      "schedule": ["at any time"],
       "addLabels": ["stateful", "backup-first"],
       "prBodyNotes": [
-        "**The host backs Vikunja up before it switches image,** and the pull fails if that backup does. After the pull, confirm the pull's journal shows the task \"Back up before the image switch of vikunja\" as `changed:`. Vikunja migrates its schema on every start; the only rollback is a restore. See docs/runbook.md, Vikunja, Upgrading, for the command."
+        "**The host backs Vikunja up before it switches image,** and the pull fails if that backup does. The CI lab upgrades the base commit's Vikunja in place, so this migration ran on lab data before the merge. Vikunja migrates its schema on every start; the only rollback is a restore. See docs/runbook.md, Vikunja, Upgrading, for the command."
       ]
     },
     {
@@ -92,17 +110,16 @@
       "description": "FreshRSS: the vendored Apache config is a copy of the image's",
       "matchPackageNames": ["docker.io/freshrss/freshrss"],
       "prBodyNotes": [
-        "Re-diff `freshrss_apache_conf` against `Docker/FreshRSS.Apache.conf` at {{{newValue}}} before merging."
+        "The CI lab compares `freshrss_apache_conf` with this image's `Docker/FreshRSS.Apache.conf`, so a drifted copy turns this PR red."
       ]
     },
     {
       "description": "Actual: monthly releases carry security fixes, and there is no downgrade",
       "matchPackageNames": ["docker.io/actualbudget/actual-server"],
       "sourceUrl": "https://github.com/actualbudget/actual",
-      "schedule": ["at any time"],
       "addLabels": ["stateful", "backup-first"],
       "prBodyNotes": [
-        "**The host backs Actual up before it switches image,** and the pull fails if that backup does. After the pull, confirm the pull's journal shows the task \"Back up before the image switch of actual\" as `changed:`. An older Actual server refuses a newer database; the only rollback is a restore. See docs/runbook.md, Actual, Upgrading, for the command."
+        "**The host backs Actual up before it switches image,** and the pull fails if that backup does. The CI lab upgrades the base commit's Actual in place, so this migration ran on lab data before the merge. An older Actual server refuses a newer database; the only rollback is a restore. See docs/runbook.md, Actual, Upgrading, for the command."
       ]
     },
     {
@@ -111,25 +128,13 @@
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
-      "description": "Actual's tags are CalVer: its 'major' is only the year turning over",
-      "matchPackageNames": ["docker.io/actualbudget/actual-server"],
-      "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": false
-    },
-    {
       "description": "RSSHub builds daily with dated tags that are not docker versions, and has more tags than Docker Hub will list, so it gets no push times and no cooldown",
       "matchPackageNames": ["docker.io/diygod/rsshub"],
       "versioning": "regex:^chromium-bundled-(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$",
       "minimumReleaseAgeBehaviour": "timestamp-optional",
       "prBodyNotes": [
-        "RSSHub builds from master daily and has no stable line. After the pull, re-test the capability list and fetch one browser route through the edge. See docs/runbook.md, RSSHub."
+        "RSSHub builds from master daily and has no stable line. The CI lab and svc1 drive its bundled Chromium against `/test/1` after each start. See docs/runbook.md, RSSHub."
       ]
-    },
-    {
-      "description": "RSSHub's tags are dates: its 'major' is only the year turning over",
-      "matchPackageNames": ["docker.io/diygod/rsshub"],
-      "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": false
     },
     {
       "description": "The operator's Ansible and the hosts' Ansible move together",
