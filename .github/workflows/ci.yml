@@ -52,7 +52,7 @@ jobs:
   lab:
     name: Lab ${{ matrix.host }}
     # Pinned: ubuntu-latest moves to 26.04 during 2026-10 and 2026-11.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     # Nothing here restores or saves a cache.
     cache-mode: none
