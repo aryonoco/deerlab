@@ -13,9 +13,14 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run it supersedes. A run on main
+# is never cancelled: it is what lets Promote ship its commit, and Renovate
+# merges about as often as the lab takes, so cancelling would hold release
+# back for as long as green pull requests were queued. Runs on main go one
+# at a time, and a newer push replaces only a run still waiting.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
