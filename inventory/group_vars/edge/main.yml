@@ -18,6 +18,10 @@ caddy_acme_ca: ""
 # public CA is ever asked.
 caddy_local_certs: false
 
+# From edge1 a request to its own public address leaves by lo, which never
+# meets the firewall's 443 redirect, so its checks use Caddy's own port.
+podman_service_verify_edge_port: 8443
+
 caddy_caddyfile: |
   {
       admin off
@@ -234,6 +238,97 @@ podman_services:
       cmd: wget -q -O /dev/null http://127.0.0.1:8081/healthz
       interval: 30s
       start_period: 30s
+    # What a pull proves once Caddy has started. The site- checks reach each
+    # backend through TLS and the tunnel, with its Caddyfile health_uri and
+    # health_status; host only, because the CI lab's upstreams are stand-ins.
+    # The refusals, the redirect and the log redaction are Caddy's own, so
+    # they run in the lab too.
+    checks:
+      - name: site-wallabag
+        where: host
+        via: edge
+        host: "wallabag.{{ deerlab_domain }}"
+        path: /login
+        timeout: 10
+      - name: site-linkding
+        where: host
+        via: edge
+        host: "linkding.{{ deerlab_domain }}"
+        path: /health
+        timeout: 10
+      - name: site-baikal
+        where: host
+        via: edge
+        host: "baikal.{{ deerlab_domain }}"
+        path: /dav.php
+        status: [401]
+        timeout: 10
+      - name: site-freshrss
+        where: host
+        via: edge
+        host: "freshrss.{{ deerlab_domain }}"
+        path: /api/
+        timeout: 10
+      - name: site-vikunja
+        where: host
+        via: edge
+        host: "{{ vikunja_hostname }}"
+        path: /health
+        timeout: 10
+      - name: site-actual
+        where: host
+        via: edge
+        host: "{{ actual_hostname }}"
+        path: /account/needs-bootstrap
+        timeout: 10
+      - name: site-rsshub
+        where: host
+        via: edge
+        host: "rsshub.{{ deerlab_domain }}"
+        path: /robots.txt
+        timeout: 10
+      - name: refused-metrics
+        via: edge
+        host: "{{ actual_hostname }}"
+        path: /metrics
+        status: [404]
+      - name: refused-openid
+        via: edge
+        host: "{{ actual_hostname }}"
+        path: /openid/config
+        status: [404]
+      - name: refused-bootstrap
+        via: edge
+        host: "{{ actual_hostname }}"
+        path: /account/bootstrap
+        status: [404]
+      - name: http-redirect
+        path: /
+        headers: { Host: "wallabag.{{ deerlab_domain }}" }
+        status: [308]
+      # RSSHub's key rides in the query string, which the site's log must
+      # drop. 403 is RSSHub refusing the keyless request; 502 or 503 an
+      # upstream Caddy cannot reach, as in the CI lab. site-rsshub, not this,
+      # proves RSSHub answers.
+      - name: redact-query
+        type: log
+        timeout: 45
+        send:
+          via: edge
+          host: "rsshub.{{ deerlab_domain }}"
+          path: /deerlab-log-__MARKER__
+          query: { deerlab-sentinel: __SENTINEL__ }
+          status: [403, 502, 503]
+      # Actual's session token rides in X-Actual-Token, which the site's log
+      # must drop; Caddy itself refuses /metrics.
+      - name: redact-token
+        type: log
+        send:
+          via: edge
+          host: "{{ actual_hostname }}"
+          path: /metrics/deerlab-log-__MARKER__
+          headers: { X-Actual-Token: __SENTINEL__ }
+          status: [404]
     egress: any
     backup:
       volumes: [data]
