@@ -168,6 +168,25 @@ podman_services:
       cmd: curl --fail --silent --output /dev/null http://localhost/login
       interval: 30s
       start_period: 180s
+    # What a pull proves once wallabag has started; none of it logs in.
+    # database asks for a client that does not exist: invalid_client, not an
+    # error page, proves the database answers. Fields: podman_service_verify.
+    checks:
+      - name: api-info
+        path: /api/info
+        body_regex: '"allowed_registration":\s*false'
+        body_version: true
+      # The underscore makes the bogus id a lookup rather than a malformed one.
+      - name: database
+        method: POST
+        path: /oauth/v2/token
+        body_format: form-urlencoded
+        body: { grant_type: client_credentials, client_id: 0_deerlabcheck, client_secret: x }
+        status: [400]
+        body_regex: '"error":\s*"invalid_client"'
+      - name: login-page
+        path: /login
+        body_regex: 'name="_csrf_token"'
     egress: web
     backup:
       sqlite: [{ volume: data, path: db/wallabag.sqlite }]
@@ -249,6 +268,57 @@ podman_services:
       cmd: curl --fail --silent --output /dev/null http://localhost:9090/health
       interval: 30s
       start_period: 120s
+    # What a pull proves once linkding has started; none of it logs in.
+    # api-token makes the API read its token table for a token that does not
+    # exist. snapshot runs the worker's single-file and Chromium under its
+    # real confinement, on a page that needs no network: the worker's own
+    # loopback is not the web container's, and its egress class refuses
+    # private addresses beyond that. About one Chromium start in five stalls
+    # until single-file's timeout, in the CI lab and on svc1 alike, and the
+    # next start succeeds, as linkding's own retry of a failed snapshot does.
+    # So the check makes up to four tries of 20 s, each with a fresh profile
+    # of its own: on the worker's shared one, a stalled try held the next.
+    checks:
+      - name: health
+        path: /health
+        body_regex: '"status":\s*"healthy"'
+        body_version: true
+      - name: shared-feed
+        path: /feeds/shared
+        query: { limit: "1" }
+        body_regex: <title>Public shared bookmarks</title>
+      - name: api-token
+        path: /api/bookmarks/
+        headers: { Authorization: Token deerlab-invalid }
+        status: [401]
+        body_regex: Invalid token
+      - name: snapshot
+        type: exec
+        container: worker
+        timeout: 90
+        cmd:
+          - python
+          - manage.py
+          - shell
+          - -c
+          - |
+            import shutil, tempfile
+            from django.conf import settings
+            from bookmarks.services import singlefile
+            settings.LD_SINGLEFILE_TIMEOUT_SEC = 20
+            options = settings.LD_SINGLEFILE_OPTIONS
+            for attempt in range(4):
+                profile = tempfile.mkdtemp(prefix="deerlab-check-")
+                settings.LD_SINGLEFILE_OPTIONS = options + " --browser-arg=--user-data-dir=" + profile
+                try:
+                    singlefile.create_snapshot("file:///etc/hostname", "/tmp/deerlab-check.html")
+                except singlefile.SingleFileError:
+                    continue
+                finally:
+                    shutil.rmtree(profile, ignore_errors=True)
+                print("snapshot ok")
+                break
+        stdout_regex: snapshot ok
     egress: web
     backup:
       sqlite: [{ volume: data, path: db.sqlite3 }]
@@ -326,6 +396,20 @@ podman_services:
       cmd: '["/usr/local/bin/frankenphp","php-cli","/usr/local/bin/baikal-health"]'
       interval: 30s
       start_period: 60s
+    # What a pull proves once Baikal has started; none of it logs in.
+    # users-table sends credentials for a user that does not exist, so
+    # sabre/dav reads the users table to refuse them.
+    checks:
+      - name: dav
+        path: /dav.php
+        status: [401]
+        body_regex: "No 'Authorization: Basic' header found"
+      - name: users-table
+        method: PROPFIND
+        path: /dav.php/
+        headers: { Authorization: "Basic {{ 'deerlab-nonexistent:x' | b64encode }}" }
+        status: [401]
+        body_regex: Username or password was incorrect
     egress: platform
     backup:
       sqlite: [{ volume: data, path: Specific/db/db.sqlite }]
@@ -367,7 +451,13 @@ podman_services:
       # namespace uid 0, which can read a root-owned group-restricted file.
       # This container runs as uid 100 and cannot - at 0640 Apache fails to
       # read its own configuration and never starts.
-      - { path: config/FreshRSS.Apache.conf, content: "{{ freshrss_apache_conf }}", mode: "0644", banner: "#" }
+      - path: config/FreshRSS.Apache.conf
+        content: "{{ freshrss_apache_conf }}"
+        mode: "0644"
+        banner: "#"
+        upstream:
+          path: /var/www/FreshRSS/Docker/FreshRSS.Apache.conf
+          edits: [{ from: Listen 80, to: "Listen 8080" }]
     mounts:
       # The Alpine path. The entrypoint auto-detects it from a list that also
       # covers Debian's sites-available and Arch's conf/conf.d - do not copy a
@@ -438,6 +528,54 @@ podman_services:
       start_period: 120s
     # web, not platform: a feed reader fetches arbitrary URLs, so port 80 is
     # required for plain-HTTP feeds and for HTTP-to-HTTPS redirects.
+    # What a pull proves once FreshRSS has started; none of it logs in or
+    # reads the live database. On the host, refresh waits for the job's
+    # first run since the start. The ci- checks run only in the CI lab: they
+    # import one public feed, run the refresh job and count what it fetched.
+    checks:
+      - name: api
+        path: /api/
+        body_regex: /scripts/api\.js
+      - name: greader
+        path: /api/greader.php/check/compatibility
+        headers: { Authorization: GoogleLogin auth=test/1 }
+        body_regex: ^PASS$
+      - name: refresh
+        type: unit
+        workload: refresh
+        where: host
+      # The user comes from FreshRSS itself, so no account name is in the
+      # check. FreshRSS's own releases feed: stable and public.
+      - name: ci-feed-import
+        type: exec
+        where: ci
+        cmd:
+          - sh
+          - -c
+          - >-
+            cat > /tmp/deerlab-feeds.opml && exec php ./cli/import-for-user.php
+            --user "$(php ./cli/list-users.php | head -n 1)" --filename /tmp/deerlab-feeds.opml
+        stdin: >-
+          <?xml version="1.0" encoding="UTF-8"?><opml version="2.0"><head><title>deerlab lab</title></head><body><outline
+          text="FreshRSS releases" type="rss" xmlUrl="https://github.com/FreshRSS/FreshRSS/releases.atom"/></body></opml>
+      - name: ci-refresh
+        type: unit
+        workload: refresh
+        start: true
+        where: ci
+        timeout: 120
+      # FreshRSS subscribes a new user to its releases feed already, so the
+      # import may add nothing; at least one feed must be there.
+      - name: ci-feed-count
+        type: exec
+        where: ci
+        cmd: [php, ./cli/user-info.php, --json]
+        stdout_regex: '"feeds":\s*[1-9]'
+      - name: ci-feed-unreads
+        type: exec
+        where: ci
+        cmd: [php, ./cli/user-info.php, --json]
+        stdout_regex: '"unreads":\s*[1-9]'
     egress: web
     backup:
       # A glob, not a fixed path: FreshRSS keeps one database per user, and a
@@ -564,6 +702,24 @@ podman_services:
       start_period: 60s
     # platform plus 465 for the mailer. Webhooks stay enabled and can reach
     # any public address on 443 or 465.
+    # What a pull proves once Vikunja has started; none of it logs in.
+    # database asks for a link share that does not exist: error 3006 comes
+    # from the shares table.
+    checks:
+      - name: api-info
+        path: /api/v1/info
+        body_regex: '"registration_enabled":\s*false'
+        body_version: true
+      - name: database
+        method: POST
+        path: /api/v1/shares/deerlab-nonexistent/auth
+        body: {}
+        body_format: json
+        status: [404]
+        body_regex: '"code":\s*3006'
+      - name: frontend
+        path: /
+        body_regex: "window\\.API_URL = 'https://{{ vikunja_hostname | regex_escape }}"
     egress: mail
     backup:
       sqlite:
@@ -648,6 +804,25 @@ podman_services:
       start_period: 60s
     # The server calls out only for bank sync, which is not configured; the
     # user still needs 443 for restic and the dead-man.
+    # What a pull proves once Actual has started; none of it logs in.
+    # needs-bootstrap reads the auth table: the host's server holds a
+    # password, the CI lab's fresh one does not.
+    checks:
+      - name: version
+        path: /info
+        body_regex: '"name":\s*"@actual-app/sync-server"'
+        body_version: true
+      - name: bootstrapped
+        where: host
+        path: /account/needs-bootstrap
+        body_regex: '"bootstrapped":\s*true'
+      - name: fresh-store
+        where: ci
+        path: /account/needs-bootstrap
+        body_regex: '"bootstrapped":\s*false'
+      - name: web
+        path: /
+        body_regex: <title>Actual</title>
     egress: platform
     backup:
       sqlite:
@@ -733,4 +908,51 @@ podman_services:
     # Any TCP port to public addresses: routes reach IMAP on 993 and sites on
     # ports other than 80 and 443. Private ranges and svc1's own addresses
     # stay closed.
+    # What a pull proves once RSSHub has started; it exposes no version, so
+    # the built-in image check is its version proof. A check never carries
+    # the key: ?code= is md5(path + key), which opens one test route and
+    # nothing else. A fresh limit= on every run misses the route cache.
+    # browser drives the bundled Chromium through Patchright against the
+    # same route, under the container's real confinement, with the
+    # executable RSSHub itself would pick; the URL and its code go on stdin,
+    # never in the command line.
+    checks:
+      - name: robots
+        path: /robots.txt
+        body_regex: "Disallow: /"
+      - name: key-required
+        path: /healthz
+        status: [403]
+      - name: route-key-required
+        path: /test/1
+        status: [403]
+      - name: test-route
+        path: /test/1
+        timeout: 15
+        query:
+          code: "{{ ('/test/1' ~ rsshub_access_key) | hash('md5') }}"
+          limit: "{{ range(6, 1000) | random | string }}"
+        body_regex: <title>Title1</title>
+      - name: browser
+        type: exec
+        timeout: 45
+        stdin: "http://127.0.0.1:1200/test/1?code={{ ('/test/1' ~ rsshub_access_key) | hash('md5') }}&limit={{ range(6, 1000) | random }}"
+        cmd:
+          - node
+          - -e
+          - >-
+            const {chromium}=require('patchright');let u='';process.stdin.on('data',d=>u+=d).on('end',async()=>{
+            const b=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE_PATH||undefined,args:['--no-sandbox']});
+            const p=await b.newPage();await p.goto(u.trim());
+            const c=await p.content();await b.close();const ok=c.includes('Title1');
+            process.stdout.write(ok?'Title1':'missing');process.exit(ok?0:1)})
+        stdout_regex: Title1
+      # Through Caddy and the tunnel, as a reader arrives.
+      - name: edge
+        where: host
+        via: edge
+        host: "rsshub.{{ deerlab_domain }}"
+        path: /robots.txt
+        timeout: 35
+        body_regex: "Disallow: /"
     egress: public
