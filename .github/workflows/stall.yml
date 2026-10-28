@@ -25,7 +25,7 @@ permissions:
 jobs:
   stall:
     name: Stall check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     # Nothing here restores or saves a cache.
     cache-mode: none
