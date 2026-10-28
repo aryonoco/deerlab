@@ -121,6 +121,10 @@ fmt:
 plan host:
     ansible-playbook playbooks/site.yml --limit {{ host }} --check --diff
 
+# Run every check against a host now: pages nobody, records nothing
+verify host:
+    ansible-playbook playbooks/verify.yml --limit {{ host }} --extra-vars podman_service_verify_force=true --extra-vars podman_service_verify_notify=false --extra-vars podman_service_verify_mark=false
+
 # Push the playbook to a host as the admin user (development and break-glass only)
 apply host *ARGS:
     ansible-playbook playbooks/site.yml --limit {{ host }} {{ ARGS }}
