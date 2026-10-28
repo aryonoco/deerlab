@@ -41,3 +41,212 @@ jobs:
 
       - name: Run every check
         run: just ci
+
+  # Upgrades each host in place in a Debian 13 container with systemd, as a
+  # host's pull would: the base commit first, then this change through
+  # ansible-pull with the old stack and again with the new one, then a dry
+  # run. Every service on every run, with its real firewall and real gate
+  # backups to a throwaway object store, and its working-use checks after
+  # each start. No needs:, so Renovate counts it among the PR's checks.
+  # The steps follow the lab procedure in docs/runbook.md, The CI lab.
+  lab:
+    name: Lab ${{ matrix.host }}
+    # Pinned: ubuntu-latest moves to 26.04 during 2026-10 and 2026-11.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Nothing here restores or saves a cache.
+    cache-mode: none
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [svc1, edge1]
+    defaults:
+      run:
+        shell: bash
+    env:
+      H: ${{ matrix.host }}
+      # Empty on a push to main, where the base is what the hosts run.
+      PR_BASE: ${{ github.event.pull_request.base.sha }}
+      # Renovate bumps these through renovate.json's regex manager.
+      LAB_DEBIAN_IMAGE: docker.io/library/debian:13@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308
+      LAB_RCLONE_IMAGE: docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
+      LAB_CADDY_IMAGE: docker.io/library/caddy:2.11.7@sha256:5e5286cb37d44086d651a5363f05f43a692ce4d649d88fb1bd844579f45fa9e8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base commit and release must be here too.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # sops encrypts the stand-ins on the runner, to the lab's public key.
+      - name: Setup sops via mise
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          install: true
+          install_args: "sops"
+          cache: false
+
+      - name: Name the base and the head
+        run: |
+          echo "BASE=${PR_BASE:-$(git rev-parse origin/release)}" >> "$GITHUB_ENV"
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      # Debian 13 is the only Podman 5.4.2; no runner image has it. Built on
+      # every run, with no Dockerfile: a root systemd image fails Trivy's
+      # DS002, and suppressions are not allowed. base_os does not run in the
+      # lab, so the image carries the packages of its that the lab's roles
+      # use. No wg0 exists, so nothing may wait for it.
+      - name: Build the lab image
+        run: |
+          docker run --name deerlab-lab-build "$LAB_DEBIAN_IMAGE" sh -c '
+            set -e
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              systemd systemd-sysv dbus dbus-user-session libpam-systemd sudo python3 python3-venv \
+              ca-certificates git age nftables curl restic sqlite3 acl procps
+            ln -s /dev/null /etc/systemd/system/systemd-networkd-wait-online@.service
+            git config --system --add safe.directory "*"
+            apt-get clean'
+          docker commit --change 'CMD ["/sbin/init"]' --change 'STOPSIGNAL SIGRTMIN+3' \
+            --change 'ENV container=docker' deerlab-lab-build deerlab-lab-image
+          docker rm deerlab-lab-build
+
+      # On documentation-range addresses, which no egress class treats as
+      # private, so the service users reach them through the real firewall.
+      # The bucket exists, as on the real store: restic retries a missing
+      # one for 15 minutes.
+      - name: Start the object store and the dead-man stand-in
+        run: |
+          docker network create --subnet 203.0.113.0/24 deerlab-lab
+          docker run -d --name deerlab-lab-s3 --network deerlab-lab --ip 203.0.113.11 --tmpfs /data \
+            "$LAB_RCLONE_IMAGE" serve s3 --addr :8080 --auth-key lab-access,lab-secret-key /data
+          docker exec deerlab-lab-s3 mkdir -p /data/lab
+          docker run -d --name deerlab-lab-front --network deerlab-lab --ip 203.0.113.10 \
+            -v "$GITHUB_WORKSPACE/ci/fixture/Caddyfile:/etc/caddy/Caddyfile:ro" "$LAB_CADDY_IMAGE"
+          for _ in $(seq 30); do
+            docker exec deerlab-lab-front test -f /data/caddy/pki/authorities/local/root.crt && break
+            sleep 1
+          done
+          docker cp deerlab-lab-front:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/front-root.crt"
+
+      # base_firewall's flush ruleset deletes the NAT rules Docker's
+      # embedded resolver needs, so the lab uses the runner's upstream.
+      - name: Boot the lab
+        run: |
+          ns=$(docker run --rm "$LAB_DEBIAN_IMAGE" grep -m1 '^nameserver' /etc/resolv.conf)
+          git init --bare -q "$RUNNER_TEMP/origin.git"
+          docker run -d --name deerlab-lab --hostname "$H" --privileged --cgroupns=private \
+            --network deerlab-lab --ip 203.0.113.2 -v deerlab-lab-varlib:/var/lib \
+            -v "$RUNNER_TEMP/origin.git:/srv/origin.git:ro" deerlab-lab-image
+          # Until systemd has made its bus, systemctl cannot even connect.
+          for _ in $(seq 60); do
+            state=$(timeout 180 docker exec deerlab-lab systemctl is-system-running --wait 2>/dev/null || true)
+            [[ -n $state ]] && break
+            sleep 2
+          done
+          echo "system state: $state"
+          [[ $state == running || $state == degraded ]]
+          docker exec deerlab-lab systemctl --failed --no-legend --no-pager
+          docker exec -i deerlab-lab sh -c 'cat >> /etc/hosts' < ci/hosts
+          docker exec -i deerlab-lab sh -c 'cat > /etc/resolv.conf' <<< "$ns"
+          docker cp "$RUNNER_TEMP/front-root.crt" deerlab-lab:/usr/local/share/ca-certificates/deerlab-lab-front.crt
+          docker exec deerlab-lab update-ca-certificates
+
+      # The age key is born in the lab and never leaves it; only its public
+      # key reaches the runner. Each side's stand-ins are encrypted to it and
+      # committed to a repository that exists only for this run. The base
+      # side gets this commit's ci/, so a base older than ci/ deploys too.
+      - name: Make the lab's base and head commits
+        run: |
+          docker exec deerlab-lab sh -c 'install -d -m 0755 /etc/deerlab && age-keygen -o /etc/deerlab/age.key 2>/dev/null && chmod 0400 /etc/deerlab/age.key'
+          pub=$(docker exec deerlab-lab age-keygen -y /etc/deerlab/age.key)
+          # Resolved here: mise would not trust the copies' own mise.toml.
+          sops=$(mise which sops)
+          git push -q "$RUNNER_TEMP/origin.git" "$HEAD_SHA:refs/heads/src-head" "$BASE:refs/heads/src-base"
+          for side in head base; do
+            git clone -q -b "src-$side" "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/side-$side"
+            cd "$RUNNER_TEMP/side-$side"
+            if [ "$side" = base ]; then
+              git rm -rq --ignore-unmatch ci
+              git checkout "$HEAD_SHA" -- ci
+            fi
+            for f in ci/stand-ins/*/*.yml; do
+              out="ci/inventory/$(basename "$(dirname "$f")")/$(basename "$f" .yml)/secrets.sops.yaml"
+              mkdir -p "$(dirname "$out")"
+              # The path matches .sops.yaml's rule; --age replaces its keys.
+              "$sops" encrypt --filename-override "$out" --age "$pub" \
+                --input-type yaml --output-type yaml < "$f" > "$out.new"
+              mv "$out.new" "$out"
+            done
+            git add -A -f ci
+            git -c user.name=lab -c user.email=lab@example.test commit -q --no-gpg-sign -m "lab $side"
+            git push -q origin "HEAD:refs/heads/lab-$side"
+          done
+
+      # What the hosts would run before this change, with a venv built from
+      # its own requirements, so the services create their data. Retried
+      # once, for Vikunja's first-boot migration race; the base is code
+      # already in production. Nothing after this step is retried.
+      - name: Deploy the base
+        run: |
+          x() { docker exec -e SOPS_AGE_KEY_FILE=/etc/deerlab/age.key -e ANSIBLE_NOCOLOR=1 -e HOME=/root \
+                  deerlab-lab sh -c 'umask 0022 && exec "$@"' lab "$@"; }
+          x python3 -m venv /opt/bootstrap
+          x sh -c 'git --git-dir=/srv/origin.git show lab-base:host-requirements.txt > /tmp/base-req.txt'
+          x /opt/bootstrap/bin/pip install -q -r /tmp/base-req.txt
+          x install -d -m 0700 /var/lib/deerlab
+          x git clone -q /srv/origin.git /var/lib/deerlab/checkout
+          x sh -c 'cd /var/lib/deerlab/checkout && git checkout -q lab-base && /opt/bootstrap/bin/ansible-playbook -i localhost, ci/sops.yml'
+          for try in 1 2; do
+            x /opt/bootstrap/bin/ansible-pull --url /srv/origin.git --directory /var/lib/deerlab/checkout --clean \
+              --connection local --inventory ci/inventory/hosts.yml --limit "$H" --checkout lab-base ci/deploy.yml && break
+            [ "$try" = 1 ] || exit 1
+            echo "::warning::the base deploy failed once; retrying"
+          done
+
+      # A host's first pull of a new commit: image switches fire the backup
+      # gate for real, the new images migrate the base's data, and the
+      # verify play runs every check marked both or ci.
+      - name: Apply the change on the old stack
+        run: |
+          x() { docker exec -e SOPS_AGE_KEY_FILE=/etc/deerlab/age.key -e ANSIBLE_NOCOLOR=1 -e HOME=/root \
+                  deerlab-lab sh -c 'umask 0022 && exec "$@"' lab "$@"; }
+          x /opt/deerlab/venv/bin/ansible-pull --url /srv/origin.git --directory /var/lib/deerlab/checkout --clean \
+            --connection local --inventory ci/inventory/hosts.yml --limit "$H" --checkout lab-head ci/lab.yml
+
+      # A host's next pull, on the venv and collections the change installed.
+      - name: Apply it again on the new stack, which must change nothing
+        run: |
+          x() { docker exec -e SOPS_AGE_KEY_FILE=/etc/deerlab/age.key -e ANSIBLE_NOCOLOR=1 -e HOME=/root \
+                  deerlab-lab sh -c 'umask 0022 && exec "$@"' lab "$@"; }
+          x /opt/deerlab/venv/bin/ansible-pull --url /srv/origin.git --directory /var/lib/deerlab/checkout --clean \
+            --connection local --inventory ci/inventory/hosts.yml --limit "$H" --checkout lab-head ci/lab.yml \
+            | tee "$RUNNER_TEMP/again.log"
+          grep -E "^$H +: .* changed=0 " "$RUNNER_TEMP/again.log"
+
+      # just plan's contract: exactly one change, the pip task, which cannot
+      # resolve its requirements under check mode.
+      - name: Dry run, which must report only the pip task
+        run: |
+          x() { docker exec -e SOPS_AGE_KEY_FILE=/etc/deerlab/age.key -e ANSIBLE_NOCOLOR=1 -e HOME=/root \
+                  deerlab-lab sh -c 'umask 0022 && exec "$@"' lab "$@"; }
+          x sh -c "cd /var/lib/deerlab/checkout && /opt/deerlab/venv/bin/ansible-playbook -i ci/inventory/hosts.yml --limit $H ci/lab.yml --check --diff" \
+            | tee "$RUNNER_TEMP/dry.log"
+          grep -E "^$H +: .* changed=1 " "$RUNNER_TEMP/dry.log"
+          changed=$(awk '/^TASK \[/ {t=$0} /^changed:/ {print t}' "$RUNNER_TEMP/dry.log" | sort -u)
+          echo "$changed"
+          [[ $changed == "TASK [base_pull : Install Ansible into its virtual environment]"* && $(wc -l <<< "$changed") == 1 ]]
+
+      # Only stand-in values exist in the lab, so its whole journal can go
+      # to the job log.
+      - name: Show the lab's journal and each service user's units
+        if: always()
+        run: |
+          docker exec deerlab-lab journalctl -b --no-pager -o short-iso || true
+          for u in $(docker exec deerlab-lab loginctl list-users --no-legend | awk '{print $2}'); do
+            echo "--- $u"
+            docker exec deerlab-lab systemctl --user --machine="$u@" list-units --all --no-pager || true
+          done
