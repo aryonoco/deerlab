@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+# Fails, so GitHub notifies the operator, when the update machine has stopped
+# without anything failing loudly: a pull request that never ages or never
+# goes green, a cancelled or timed-out check, which leaves a pull request
+# yellow and unmerged for ever, Renovate broken, or main not shipped. A
+# scheduled run's failure goes to whoever last edited the cron line below.
+# See docs/runbook.md, Bot pull requests.
+
+name: Stall check
+
+on:
+  schedule:
+    - cron: "23 8 * * *"
+      timezone: "Australia/Sydney"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  checks: read
+
+jobs:
+  stall:
+    name: Stall check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Nothing here restores or saves a cache.
+    cache-mode: none
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      OPEN_DAYS: 14
+      STUCK_HOURS: 24
+      RUN_HOURS: 24
+      MAIN_HOURS: 24
+    # Each step lists what it found and fails if it found anything. Every step
+    # runs, so one run names every stall.
+    steps:
+      # Catches an update that never ages past its cooldown, such as a Docker
+      # Hub digest rebuilt more often than its 3 days.
+      - name: Renovate pull requests open too long
+        id: open
+        if: ${{ !cancelled() }}
+        env:
+          QUERY: >-
+            .[] | select(now - (.createdAt | fromdateiso8601) > ($ENV.OPEN_DAYS | tonumber) * 86400)
+            | "#\(.number) \(.title)"
+        run: |
+          found=$(gh pr list --author app/deerlab-renovate-app --state open --limit 100 \
+            --json number,title,createdAt --jq "$QUERY")
+          [ -z "$found" ] || { echo "Open more than $OPEN_DAYS days:"; echo "$found"; exit 1; }
+
+      # Red for more than a day since the PR opened, or yellow for more than
+      # a day since its last push. A failed, cancelled or timed-out check
+      # counts from the opening, because every rebase re-runs CI and would
+      # otherwise reset the clock; a check still running, or a lab that never
+      # started, counts from the last push. Renovate waits on all of them for
+      # ever. renovate/stability-days is its own cooldown, not a stall.
+      - name: Renovate pull requests red or pending too long
+        id: stuck
+        if: ${{ !cancelled() }}
+        env:
+          QUERY: >-
+            ((($ENV.STUCK_HOURS | tonumber) * 3600) as $limit
+            | .[]
+            | [.statusCheckRollup[] | select(.context != "renovate/stability-days")] as $checks
+            | [$checks[] | select(.__typename == "CheckRun") | .name] as $names
+            | select(
+                (now - (.createdAt | fromdateiso8601) > $limit
+                 and ([$checks[] | select(
+                        (.__typename == "CheckRun" and .conclusion != null
+                         and (.conclusion | IN("SUCCESS", "SKIPPED", "NEUTRAL") | not))
+                        or (.__typename == "StatusContext" and (.state | IN("FAILURE", "ERROR"))))] | length > 0))
+                or (now - (.commits[-1].committedDate | fromdateiso8601) > $limit
+                    and (([$checks[] | select(
+                            (.__typename == "CheckRun" and .conclusion == null)
+                            or (.__typename == "StatusContext" and (.state | IN("PENDING", "EXPECTED"))))] | length > 0)
+                         or ("Lab svc1" | IN($names[]) | not)
+                         or ("Lab edge1" | IN($names[]) | not))))
+            | "#\(.number) \(.title)")
+        run: |
+          found=$(gh pr list --author app/deerlab-renovate-app --state open --limit 40 \
+            --json number,title,createdAt,commits,statusCheckRollup --jq "$QUERY")
+          [ -z "$found" ] || { echo "Not green for more than $STUCK_HOURS hours:"; echo "$found"; exit 1; }
+
+      - name: Renovate silent
+        id: renovate
+        if: ${{ !cancelled() }}
+        env:
+          QUERY: >-
+            if length == 0 then "no successful Renovate run"
+            elif now - (.[0].createdAt | fromdateiso8601) > ($ENV.RUN_HOURS | tonumber) * 3600
+            then "last successful Renovate run \(.[0].createdAt)"
+            else empty end
+        run: |
+          found=$(gh run list --workflow renovate.yml --status success --limit 1 --json createdAt --jq "$QUERY")
+          [ -z "$found" ] || { echo "$found"; exit 1; }
+
+      # main ahead of release by a commit older than the threshold: a red CI
+      # on main and a failed Promote both look like this.
+      - name: main not shipped
+        id: main
+        if: ${{ !cancelled() }}
+        env:
+          QUERY: >-
+            if .ahead_by > 0
+               and now - (.commits[0].commit.committer.date | fromdateiso8601) > ($ENV.MAIN_HOURS | tonumber) * 3600
+            then "release lags main by \(.ahead_by) commit(s), the oldest from \(.commits[0].commit.committer.date)"
+            else empty end
+        run: |
+          found=$(gh api "repos/$GH_REPO/compare/release...main" --jq "$QUERY")
+          [ -z "$found" ] || { echo "$found"; exit 1; }
