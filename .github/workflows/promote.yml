@@ -3,6 +3,11 @@
 
 # Fast-forwards the release branch to the commit CI passed on.
 # The hosts pull release and apply its head, signed or not.
+#
+# A manual run ships a named commit on main without waiting for CI. It is for
+# a recovery the operator is already doing by hand, such as the revert of a
+# migrating service after a restore, which the CI lab's upgrade in place can
+# never pass, or an urgent fix. See docs/runbook.md, Rolling back an upgrade.
 
 name: Promote
 
@@ -11,6 +16,12 @@ on:
     workflows: [CI]
     branches: [main]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA on main to promote now, without waiting for CI. Recovery and urgent fixes only; see docs/runbook.md
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -23,9 +34,13 @@ jobs:
     # named main satisfies it. That was harmless while this job checked out the
     # base repository's main; it is not harmless now that it checks out the
     # commit CI ran on. Narrow the trigger to pushes.
+    #
+    # A manual run counts only from main, so a workflow file changed on
+    # another branch cannot take this path.
     if: >-
-      github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'push'
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -35,15 +50,26 @@ jobs:
       - name: Checkout the commit CI passed on
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+
+      # A 40-hex SHA that main already contains, and nothing else: not a
+      # branch name, not a short SHA, not a commit only on another branch.
+      - name: Refuse a commit that is not on main
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-character commit SHA"; exit 1; }
+          git merge-base --is-ancestor "$SHA" origin/main || { echo "::error::$SHA is not on main"; exit 1; }
 
       # No --force, so release can only fast-forward: a release branch already
       # ahead of this commit fails the push instead of rewinding both hosts.
+      # That holds for a manual run too, which skips only the CI lab.
       #
       # No signature check, here or on the hosts: the hosts apply whatever
       # release points at. The gate is write access to this repository.
       - name: Push it to release
         env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha }}
         run: git push origin "$HEAD_SHA:refs/heads/release"
