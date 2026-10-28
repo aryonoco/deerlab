@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The record checks validate every check before any of them runs. They also
+# define the defaults a check gets for timeout, retries and delay.
+dependencies:
+  - role: podman_service_check

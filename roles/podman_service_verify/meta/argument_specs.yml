@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Check each service's working use after it starts
+    description: >
+      For each service whose units have started since its last verdict, as
+      the systemd InvocationIDs recorded in a root-owned marker tell, waits
+      for the primary and its workers to be active and runs the built-in
+      checks, then the record's checks for this site. Every failure is
+      collected, so every service is checked; one Pushover message names
+      them all, then the play fails, so the pull's OnFailure= pages too.
+      The marker is written on a pass at once, and on a failure once its
+      page has gone out, never on a pending verdict, so a failure pages
+      once per start and a page that was not accepted is sent again. Under check mode it runs
+      no check, writes nothing, and lists the services awaiting
+      verification in one debug. podman_service_check validates every
+      check first, as a dependency.
+    options:
+      podman_service_verify_services:
+        type: dict
+        required: true
+        description: >
+          The podman_services dictionary. Built in, for every service: the
+          running image of the primary and of each worker equals the
+          record's image (checks image and image-<worker>), and each
+          config_files entry with an upstream equals the image's own file
+          after its edits (upstream-<basename, lowercased, non-alphanumerics
+          as ->). A record's checks is a list of mappings. Every check has
+          name ([a-z0-9-]+, unique in the service, the only identifier ever
+          printed or paged), type (http, the default, exec, unit or log),
+          where (both, the default, host or ci), timeout (1-120 s, default
+          5), retries (0-3, default 0) and delay (1-30 s, default 5); its
+          worst case, (retries + 1) * timeout + retries * delay, is at most
+          120 s. http takes via (local, the default, for
+          http://127.0.0.1:<first published host port>, or edge, for
+          https://<host> on podman_service_verify_edge_port), host (with
+          edge only), method (default GET), path (from /), query and
+          headers (string to string; may hold secrets, never printed), body
+          and body_format (json or form-urlencoded, together), status (list
+          of codes, default [200]; redirects are not followed), body_regex,
+          and body_version (the tag's leading version number appears in the
+          body). exec takes container (a worker; default the primary), cmd
+          (argv list; never a secret), stdin (where a secret goes) and
+          stdout_regex, run with podman exec as the service user. unit
+          takes workload (a job) and start (true runs it first; where ci
+          only). Without start it passes when the job has run since the
+          primary's activation and succeeded, is pending while it has not
+          run and its timer is active, and must be where host. log takes
+          send, an http request whose path holds __MARKER__ and one of
+          whose query or header values holds __SENTINEL__; both become
+          fresh random tokens, and it passes when the marker is in the
+          service's journal and the sentinel is not.
+      podman_service_verify_limits:
+        type: dict
+        required: true
+        description: >
+          The deerlab_service_limits dictionary. Each unit is waited for up
+          to its start_timeout (default 300 s) before it is judged.
+      podman_service_verify_state_dir:
+        type: path
+        default: /var/lib/deerlab/verified
+        description: Where the root-owned marker of each service lives.
+      podman_service_verify_site:
+        type: str
+        default: host
+        choices: [host, ci]
+        description: Runs the checks whose where is both or this site.
+      podman_service_verify_edge_port:
+        type: int
+        default: 443
+        description: >
+          The port of via edge checks. edge1 sets 8443, because a request
+          to its own public address leaves by lo, which skips the
+          firewall's 443 redirect.
+      podman_service_verify_ca_path:
+        type: str
+        default: ""
+        description: A CA file for via edge checks; empty for the system store.
+      podman_service_verify_force:
+        type: bool
+        default: false
+        description: Verify every service, whatever its marker says.
+      podman_service_verify_mark:
+        type: bool
+        default: true
+        description: Write the markers. just verify turns it off.
+      podman_service_verify_notify:
+        type: bool
+        default: true
+        description: Send the Pushover message. The CI lab and just verify turn it off.
+      podman_service_verify_notify_url:
+        type: str
+        default: "{{ deerlab_pushover_url }}"
+        description: The Pushover messages endpoint.
+      podman_service_verify_notify_token:
+        type: str
+        default: "{{ deerlab_pushover_token }}"
+        description: The Pushover application token, base_notify's.
+      podman_service_verify_notify_user:
+        type: str
+        default: "{{ deerlab_pushover_user }}"
+        description: The Pushover user key, base_notify's.

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_site in ['host', 'ci']
+      - podman_service_verify_state_dir is match('/')
+      - podman_service_verify_edge_port | int > 0
+      - not (podman_service_verify_notify | bool) or podman_service_verify_notify_url | length > 0
+    fail_msg: >-
+      podman_service_verify_site must be host or ci, the state directory
+      absolute, the edge port a port, and a notify URL set when notify is on
+    quiet: true
+
+- name: Start with no failures and nothing awaiting
+  ansible.builtin.set_fact:
+    podman_service_verify_failures: []
+    podman_service_verify_awaiting: []
+    podman_service_verify_held: []
+
+# Under check mode nothing is written: just plan reports exactly one change.
+- name: Create the verification state directory
+  ansible.builtin.file:
+    path: "{{ podman_service_verify_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: not ansible_check_mode and podman_service_verify_mark | bool
+
+- name: Verify each service that started since its last verdict
+  ansible.builtin.include_tasks: service.yml
+  loop: "{{ podman_service_verify_services | list }}"
+  loop_control:
+    loop_var: podman_service_verify_name
+    label: "{{ podman_service_verify_name }}"
+
+- name: Report the verdict
+  ansible.builtin.import_tasks: report.yml

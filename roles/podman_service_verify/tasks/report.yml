@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# One page naming every failed check, then a failed pull, whose OnFailure=
+# sends the generic page too. The markers keep later pulls silent until the
+# service next starts.
+- name: Page the failed checks
+  ansible.builtin.uri:
+    url: "{{ podman_service_verify_notify_url }}"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ podman_service_verify_notify_token }}"
+      user: "{{ podman_service_verify_notify_user }}"
+      title: "deerlab {{ inventory_hostname }}"
+      priority: "1"
+      message: "{{ ('verify failed on ' ~ inventory_hostname ~ ': ' ~ podman_service_verify_failures | join('; '))[:1024] }}"
+    timeout: 15
+  register: podman_service_verify_page
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - podman_service_verify_failures | length > 0
+    - podman_service_verify_notify | bool
+
+# Only once the page is out, or when nobody is to be paged.
+- name: Record the verdicts of the failed services
+  ansible.builtin.copy:
+    content: "{{ item.verdict }}"
+    dest: "{{ podman_service_verify_state_dir }}/{{ item.service }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ podman_service_verify_held }}"
+  loop_control:
+    label: "{{ item.service }}"
+  when:
+    - not ansible_check_mode
+    - not (podman_service_verify_notify | bool) or podman_service_verify_page.status | default(-1) == 200
+
+- name: Fail the pull on a failed check
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_failures | length == 0
+    fail_msg: "verification failed on {{ inventory_hostname }}: {{ podman_service_verify_failures | join('; ') }}"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: List the services awaiting verification
+  ansible.builtin.debug:
+    msg: "awaiting verification: {{ podman_service_verify_awaiting | join(', ') if podman_service_verify_awaiting else 'none' }}"
+  changed_when: false
+  when: ansible_check_mode

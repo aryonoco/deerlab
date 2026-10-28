@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# The vendored copy must equal the image's own file after the record's edits,
+# each an exact whole-line replacement. The command module strips trailing
+# newlines from its output, so the vendored copy is compared the same way,
+# line by line.
+- name: Read the upstream file of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.command:
+    argv: [podman, exec, "{{ podman_service_verify_name }}", cat, "{{ podman_service_verify_check.upstream.path }}"]
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  register: podman_service_verify_upstream
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Assert the upstream file was read for {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_upstream.rc == 0
+    fail_msg: unreadable
+    quiet: true
+
+- name: Assert the vendored copy matches its upstream for {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_edited == (podman_service_verify_check.content | regex_replace('[\r\n]+$', '')).splitlines()
+    fail_msg: drift
+    quiet: true
+  vars:
+    podman_service_verify_edited: >-
+      {%- set ns = namespace(lines=podman_service_verify_upstream.stdout_lines) -%}
+      {%- for e in podman_service_verify_check.upstream.edits | default([]) -%}
+      {%- set edited = namespace(lines=[]) -%}
+      {%- for line in ns.lines -%}
+      {%- set edited.lines = edited.lines + [e.to if line == e['from'] else line] -%}
+      {%- endfor -%}
+      {%- set ns.lines = edited.lines -%}
+      {%- endfor -%}
+      {{ ns.lines }}

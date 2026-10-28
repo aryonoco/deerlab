@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# The record and its checks hold secret values, so no task here prints them.
+- name: Set the facts for {{ podman_service_verify_name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_spec: "{{ podman_service_verify_services[podman_service_verify_name] }}"
+    podman_service_verify_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ podman_service_verify_services[podman_service_verify_name].uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ podman_service_verify_services[podman_service_verify_name].uid }}/bus"
+    podman_service_verify_pending: false
+    podman_service_verify_failed_before: "{{ podman_service_verify_failures | length }}"
+  no_log: true
+
+# Jobs are left out of the units: their InvocationID changes at every run.
+# The built-in checks come first: the running image of the primary and each
+# worker, then each config file copied from the image.
+- name: List the units and checks of {{ podman_service_verify_name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_workers: >-
+      {{ podman_service_verify_spec.workloads | default({}) | dict2items
+         | selectattr('value.kind', 'equalto', 'worker') | map(attribute='key') | list }}
+    podman_service_verify_checks: >-
+      {%- set n = podman_service_verify_name -%}
+      {%- set d = podman_service_check_check_defaults -%}
+      {%- set ns = namespace(out=[d | combine({'name': 'image', 'type': 'image', 'container': n})]) -%}
+      {%- for w in podman_service_verify_spec.workloads | default({}) | dict2items
+           if w.value.kind == 'worker' -%}
+      {%- set ns.out = ns.out + [d | combine({'name': 'image-' ~ w.key, 'type': 'image', 'container': n ~ '-' ~ w.key})] -%}
+      {%- endfor -%}
+      {%- for f in podman_service_verify_spec.config_files | default([]) if f.upstream is defined -%}
+      {%- set ns.out = ns.out + [d | combine({'name': 'upstream-' ~ (f.path | basename | lower | regex_replace('[^a-z0-9]+', '-')),
+                                              'type': 'upstream', 'upstream': f.upstream, 'content': f.content})] -%}
+      {%- endfor -%}
+      {%- for c in podman_service_verify_spec.checks | default([])
+           if c.where | default('both') in ['both', podman_service_verify_site] -%}
+      {%- set ns.out = ns.out + [d | combine({'type': 'http'}, c)] -%}
+      {%- endfor -%}
+      {{ ns.out }}
+  no_log: true
+
+- name: Wait for the units to be active of {{ podman_service_verify_name }}
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_verify_unit }}.service"
+    scope: user
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  loop: "{{ [podman_service_verify_name] + podman_service_verify_workers | map('regex_replace', '^(.*)$', podman_service_verify_name ~ '-\\1') }}"
+  loop_control:
+    loop_var: podman_service_verify_unit
+  register: podman_service_verify_units
+  until: podman_service_verify_units.status.ActiveState | default('') == 'active'
+  retries: >-
+    {{ 0 if ansible_check_mode
+       else ((podman_service_verify_limits[podman_service_verify_name].containers[podman_service_verify_unit].start_timeout
+              | default(300) | int) / 5) | round(0, 'ceil') | int }}
+  delay: 5
+  changed_when: false
+  failed_when: false
+  # A unit that never becomes active exhausts the retries, which fails the
+  # task; the failure is recorded below rather than ending the play.
+  ignore_errors: true
+  # The status holds the unit's ExecStart=, which carries its environment.
+  no_log: true
+
+# The key changes at every start of a unit, and when the checks change. The
+# states are in it too, so a unit stopped since its last verdict is due.
+- name: Read the last verdict of {{ podman_service_verify_name }}
+  ansible.builtin.slurp:
+    src: "{{ podman_service_verify_state_dir }}/{{ podman_service_verify_name }}"
+  register: podman_service_verify_marker
+  failed_when: false
+
+- name: Compute the verification key of {{ podman_service_verify_name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_key: >-
+      {{ podman_service_verify_units.results | map(attribute='status.InvocationID', default='') | join(',') }}|{{
+         podman_service_verify_units.results | map(attribute='status.ActiveState', default='') | join(',') }}|{{
+         podman_service_verify_checks | map(attribute='name') | join(',') }}
+    # The primary's failure is <svc>/active, a worker's <svc>/active-<worker>.
+    podman_service_verify_inactive: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for r in podman_service_verify_units.results -%}
+      {%- set state = r.status.ActiveState if r.status is defined and r.status.ActiveState is defined else 'unknown' -%}
+      {%- if state != 'active' -%}
+      {%- set w = r.podman_service_verify_unit[podman_service_verify_name | length + 1:] -%}
+      {%- set ns.out = ns.out + [podman_service_verify_name ~ '/active' ~ ('-' ~ w if w else '') ~ ' (' ~ state ~ ')'] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out }}
+    podman_service_verify_primary_entered: >-
+      {{ podman_service_verify_units.results[0].status.ActiveEnterTimestampMonotonic | default(0) | int }}
+
+- name: Decide whether verification is due for {{ podman_service_verify_name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_due: >-
+      {{ podman_service_verify_force | bool
+         or (podman_service_verify_marker.content | default('') | b64decode) != podman_service_verify_key }}
+
+- name: Record as awaiting verification {{ podman_service_verify_name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_awaiting: "{{ podman_service_verify_awaiting + [podman_service_verify_name] }}"
+  when: ansible_check_mode and podman_service_verify_due
+
+- name: Verify {{ podman_service_verify_name }}
+  when: not ansible_check_mode and podman_service_verify_due
+  block:
+    - name: Record the inactive units of {{ podman_service_verify_name }}
+      ansible.builtin.set_fact:
+        podman_service_verify_failures: "{{ podman_service_verify_failures + podman_service_verify_inactive }}"
+      when: podman_service_verify_inactive | length > 0
+
+    - name: Run the checks of {{ podman_service_verify_name }}
+      ansible.builtin.include_tasks: check.yml
+      loop: "{{ podman_service_verify_checks }}"
+      loop_control:
+        loop_var: podman_service_verify_check
+        label: "{{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}"
+      when: podman_service_verify_inactive | length == 0
+
+    # A pass is recorded now. A failure is held until its page has gone out
+    # (report.yml), so a page lost on the way is sent again by the next pull;
+    # once sent, the marker keeps later pulls silent. A pending verdict is
+    # never recorded: a later pull decides it.
+    - name: Record the verdict of {{ podman_service_verify_name }}
+      ansible.builtin.copy:
+        content: "{{ podman_service_verify_key }}"
+        dest: "{{ podman_service_verify_state_dir }}/{{ podman_service_verify_name }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when:
+        - podman_service_verify_mark | bool
+        - not podman_service_verify_pending
+        - podman_service_verify_failures | length == podman_service_verify_failed_before | int
+
+    - name: Hold until its page is sent the failed verdict of {{ podman_service_verify_name }}
+      ansible.builtin.set_fact:
+        podman_service_verify_held: >-
+          {{ podman_service_verify_held + [{'service': podman_service_verify_name, 'verdict': podman_service_verify_key}] }}
+      when:
+        - podman_service_verify_mark | bool
+        - not podman_service_verify_pending
+        - podman_service_verify_failures | length > podman_service_verify_failed_before | int

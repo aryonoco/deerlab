@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Request {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.include_tasks: request.yml
+  vars:
+    podman_service_verify_request: "{{ podman_service_verify_check }}"
+
+- name: Assert the status of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_response.status | default(-1) in podman_service_verify_check.status | default([200])
+    fail_msg: "status {{ podman_service_verify_response.status | default(-1) }}"
+    quiet: true
+
+- name: Assert the body of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_response.content | default('') is regex(podman_service_verify_check.body_regex, multiline=True)
+    fail_msg: body
+    quiet: true
+  when: podman_service_verify_check.body_regex is defined
+
+# The tag's leading version number, bounded: 2.7.1 matches inside v2.7.1 but
+# not inside 2.7.10 or 12.7.1.
+- name: Assert the version of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_response.content | default('') is regex('(?<![0-9.])' ~ (podman_service_verify_version | regex_escape) ~ '(?![0-9]|[.][0-9])')
+    fail_msg: version
+    quiet: true
+  vars:
+    podman_service_verify_version: >-
+      {{ podman_service_verify_spec.image | regex_replace('^[^@]*:([^:/@]+)@.*$', '\1')
+         | regex_search('^[0-9]+([.][0-9]+)*') }}
+  when: podman_service_verify_check.body_version | default(false) | bool

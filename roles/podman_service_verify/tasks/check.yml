@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Every task that touches a check's request, command or output is no_log. A
+# failure is recorded by name with the failed assert's own short message,
+# or "error" for anything else, so no module message can carry a URL.
+- name: Check {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  block:
+    - name: Run {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+      ansible.builtin.include_tasks: "check_{{ podman_service_verify_check.type }}.yml"
+  rescue:
+    - name: Record the failure of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+      ansible.builtin.set_fact:
+        podman_service_verify_failures: >-
+          {{ podman_service_verify_failures
+             + [podman_service_verify_name ~ '/' ~ podman_service_verify_check.name ~ ' ('
+                ~ (ansible_failed_result.msg
+                   if ansible_failed_task.action in ['ansible.builtin.assert', 'assert'] else 'error') ~ ')'] }}

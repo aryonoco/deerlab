@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Runs each service's working-use checks once it has started, and pages by
+# name if one fails. site.yml imports it last, so every role that converges
+# anything has finished first and a failing check holds nothing else back.
+- name: Verify every service's working use
+  hosts: podman_hosts
+  roles:
+    - role: podman_service_verify

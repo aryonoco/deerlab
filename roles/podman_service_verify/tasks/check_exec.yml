@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# A secret reaches the command only on stdin, never in its argv.
+- name: Run the command of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['podman', 'exec']
+         + (['-i'] if podman_service_verify_check.stdin is defined else [])
+         + [podman_service_verify_name ~ (('-' ~ podman_service_verify_check.container) if podman_service_verify_check.container is defined else '')]
+         + podman_service_verify_check.cmd }}
+    stdin: "{{ podman_service_verify_check.stdin | default(omit) }}"
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  register: podman_service_verify_exec
+  until: >-
+    podman_service_verify_exec.rc | default(-1) == 0
+    and (podman_service_verify_check.stdout_regex is not defined
+         or podman_service_verify_exec.stdout | default('') is regex(podman_service_verify_check.stdout_regex, multiline=True))
+  retries: "{{ podman_service_verify_check.retries }}"
+  delay: "{{ podman_service_verify_check.delay }}"
+  timeout: "{{ podman_service_verify_check.timeout }}"
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+
+- name: Assert the exit status of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_exec.rc | default(-1) == 0
+    fail_msg: "rc {{ podman_service_verify_exec.rc | default(-1) }}"
+    quiet: true
+
+- name: Assert the output of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_exec.stdout | default('') is regex(podman_service_verify_check.stdout_regex, multiline=True)
+    fail_msg: stdout
+    quiet: true
+  when: podman_service_verify_check.stdout_regex is defined
