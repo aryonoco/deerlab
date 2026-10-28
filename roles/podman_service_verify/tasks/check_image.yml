@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# The only version proof that works for a digest-only bump, and for an image
+# that reports no version: the running container's image is the record's.
+- name: Read the running image of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.command:
+    argv: [podman, container, inspect, --format, "{{ '{{' }}.Image{{ '}}' }}", "{{ podman_service_verify_check.container }}"]
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  register: podman_service_verify_running_image
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Read the record's image of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.command:
+    argv: [podman, image, inspect, --format, "{{ '{{' }}.Id{{ '}}' }}", "{{ podman_service_verify_spec.image }}"]
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  register: podman_service_verify_record_image
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Assert the image of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_running_image.rc == 0
+      - podman_service_verify_record_image.rc == 0
+      - >-
+        (podman_service_verify_running_image.stdout | regex_replace('^sha256:', ''))
+        == (podman_service_verify_record_image.stdout | regex_replace('^sha256:', ''))
+    fail_msg: stale
+    quiet: true

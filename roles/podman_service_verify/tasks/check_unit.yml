@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# A job passes when it has run since the primary's current activation and
+# succeeded. One that has not run yet, or is running, under an active timer
+# is pending: no failure and no marker, so a later pull decides. start, CI
+# only, runs the job first: systemd blocks until a oneshot ends.
+- name: Start the job of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_verify_name }}-{{ podman_service_verify_check.workload }}.service"
+    state: started
+    scope: user
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  register: podman_service_verify_job_start
+  timeout: "{{ podman_service_verify_check.timeout }}"
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: podman_service_verify_check.start | default(false) | bool
+
+- name: Read the job and timer of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.systemd_service:
+    name: "{{ podman_service_verify_name }}-{{ podman_service_verify_check.workload }}.{{ podman_service_verify_job_unit }}"
+    scope: user
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  environment: "{{ podman_service_verify_env }}"
+  loop: [service, timer]
+  loop_control:
+    loop_var: podman_service_verify_job_unit
+  register: podman_service_verify_job
+  changed_when: false
+  no_log: true
+
+- name: Judge the job of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_job_verdict: >-
+      {%- set job = podman_service_verify_job.results[0].status -%}
+      {%- set timer = podman_service_verify_job.results[1].status -%}
+      {%- set since = job.ExecMainStartTimestampMonotonic | default(0) | int > podman_service_verify_primary_entered | int -%}
+      {%- if since and job.ActiveState != 'activating' and job.Result == 'success' -%}
+      {%- set verdict = 'pass' -%}
+      {%- elif (not since or job.ActiveState == 'activating') and timer.ActiveState == 'active' -%}
+      {%- set verdict = 'pending' -%}
+      {%- elif timer.ActiveState != 'active' -%}
+      {%- set verdict = 'timer ' ~ timer.ActiveState -%}
+      {%- else -%}
+      {%- set verdict = 'result ' ~ job.Result -%}
+      {%- endif -%}
+      {{ verdict }}
+
+- name: Assert the job of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_job_verdict in ['pass', 'pending']
+    fail_msg: "{{ podman_service_verify_job_verdict }}"
+    quiet: true
+
+- name: Leave pending the service of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_pending: true
+  when: podman_service_verify_job_verdict == 'pending'

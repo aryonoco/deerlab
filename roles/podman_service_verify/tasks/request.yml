@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# One HTTP request, shared by http checks and a log check's send. local goes
+# to the first published host port on the loopback; edge goes through TLS by
+# name, on the edge port. Redirects are not followed, so an exact 301 or 401
+# is seen as such. The retries exhausting fail this task, which the caller's
+# asserts then report by status and body; ignore_errors lets them run.
+- name: Send the request of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.uri:
+    url: "{{ podman_service_verify_url }}"
+    method: "{{ podman_service_verify_request.method | default('GET') }}"
+    headers: "{{ podman_service_verify_request.headers | default(omit) }}"
+    body: "{{ podman_service_verify_request.body | default(omit) }}"
+    body_format: "{{ podman_service_verify_request.body_format | default(omit) }}"
+    status_code: "{{ podman_service_verify_request.status | default([200]) }}"
+    return_content: true
+    follow_redirects: none
+    validate_certs: true
+    ca_path: "{{ podman_service_verify_ca_path if podman_service_verify_ca_path | length > 0 else omit }}"
+    timeout: "{{ podman_service_verify_check.timeout }}"
+  vars:
+    podman_service_verify_url: >-
+      {%- set r = podman_service_verify_request -%}
+      {%- if r.via | default('local') == 'edge' -%}
+      https://{{ r.host }}{{ '' if podman_service_verify_edge_port | int == 443 else ':' ~ podman_service_verify_edge_port }}
+      {%- else -%}
+      http://127.0.0.1:{{ podman_service_verify_spec.publish[0] | regex_replace('^([0-9]+):.*$', '\1') }}
+      {%- endif -%}
+      {{ r.path }}{{ ('?' ~ (r.query | urlencode)) if r.query is defined else '' }}
+  register: podman_service_verify_response
+  until: >-
+    podman_service_verify_response.status | default(-1) in podman_service_verify_request.status | default([200])
+    and (podman_service_verify_request.body_regex is not defined
+         or podman_service_verify_response.content | default('') is regex(podman_service_verify_request.body_regex, multiline=True))
+  retries: "{{ podman_service_verify_check.retries }}"
+  delay: "{{ podman_service_verify_check.delay }}"
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  no_log: true

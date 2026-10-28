@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# The request carries a fresh marker in its path and a fresh sentinel where a
+# secret would ride. It passes when the marker reached the service's journal
+# and the sentinel did not: the marker stops a log never written from passing.
+- name: Make the marker and sentinel of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.set_fact:
+    podman_service_verify_log_marker: "{{ lookup('ansible.builtin.password', '/dev/null', length=12, chars=['ascii_lowercase', 'digits']) }}"
+    podman_service_verify_log_sentinel: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_lowercase', 'digits']) }}"
+  no_log: true
+
+- name: Send the request of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.include_tasks: request.yml
+  vars:
+    podman_service_verify_request: >-
+      {{ podman_service_verify_check.send | to_json
+         | replace('__MARKER__', podman_service_verify_log_marker)
+         | replace('__SENTINEL__', podman_service_verify_log_sentinel) | from_json }}
+
+- name: Assert the status of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_response.status | default(-1) in podman_service_verify_check.send.status | default([200])
+    fail_msg: "status {{ podman_service_verify_response.status | default(-1) }}"
+    quiet: true
+
+# As root: the service's journal is its user's, and journald may write it a
+# moment after the response.
+- name: Read the journal of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.command:
+    argv: [journalctl, --no-pager, -o, cat, --since=-10min, "CONTAINER_NAME={{ podman_service_verify_name }}"]
+  register: podman_service_verify_journal
+  until: podman_service_verify_log_marker in podman_service_verify_journal.stdout | default('')
+  retries: 5
+  delay: 2
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+
+- name: Assert the marker reached the journal for {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_log_marker in podman_service_verify_journal.stdout | default('')
+    fail_msg: not logged
+    quiet: true
+
+- name: Assert the sentinel stayed out of the journal for {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_log_sentinel not in podman_service_verify_journal.stdout | default('')
+    fail_msg: leaked
+    quiet: true

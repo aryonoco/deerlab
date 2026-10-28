@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+podman_service_verify_services: "{{ podman_services }}"
+podman_service_verify_limits: "{{ deerlab_service_limits }}"
+
+# Root-owned, one marker per service, holding the units' InvocationIDs and
+# the checks it last ran. A service is verified when that no longer matches.
+podman_service_verify_state_dir: /var/lib/deerlab/verified
+
+# host on the hosts; the CI lab sets ci. A check runs when its where is both
+# or this site.
+podman_service_verify_site: host
+
+# The port via: edge checks use. edge1 sets 8443: a request to its own public
+# address leaves by lo, which never meets the firewall's 443 redirect.
+podman_service_verify_edge_port: 443
+
+# A CA file for via: edge checks, empty for the system store. The CI lab sets
+# the root of Caddy's internal CA.
+podman_service_verify_ca_path: ""
+
+# just verify sets force, clears mark and notify: every check runs now,
+# nothing is recorded and nobody is paged.
+podman_service_verify_force: false
+podman_service_verify_mark: true
+podman_service_verify_notify: true
+podman_service_verify_notify_url: "{{ deerlab_pushover_url }}"
+podman_service_verify_notify_token: "{{ deerlab_pushover_token }}"
+podman_service_verify_notify_user: "{{ deerlab_pushover_user }}"
