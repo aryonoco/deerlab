@@ -80,6 +80,7 @@ for Claude 5 Fable.
 - `just apply HOST` — push directly; bootstrap and break-glass only. The next pull reverts anything not promoted
 - `just bootstrap HOST` — first run against a fresh image, as root, with the pull timer held off
 - `just idempotency HOST` — apply twice, fail if the second run changed anything
+- `just verify HOST` — run every service's working-use checks against a host now; pages nobody, records nothing
 - `just secrets-edit FILE`, `just secrets-rekey`
 - `just backup-prune SERVICE`, `just restore-drill SERVICE` — one argument, the service name; the inventory file is found by the key it holds
 
@@ -87,14 +88,16 @@ for Claude 5 Fable.
 
 - Pull-based. Each host runs `deerlab-pull.timer` every 30 minutes with a 0–300s randomised delay, checks out `release`, and applies `site.yml --limit <itself>` without checking the head commit's signature
 - **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run from this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
-- The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. It is the only workflow that pushes `release`
-- Renovate runs in GitHub Actions on a GitHub App token, daily and after every push to `main`, and also manages the Actions pins. Its PRs run CI themselves. Every PR, the operator's and Renovate's, lands with "Rebase and merge" on GitHub. Read the merge box first: no check is required. See `docs/runbook.md`, Bot pull requests
+- The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. A manual run ships a named commit on `main` without waiting for CI, for a recovery or an urgent fix (`gh workflow run promote.yml --ref main -f sha=<sha>`); it still only fast-forwards. It is the only workflow that pushes `release`
+- Renovate runs in GitHub Actions on a GitHub App token, every 3 hours, after every push to `main` and when CI finishes on a `renovate/**` branch, and also manages the Actions pins. Its PRs run CI themselves, and it merges its own green PRs, with "Rebase and merge" through the API, while the repository variable `DEERLAB_AUTOMERGE` is `enabled`; unset, empty or any other value stops it. The operator's PRs, and an agent's, still land by hand with "Rebase and merge" on GitHub. Read the merge box first: no check is required. A daily stall check fails when updates stop moving. See `docs/runbook.md`, Bot pull requests
+- After each deploy the last play of every pull runs the working-use checks of each service that has started since its last verdict, and pages once, by name, if one fails. See `docs/runbook.md`, Verification after a deploy
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 
 ## Code Quality
 
 - All linter rules are enforced as errors — fix them, don't suppress them
 - `just ci` runs: ansible-lint (production profile plus `role-argument-spec`), ShellCheck, Trivy config scan, gitleaks, and checks for trailing whitespace, end-of-file newlines, YAML and JSON syntax, and merge-conflict markers
+- CI also runs `Lab svc1` and `Lab edge1`: each host upgraded in place in a Debian 13 container with systemd, from the base commit to the change, then re-run and dry-run, with every service's checks. A new key in a `secrets.sops.yaml` needs a stand-in in `ci/stand-ins/`. See `docs/runbook.md`, The CI lab
 - A second playbook run must produce zero changes. Common causes of a failure: `command` tasks without `creates` or `changed_when`, and templates whose content depends on facts that change per run
 - Two roles setting different modes on one shared directory will flap forever and fail the idempotency check
 
@@ -117,6 +120,7 @@ for Claude 5 Fable.
 - One entry in `podman_services` per service: explicit UID from 2000, a fully qualified digest-pinned image written as a literal `image:` value, published ports, volumes, tmpfs, health command, egress class, and backup paths for a service that keeps data. Renovate's custom manager matches `image:` lines under `inventory/group_vars/`, not the Quadlet's rendered `Image=` line, so an image assembled from variables will never be bumped
 - Resource ceilings live in `inventory/group_vars/all/limits.yml`, not the service record: a per-container budget under `containers:` and a per-service slice budget that must be at least the sum of its containers
 - Everything else derives from the service record: the service user, its subordinate ID range, slice drop-in, firewall egress chain, Quadlet units, Podman secrets, and the backup unit and timer where it has a `backup:` block
+- Each record's `checks:` lists the checks of its working use once started, with no login and no read of the live database; a config file copied from the image declares `upstream:`. They run in the CI lab and on the host after each start. A secret goes only in a check's query, headers or `stdin`, never its `cmd`
 - **Least privilege, established empirically.** Drop all capabilities, set read-only root and no-new-privileges, then add back only what the image proves it needs, one at a time. Record in a comment beside the definition what failed and how when a capability is added, and re-test the list when the image changes
 - Subordinate ID ranges are arithmetic, not allocated. Changing a service's `uid`, or `podman_user_uid_base`/`podman_user_subid_base`/`podman_user_subid_count`, silently invalidates the file ownership recorded in every existing snapshot for that service
 
