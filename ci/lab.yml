@@ -14,3 +14,6 @@
 
 - name: Deploy as a host's pull does
   ansible.builtin.import_playbook: deploy.yml
+
+- name: Verify what the change deployed
+  ansible.builtin.import_playbook: ../playbooks/verify.yml

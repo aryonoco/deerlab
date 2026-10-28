@@ -12,3 +12,6 @@
 
 - name: Configure the services host
   ansible.builtin.import_playbook: services.yml
+
+- name: Verify what this pull deployed
+  ansible.builtin.import_playbook: verify.yml
