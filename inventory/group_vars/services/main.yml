@@ -733,7 +733,7 @@ podman_services:
     # The official Debian build, from Docker Hub because it records push
     # times, which Renovate's cooldown needs. ghcr.io/actualbudget/actual
     # serves the same index digest.
-    image: docker.io/actualbudget/actual-server:26.10.0@sha256:24645e971da6bb1a1f953d6859e307a0b29be1e8b4130a35b3220c209b5b860c
+    image: docker.io/actualbudget/actual-server:26.11.0@sha256:06cf186569cf58d93e12659ff1a517b65b5b0ebee7050a3991d4bd8a1d398da6
     # The image sets no USER, so it would run as root, and root with no
     # capabilities cannot write the /data the image gives to actual:1001.
     # Pinned to that user. Upstream neither documents nor tests non-root, so
