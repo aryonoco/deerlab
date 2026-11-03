@@ -14,3 +14,9 @@ base_wireguard_public_key: "K0IwugKaMJ+y0tTMeCnND/fBIs8xQxFgkZIYYi4T9CI="
 # after a reboot; without it the edge loses the endpoint it learned and the
 # tunnel waits out REJECT_AFTER_TIME.
 base_wireguard_public_endpoint: "{{ ansible_host }}:{{ deerlab_wg_port }}"
+
+# svc1's services log far more than the edge (Baikal's access log alone records
+# a health probe every 30 s), and at the role's 512M the system journal held
+# about four days of pull and deploy history against a 90-day retention. 2G
+# keeps roughly four times as much; svc1 has the disk to spare.
+base_os_journald_max_use: 2G
