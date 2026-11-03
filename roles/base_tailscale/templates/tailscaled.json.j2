@@ -1,0 +1,12 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+{
+  "version": "alpha0",
+  "locked": true,
+  "hostname": {{ base_tailscale_hostname | to_json }},
+  "acceptDNS": {{ base_tailscale_accept_dns | to_json }},
+  "acceptRoutes": false,
+  "netfilterMode": "on",
+  "autoUpdate": {"check": false, "apply": false},
+  "authKey": {{ ('file:' ~ base_tailscale_auth_key_path) | to_json }}
+}

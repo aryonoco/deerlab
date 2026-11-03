@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Tailscale from its own repository, pinned and locked
+    description: >
+      Installs the pinned tailscale package from Tailscale's stable trixie
+      repository and holds it, writes tailscaled's flags and its alpha0
+      configuration file with the settings locked, and keeps tailscaled
+      running. Joins the tailnet only when a one-off auth key is supplied, as
+      `just enrol` and `just bootstrap` do; a pull never does.
+    options:
+      base_tailscale_version:
+        type: str
+        required: true
+        description: The tailscale package version, without its leading v. Bumped by Renovate.
+      base_tailscale_keyring_url:
+        type: str
+        required: true
+        description: Tailscale's binary signing keyring for trixie.
+      base_tailscale_keyring_checksum:
+        type: str
+        required: true
+        description: sha256:<hex> of that keyring; a different file fails the download.
+      base_tailscale_hostname:
+        type: str
+        required: true
+        description: The machine's name on the tailnet; the inventory name by default.
+      base_tailscale_accept_dns:
+        type: bool
+        default: true
+        description: >
+          Accept the tailnet's DNS (MagicDNS). With systemd-resolved this adds
+          split DNS for the tailnet's names only, while the console's
+          "Override DNS servers" stays off.
+      base_tailscale_port:
+        type: int
+        required: true
+        description: tailscaled's UDP port.
+      base_tailscale_userspace:
+        type: bool
+        default: false
+        description: Userspace networking instead of a TUN device; for the CI lab, which has none.
+      base_tailscale_no_logs:
+        type: bool
+        default: false
+        description: Stop tailscaled sending its logs to Tailscale; for the CI lab.
+      base_tailscale_config_path:
+        type: path
+        default: /etc/tailscale/tailscaled.json
+      base_tailscale_auth_key_path:
+        type: path
+        default: /etc/tailscale/authkey
+        description: >
+          Root-only file through which the one-off key reaches tailscaled.
+          Always present, because the configuration names it; empty except
+          during an enrolment.
+      base_tailscale_auth_key:
+        type: str
+        required: false
+        no_log: true
+        description: >
+          A one-off, pre-approved auth key tagged tag:edge or tag:svc. Read
+          from DEERLAB_TAILSCALE_AUTH_KEY; empty means do not enrol.

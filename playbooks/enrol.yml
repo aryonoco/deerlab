@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Used only by `just enrol HOST`, which supplies the one-off key.
+- name: Join a host to the tailnet
+  hosts: podman_hosts
+  roles:
+    - role: base_tailscale

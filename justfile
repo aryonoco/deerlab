@@ -129,11 +129,28 @@ verify host:
 apply host *ARGS:
     ansible-playbook playbooks/site.yml --limit {{ host }} {{ ARGS }}
 
-# First run against a freshly imaged host, connecting as root. The timer stays
-# off: a host being bootstrapped is not yet a recipient of the encrypted
-# inventory, so its first unattended run could only fail to decrypt.
+# The timer stays off: a host being bootstrapped is not yet a recipient of the
+# encrypted inventory, so its first unattended run could only fail to decrypt.
+# The key typed at the prompt reaches the host only through the environment
+# and a root-only file. The run connects to the host's public address
+# directly: a fresh host is on no tailnet to jump through.
+# First run against a freshly imaged host, as root; joins it to the tailnet
 bootstrap host *ARGS:
-    ansible-playbook playbooks/site.yml --limit {{ host }} --extra-vars ansible_user=root --extra-vars base_pull_enabled=false {{ ARGS }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -rsp "One-off auth key for {{ host }} (tag:edge or tag:svc): " DEERLAB_TAILSCALE_AUTH_KEY; echo
+    [[ -n $DEERLAB_TAILSCALE_AUTH_KEY ]] || { echo "an auth key is required" >&2; exit 1; }
+    export DEERLAB_TAILSCALE_AUTH_KEY
+    ansible-playbook playbooks/site.yml --limit {{ host }} --extra-vars ansible_user=root --extra-vars base_pull_enabled=false --extra-vars ansible_ssh_common_args= {{ ARGS }}
+
+# Join a running host to the tailnet with a one-off tagged key (runbook: Tailscale)
+enrol host:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -rsp "One-off auth key for {{ host }} (tag:edge or tag:svc): " DEERLAB_TAILSCALE_AUTH_KEY; echo
+    [[ -n $DEERLAB_TAILSCALE_AUTH_KEY ]] || { echo "an auth key is required" >&2; exit 1; }
+    export DEERLAB_TAILSCALE_AUTH_KEY
+    ansible-playbook playbooks/enrol.yml --limit {{ host }}
 
 # Run the playbook twice and fail if the second run changed anything
 idempotency host:

@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_tailscale_version | length > 0
+      - base_tailscale_keyring_checksum is match('sha256:[0-9a-f]{64}$')
+      - base_tailscale_hostname | length > 0
+      - base_tailscale_port | int > 0
+    fail_msg: base_tailscale needs a version, the keyring's sha256, a hostname and a port
+    quiet: true
+
+# Phase 1 — The pinned package from Tailscale's own repository
+
+# Fingerprint 2596A99EAAB33821893C0A79458CA832957F5868, "Tailscale Inc.
+# (Package repository signing key)". The digest pins this exact keyring, so a
+# swapped key fails the download instead of being trusted.
+- name: Install Tailscale's signing key
+  ansible.builtin.get_url:
+    url: "{{ base_tailscale_keyring_url }}"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    checksum: "{{ base_tailscale_keyring_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: base_tailscale_keyring
+
+# The .list form, not deb822: Tailscale's updater reads this exact path, and
+# keeping its expected shape avoids a second, surprising failure mode.
+- name: Add Tailscale's stable repository
+  ansible.builtin.copy:
+    content: |
+      # {{ deerlab_managed }}
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian trixie main
+    dest: /etc/apt/sources.list.d/tailscale.list
+    owner: root
+    group: root
+    mode: "0644"
+  register: base_tailscale_source
+
+# base_os refreshes apt's lists at most hourly, so a source added since then
+# would not be in them and the install below could not find the package.
+- name: Read the new repository's package lists
+  ansible.builtin.apt:
+    update_cache: true
+  when: base_tailscale_keyring is changed or base_tailscale_source is changed
+
+- name: Install the pinned Tailscale
+  ansible.builtin.apt:
+    name: "tailscale={{ base_tailscale_version }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    # Its Recommends are the keyring package, which would own the file
+    # above, and iproute2, which the base image already has.
+    install_recommends: false
+    allow_change_held_packages: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Hold Tailscale at the pinned version
+  ansible.builtin.dpkg_selections:
+    name: tailscale
+    selection: hold
+
+# Phase 2 — tailscaled's settings, declarative and locked
+
+- name: Create Tailscale's configuration directory
+  ansible.builtin.file:
+    path: "{{ base_tailscale_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# The config file names this file as the auth key, and tailscaled refuses to
+# start while it is missing. Empty, it is no key at all: tailscaled waits for
+# a login. It holds a key only during an enrolment, which empties it again.
+# no_log: a run interrupted mid-enrolment could leave a key here for --diff.
+- name: Keep the auth key file present and empty
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ base_tailscale_auth_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Write tailscaled's daemon flags
+  ansible.builtin.template:
+    src: tailscaled.default.j2
+    dest: /etc/default/tailscaled
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart tailscaled
+
+# locked: tailscale set and tailscale up are refused, so the settings change
+# only here. Netfilter mode on: tailscaled writes its own rules, which the
+# firewall's reload deletes, so base_firewall restarts tailscaled after it.
+- name: Write tailscaled's configuration file
+  ansible.builtin.template:
+    src: tailscaled.json.j2
+    dest: "{{ base_tailscale_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    validate: /usr/bin/python3 -c "import sys,json;json.load(open(sys.argv[1]))" %s
+  notify: Restart tailscaled
+
+- name: Run tailscaled
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Restart tailscaled before enrolling
+  ansible.builtin.meta: flush_handlers
+
+# Phase 3 — Enrolment, only when a one-off key was given
+
+- name: Enrol with the one-off key
+  ansible.builtin.include_tasks: enrol.yml
+  when: base_tailscale_auth_key | length > 0
