@@ -41,6 +41,16 @@
     },
     {
       "customType": "regex",
+      "description": "The Tailscale release base_tailscale installs and holds on each host",
+      "managerFilePatterns": ["/^roles/base_tailscale/defaults/main\\.yml$/"],
+      "matchStrings": ["base_tailscale_version:\\s*\"(?<currentValue>[0-9][0-9.]*)\""],
+      "depNameTemplate": "tailscale",
+      "packageNameTemplate": "tailscale/tailscale",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
       "description": "The CI lab's base and fixture images (LAB_*_IMAGE: registry/repo:tag@sha256:digest)",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
@@ -69,7 +79,7 @@
       "minimumReleaseAge": "7 days"
     },
     {
-      "description": "Cooldown for GitHub releases: the hosts' sops and every mise tool",
+      "description": "Cooldown for GitHub releases: the hosts' sops and Tailscale, and every mise tool",
       "matchDatasources": ["github-releases", "github-tags"],
       "minimumReleaseAge": "7 days"
     },
@@ -178,8 +188,8 @@
       "commitMessagePrefix": "edge:"
     },
     {
-      "description": "Subsystem: the operator's toolchain and the Ansible and sops the hosts install",
-      "matchFileNames": ["mise.toml", "host-requirements.txt", "roles/base_pull/defaults/main.yml"],
+      "description": "Subsystem: the operator's toolchain and the Ansible, sops and Tailscale the hosts install",
+      "matchFileNames": ["mise.toml", "host-requirements.txt", "roles/base_pull/defaults/main.yml", "roles/base_tailscale/defaults/main.yml"],
       "commitMessagePrefix": "tools:"
     },
     {
