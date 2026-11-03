@@ -23,3 +23,8 @@ base_os_sysctl_skip:
 # Run the checks marked ci or both, and page nobody.
 podman_service_verify_site: ci
 podman_service_verify_notify: false
+
+# A container has no /dev/net/tun, so tailscaled runs in userspace; and the
+# lab must not report to Tailscale. It is installed and never enrolled.
+base_tailscale_userspace: true
+base_tailscale_no_logs: true

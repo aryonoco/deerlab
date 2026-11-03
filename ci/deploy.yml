@@ -5,7 +5,8 @@
 # cannot run (base_os beyond its kernel parameters, base_ssh and
 # base_wireguard). The lab's first step runs this file from the base commit
 # with this commit's ci/ laid over it, so it imports nothing a base commit
-# may lack: no verify play, no kernel play. See docs/runbook.md, The CI lab.
+# may lack: no verify play, no kernel play, no base_tailscale (ci/lab.yml
+# installs it). See docs/runbook.md, The CI lab.
 - name: Install collections into the checkout
   ansible.builtin.import_playbook: ../playbooks/deps.yml
 
