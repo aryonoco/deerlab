@@ -12,6 +12,18 @@ base_firewall_peer_ipv4: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv4'] 
 base_firewall_peer_ipv6: "{{ hostvars[groups['edge'][0]]['base_wireguard_ipv6'] | default('') }}"
 base_firewall_peer_public_v4: "{{ hostvars[groups['edge'][0]]['ansible_host'] | default('') }}"
 
+# The tailnet. tailscaled names its interface tailscale0 and recreates it on
+# every restart, so the rules match it by name (iifname), never by index.
+base_firewall_tailscale_interface: tailscale0
+base_firewall_tailscale_port: "{{ deerlab_tailscale_port }}"
+# Tailscale's address ranges. Traffic claiming them on any other interface is
+# spoofed; the backends trust both as their proxy.
+base_firewall_tailnet_v4: 100.64.0.0/10
+base_firewall_tailnet_v6: fd7a:115c:a1e0::/48
+# tailscaled's own rules do not survive the flush at the top of the ruleset
+# and come back only when it restarts. Off only where tailscaled is absent.
+base_firewall_restart_tailscaled: true
+
 base_firewall_edge_tcp_redirects:
   80: 8080
   443: 8443

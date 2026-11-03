@@ -44,6 +44,30 @@ argument_specs:
         description: >-
           The peer's public address the tunnel port is accepted from,
           required on a services host so the peer can initiate the tunnel.
+      base_firewall_tailscale_interface:
+        type: str
+        default: tailscale0
+        description: >
+          tailscaled's interface. Everything arriving on it is accepted; the
+          tailnet policy decides what reaches each port.
+      base_firewall_tailscale_port:
+        type: int
+        required: true
+        description: tailscaled's UDP port, open to the internet on an edge host only.
+      base_firewall_tailnet_v4:
+        type: str
+        default: 100.64.0.0/10
+        description: Tailscale's IPv4 range, dropped when it arrives on any other interface.
+      base_firewall_tailnet_v6:
+        type: str
+        default: fd7a:115c:a1e0::/48
+        description: Tailscale's IPv6 range, dropped when it arrives on any other interface.
+      base_firewall_restart_tailscaled:
+        type: bool
+        default: true
+        description: >
+          Restart tailscaled after each ruleset reload, because the reload's
+          flush deletes the rules tailscaled installed.
       base_firewall_edge_tcp_redirects:
         type: dict
         description: Public port to Caddy's published port, TCP.
