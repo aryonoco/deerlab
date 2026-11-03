@@ -7,8 +7,8 @@ argument_specs:
     description: >
       Key-only authentication for one admin user, root login disabled,
       post-quantum key exchange first, per-source penalties with the
-      tunnel exempt, and a validated drop-in that is removed again if
-      sshd rejects it.
+      tunnel and the tailnet exempt, TCP forwarding on the jump host only,
+      and a validated drop-in that is removed again if sshd rejects it.
     options:
       base_ssh_admin_user:
         type: str
@@ -18,6 +18,12 @@ argument_specs:
         type: list
         elements: str
         description: Prefixes exempt from PerSourcePenalties.
+      base_ssh_allow_tcp_forwarding:
+        type: bool
+        default: false
+        description: >
+          Allow TCP forwarding, which ssh -J and ProxyJump need. True on the
+          jump host only.
       base_ssh_max_auth_tries:
         type: int
         default: 6

@@ -27,7 +27,7 @@ MaxSessions 4
 # Forwarding
 X11Forwarding no
 AllowAgentForwarding no
-AllowTcpForwarding no
+AllowTcpForwarding {{ 'yes' if base_ssh_allow_tcp_forwarding else 'no' }}
 AllowStreamLocalForwarding no
 PermitUserEnvironment no
 

@@ -2,9 +2,16 @@
 # Copyright (c) 2026 Aryan Ameri
 
 base_ssh_admin_user: "{{ deerlab_admin_user }}"
+# The tailnet's ranges are exempt because every login that jumps through the
+# edge arrives from the edge's tailnet address: penalising that one address
+# for someone else's failures would block every jump.
 base_ssh_penalty_exempt:
   - "{{ deerlab_wg_ipv4_prefix }}"
   - "{{ deerlab_wg_ipv6_prefix }}"
+  - 100.64.0.0/10
+  - fd7a:115c:a1e0::/48
+# Only the jump host forwards (inventory/group_vars/edge/main.yml).
+base_ssh_allow_tcp_forwarding: false
 # Debian's default, and deliberately not lowered. Under `AuthenticationMethods
 # publickey` with passwords disabled, MaxAuthTries only caps how many public
 # keys a client may offer: an attacker either holds a key or does not, so a low
