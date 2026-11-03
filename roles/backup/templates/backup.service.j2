@@ -85,4 +85,7 @@ ExecStart=/usr/bin/podman unshare /usr/bin/restic backup --quiet --exclude-cache
 # about, loudly and through both channels. No --read-data; that reads every
 # pack back from the object store and is not what a nightly job should do.
 ExecStart=/usr/bin/restic check
-ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/deadman.conf --data "backup ok"
+# The dead-man ping. A 502 or a timeout from the external monitor would fail
+# a backup that succeeded and page for it, so it tries four times, 30 s
+# apart, on any error. A monitor still failing after that fails the unit.
+ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --retry 3 --retry-delay 30 --retry-all-errors --config %d/deadman.conf --data "backup ok"
