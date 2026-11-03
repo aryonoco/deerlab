@@ -137,6 +137,12 @@
       ]
     },
     {
+      "description": "RSSHub moves once a day, to each new dated tag at its digest. Upstream rebuilds the day's tag on every push to master, and taking each rebuild restarted RSSHub several times a day",
+      "matchPackageNames": ["docker.io/diygod/rsshub"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": false
+    },
+    {
       "description": "The operator's Ansible and the hosts' Ansible move together",
       "matchManagers": ["mise", "pip_requirements"],
       "matchPackageNames": ["ansible"],
