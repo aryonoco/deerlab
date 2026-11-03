@@ -18,4 +18,7 @@ Environment=HOME=/root
 WorkingDirectory={{ base_pull_dir }}
 LoadCredential=deadman.conf:/etc/deerlab/deadman-pull.conf
 ExecStart={{ base_pull_venv }}/bin/ansible-pull --url {{ base_pull_repo_url }} --checkout {{ base_pull_branch }} --directory {{ base_pull_dir }}/checkout --clean --connection local --inventory inventory/hosts.yml --limit {{ inventory_hostname }} playbooks/site.yml
-ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --config %d/deadman.conf --data "pull ok"
+# A 502 or a timeout from the external monitor would fail a pull that
+# passed and page for it, so the ping tries four times, 30 s apart, on any
+# error. A monitor still failing after that fails the unit as before.
+ExecStartPost=/usr/bin/curl --silent --show-error --fail --max-time 15 --retry 3 --retry-delay 30 --retry-all-errors --config %d/deadman.conf --data "pull ok"

@@ -264,7 +264,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | Channel | Reports | Wired by |
 | --- | --- | --- |
 | Pushover, direct from each host | a unit that **failed** | `OnFailure=` on every Quadlet, every backup unit, the pull unit, and `base_notify_onfailure_units` (`nftables.service`, `systemd-networkd.service`); the reboot-required timer posts the same way |
-| Dead-man push monitors, on an external uptime monitor | a host that **stopped running anything** | `ExecStartPost` curl on each successful pull and each successful backup |
+| Dead-man push monitors, on an external uptime monitor | a host that **stopped running anything** | `ExecStartPost` curl on each successful pull and each successful backup, tried four times 30 s apart on any error; a ping still failing after that fails the unit and pages |
 
 - Notifications leave the host directly and depend on neither the edge nor the external monitor: an outage of the thing that watches must not silence the thing that reports
 - Push URLs are bearer secrets, in SOPS as `deerlab_deadman_urls`. Anyone holding one can mark a check healthy and mask a real outage
@@ -349,7 +349,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
    - Then `presence_query`, where the entry has one, against the same staged copy; it must print exactly `1`. A database deleted and silently re-created empty — Vikunja does this at every start — passes step 1 and the integrity check, and would otherwise upload as the newest snapshot and ping the dead-man green. With it the unit fails and pages instead, and restic never runs
 5. `podman unshare restic backup` of the staging directory plus each named volume's `_data`
 6. `restic check` — structural, no `--read-data`
-7. `ExecStartPost`: the dead-man ping
+7. `ExecStartPost`: the dead-man ping, tried four times 30 s apart, so a blip at the external monitor does not fail a good backup
 
 - `backup.sqlite` is a list of `{ volume, path }` entries: `volume` is a literal volume name, and `path` is relative to that volume's `_data` root. An entry may add `presence_query`, one plain `SELECT` that must print exactly `1` against the staged copy, such as Vikunja's `SELECT count(*) > 0 FROM users`. The play refuses anything else, because the query is written into an `sh -c` line in the unit: a quote, `%`, `$`, `;`, a backslash or a newline would break the quoting or be expanded by systemd. A glob entry may instead add `allow_empty: true` (see step 1 above); the play refuses it on a fixed path, as anything but a boolean, and beside `presence_query`, since "may be absent" and "must hold data" contradict
 - A service with no database skips steps 1–4
