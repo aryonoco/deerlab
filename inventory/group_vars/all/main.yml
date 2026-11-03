@@ -36,6 +36,11 @@ deerlab_pushover_url: https://api.pushover.net/1/messages.json
 
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
 
+# tailscaled's UDP port, Tailscale's default. Plaintext because it is the
+# documented default every installation uses; it is open to the internet on
+# the edge only, where it makes direct connections between peers likelier.
+deerlab_tailscale_port: 41641
+
 # Named globally because base_firewall renders the chains from it and
 # podman_user asserts its own inputs against it. One definition, two gates.
 deerlab_egress_classes: [any, web, platform, mail, public]

@@ -7,3 +7,4 @@ base_notify_user: "{{ deerlab_pushover_user }}"
 base_notify_onfailure_units:
   - nftables.service
   - systemd-networkd.service
+  - tailscaled.service

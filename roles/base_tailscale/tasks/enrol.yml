@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# The key must be one-off, pre-approved and tagged (tag:edge or tag:svc).
+# Tagged at first login, the machine belongs to the tag and its key expiry is
+# off; a tag added later would leave the 180-day expiry on. The key reaches
+# tailscaled only through the root-only file, never an argument, and the file
+# is emptied again whether or not the login worked.
+
+# rc is 0 whenever tailscaled answers, whatever its state.
+- name: Read tailscaled's state
+  ansible.builtin.command: tailscale status --json
+  register: base_tailscale_status
+  changed_when: false
+  failed_when: base_tailscale_status.rc != 0
+  check_mode: false
+  no_log: true
+
+- name: Report a machine that has already joined
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is already on the tailnet; the key was not used"
+  when: (base_tailscale_status.stdout | from_json)['BackendState'] == 'Running'
+
+- name: Join the tailnet
+  when: (base_tailscale_status.stdout | from_json)['BackendState'] != 'Running'
+  block:
+    - name: Hand tailscaled the key
+      ansible.builtin.copy:
+        content: "{{ base_tailscale_auth_key }}"
+        dest: "{{ base_tailscale_auth_key_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Restart tailscaled so it reads the key
+      ansible.builtin.systemd_service:
+        name: tailscaled
+        state: restarted
+
+    # no_log: the status names the tailnet and its addresses.
+    - name: Wait for tailscaled to log in
+      ansible.builtin.command: tailscale status --json
+      register: base_tailscale_join
+      until: >-
+        base_tailscale_join.rc == 0 and
+        (base_tailscale_join.stdout | from_json)['BackendState'] == 'Running'
+      retries: 30
+      delay: 2
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Fail unless tailscaled joined the tailnet
+      ansible.builtin.assert:
+        that: base_tailscale_join_state == 'Running'
+        fail_msg: >-
+          tailscaled on {{ inventory_hostname }} is {{ base_tailscale_join_state }},
+          not Running: {{ base_tailscale_join_health | join('; ') }}
+        quiet: true
+      vars:
+        base_tailscale_join_json: "{{ base_tailscale_join.stdout | from_json if base_tailscale_join.rc == 0 else {} }}"
+        base_tailscale_join_state: "{{ base_tailscale_join_json['BackendState'] | default('not answering') }}"
+        base_tailscale_join_health: "{{ base_tailscale_join_json['Health'] | default([], true) }}"
+  always:
+    - name: Empty the auth key file
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ base_tailscale_auth_key_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true

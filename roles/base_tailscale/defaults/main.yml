@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# Bumped by Renovate from tailscale/tailscale's GitHub releases, after the
+# same 7-day cooldown as every other release. The package is held, so
+# neither unattended-upgrades nor Tailscale's own updater moves it.
+base_tailscale_version: "1.104.2"
+# Tailscale's signing key for trixie, fetched once and checked against this
+# digest. Its fingerprint is 2596A99EAAB33821893C0A79458CA832957F5868.
+base_tailscale_keyring_url: https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg
+base_tailscale_keyring_checksum: sha256:3e03dacf222698c60b8e2f990b809ca1b3e104de127767864284e6c228f1fb39
+# The machine's name on the tailnet. The OS hostnames (edge, services)
+# differ from the inventory names, and MagicDNS would otherwise use them.
+base_tailscale_hostname: "{{ inventory_hostname }}"
+base_tailscale_accept_dns: true
+base_tailscale_port: "{{ deerlab_tailscale_port }}"
+# The CI lab has no /dev/net/tun and must not report to Tailscale.
+base_tailscale_userspace: false
+base_tailscale_no_logs: false
+base_tailscale_config_path: /etc/tailscale/tailscaled.json
+base_tailscale_auth_key_path: /etc/tailscale/authkey
+# Set only by `just enrol` and `just bootstrap`, from a hidden prompt. A pull
+# never has it, so a pull never enrols.
+base_tailscale_auth_key: "{{ lookup('ansible.builtin.env', 'DEERLAB_TAILSCALE_AUTH_KEY') }}"
