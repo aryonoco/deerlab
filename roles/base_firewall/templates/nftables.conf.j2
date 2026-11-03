@@ -6,6 +6,10 @@
 flush ruleset
 
 table inet deerlab {
+{# Per-source SSH budgets: scanners cannot use up the operator's. #}
+  set ssh_rate4 { type ipv4_addr; flags dynamic, timeout; timeout 1m; }
+  set ssh_rate6 { type ipv6_addr; flags dynamic, timeout; timeout 1m; }
+
 {% for name, svc in base_firewall_services.items() %}
   chain svc_{{ name }} {
 {% if svc.egress == 'any' %}
@@ -57,12 +61,24 @@ table inet deerlab {
     ct state established,related accept
     ct state invalid drop
     iifname "lo" accept
+{# Tailscale's own anti-spoofing drop, mirrored for IPv6 too: it also covers #}
+{# the seconds between a reload of this ruleset and tailscaled's restart. #}
+    iifname != "{{ base_firewall_tailscale_interface }}" ip saddr {{ base_firewall_tailnet_v4 }} drop
+    iifname != "{{ base_firewall_tailscale_interface }}" ip6 saddr {{ base_firewall_tailnet_v6 }} drop
+{# Admits the tailnet: an accept in tailscaled's own table cannot override #}
+{# this chain's drop policy. What reaches each port is the tailnet policy's. #}
+    iifname "{{ base_firewall_tailscale_interface }}" accept
     meta l4proto icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept
     meta l4proto icmpv6 icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, nd-router-solicit, mld-listener-query } accept
-    tcp dport {{ base_firewall_ssh_port }} ct state new limit rate 10/minute burst 10 packets accept
+    tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate4 { ip saddr limit rate over 10/minute burst 10 packets } drop
+    tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate6 { ip6 saddr limit rate over 10/minute burst 10 packets } drop
+    tcp dport {{ base_firewall_ssh_port }} ct state new accept
 {% if base_firewall_role == 'edge' %}
-    tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } accept
-    udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } accept
+{# Caddy's own ports only as the redirect's target: the internet sees 80 and #}
+{# 443. Loopback and the tailnet reach them directly through the accepts above. #}
+    tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } ct status dnat accept
+    udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } ct status dnat accept
+    udp dport {{ base_firewall_tailscale_port }} accept
     udp dport {{ base_firewall_wg_port }} accept
 {% else %}
 {% if base_firewall_peer_public_v4 | length > 0 %}
