@@ -3,6 +3,10 @@
 
 base_firewall_role: edge
 
+# The jump host: every other machine is reached through it, by Ansible and
+# by `just ssh`, which needs sshd to allow TCP forwarding.
+base_ssh_allow_tcp_forwarding: true
+
 # QUIC wants larger UDP buffers than Debian's default; raising them here
 # means Caddy does not need CAP_NET_ADMIN to do it itself.
 base_os_sysctl_extra:
