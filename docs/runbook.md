@@ -14,7 +14,8 @@
 [Before you can do anything](#before-you-can-do-anything) ·
 [The shape of the estate](#the-shape-of-the-estate) ·
 [Where everything lives on a host](#where-everything-lives-on-a-host) ·
-[Delivery](#delivery) · [Reading state on a host](#reading-state-on-a-host) ·
+[Delivery](#delivery) · [Tailscale](#tailscale) ·
+[Reading state on a host](#reading-state-on-a-host) ·
 [Reboots and planned maintenance](#reboots-and-planned-maintenance) ·
 [Alerts, and what only looks like a fault](#alerts-and-what-only-looks-like-a-fault) ·
 [Verification after a deploy](#verification-after-a-deploy) ·
@@ -136,7 +137,8 @@ flowchart LR
 | `just ci` | the lint pipeline locally. CI runs it, and the [CI lab](#the-ci-lab) for each host, on every PR to `main` and every push to `main`, and Promote ships only a commit CI passed on a push to `main` |
 | `just plan HOST` | check-and-diff `site.yml` against a real host |
 | `just apply HOST` | push directly; bootstrap and break-glass only |
-| `just bootstrap HOST` | first run on a fresh image, as root, pull timer held off |
+| `just bootstrap HOST` | first run on a fresh image, as root, pull timer held off; asks for a one-off Tailscale auth key and joins the tailnet |
+| `just enrol HOST` | join a running host to the tailnet with a one-off auth key ([Tailscale](#enrolling-a-host)) |
 | `just idempotency HOST` | apply twice, fail if the second run changed anything |
 | `just verify HOST` | run every check of every service against the host now; pages nobody, records nothing ([Verification](#verification-after-a-deploy)) |
 | `just secrets-edit FILE`, `just secrets-rekey` | edit, or re-encrypt for the current recipients |
@@ -157,7 +159,7 @@ flowchart LR
 
 - **Renovate** runs in GitHub Actions (`.github/workflows/renovate.yml`) every 3 hours (at 17 past, Sydney time), after every push to `main`, and whenever CI finishes on one of its `renovate/**` branches, on a token minted per run from a GitHub App. GitHub starts scheduled runs hours late, so the schedule is a heartbeat; the other two triggers do the work. The App is installed on this repository only and holds these repository permissions: Contents, Pull requests, Issues, Commit statuses and Workflows, all read and write, plus Metadata read. The minted token is narrowed to the same five
 - **The App's private key is a repository secret** (`RENOVATE_APP_PRIVATE_KEY`, with `RENOVATE_APP_CLIENT_ID` beside it). Any workflow run in this repository can read it, including runs on branches and pull requests from this repository. Because the App holds `contents: write` and `workflows: write`, whoever holds the key can push to `main`, and so to `release`, and so run code as root on both hosts. There are no branch rules, by choice. A minted token holds `workflows: write`, so within its hour it can push a workflow that reads `RENOVATE_APP_PRIVATE_KEY`, which turns one hour of access into the long-lived key. The key is a repository secret by the operator's choice: an environment secret limited to `main` would keep it from branch and pull request runs, but not from a push straight to `main`
-- Renovate opens one PR per dependency, at any time and for every update type, majors included. `ansible` and `sops` each get a single PR covering both files that pin them. The cooldowns hold a release back after it is published: Docker Hub images 3 days; PyPI, Galaxy, the Actions and GitHub releases (the hosts' sops and the mise tools) 7 days; none where the registry gives no time (ghcr.io, Actual, RSSHub). The Dependency Dashboard issue is a record of what is pending; nothing waits there for a tick
+- Renovate opens one PR per dependency, at any time and for every update type, majors included. `ansible` and `sops` each get a single PR covering both files that pin them. The cooldowns hold a release back after it is published: Docker Hub images 3 days; PyPI, Galaxy, the Actions and GitHub releases (the hosts' sops and Tailscale, and the mise tools) 7 days; none where the registry gives no time (ghcr.io, Actual, RSSHub). The Dependency Dashboard issue is a record of what is pending; nothing waits there for a tick
 - **Renovate merges its own PR** once every check on it has finished green, `Lint and validate`, `Lab svc1` and `Lab edge1` among them, while the repository variable `DEERLAB_AUTOMERGE` is `enabled`. It merges through the API with "Rebase and merge", one PR per run; the run that CI finishing starts merges the next one, and the push rebases the rest. A cancelled, timed-out or never-finished check leaves the PR waiting, as a failure does. GitHub's own auto-merge stays off: without required checks it could merge before the tests ran, outside the switch
 - **Stopping it:** `gh variable set DEERLAB_AUTOMERGE --body disabled`, or `gh variable delete DEERLAB_AUTOMERGE`. The switch fails closed: unset, empty or any value but `enabled` stops merging (GitHub compares it without regard to case). It acts from the next Renovate run and cannot recall a merge already made. Resume with `gh variable set DEERLAB_AUTOMERGE --body enabled`. While it is off, Renovate still opens and rebases PRs, and their PR bodies say "Automerge: Disabled by config"
 - **An update you reverted waits for you.** Renovate proposes it again, but switches automerge off for an update whose earlier PR was merged. Close that PR to keep the version out, or merge it by hand once its cause is fixed
@@ -184,12 +186,44 @@ flowchart LR
   3. **The new stack**: the same pull again, on the venv and collections step 2 installed. It must change nothing
   4. **The dry run**: `--check --diff`, which must report exactly one change, the pip task, as `just plan` does
   5. Always: the lab's journal and every service user's units go to the job log
-- **What it is not.** `ci/deploy.yml` leaves out what a container cannot run: `base_os` beyond its kernel parameters, `base_ssh` and `base_wireguard`. The kernel parameters do apply, through `base_os`'s `sysctl` entry point, less three `net.core` keys a container's network namespace lacks, on the runner's kernel rather than Debian 13's. The lab's data is minutes old. See [What is not proven](#what-is-not-proven)
+- **What it is not.** `ci/deploy.yml` leaves out what a container cannot run: `base_os` beyond its kernel parameters, `base_ssh` and `base_wireguard`. `base_tailscale` runs from `ci/lab.yml` instead, because a base commit may predate it: it installs the pinned package and starts tailscaled in userspace networking, with its logs to Tailscale off, and never enrols, so the lab proves the package, the configuration and the firewall's restart of tailscaled, never tailnet traffic. The kernel parameters do apply, through `base_os`'s `sysctl` entry point, less three `net.core` keys a container's network namespace lacks, on the runner's kernel rather than Debian 13's. The lab's data is minutes old. See [What is not proven](#what-is-not-proven)
 - **Stand-ins.** `ci/inventory/` is the real group and host vars, symlinked, plus `overrides.yml` files and the plaintext stand-ins in `ci/stand-ins/`, in documentation ranges and `example.test`, never a real value. Each run encrypts them with sops to an age key generated inside the lab, so the sops vars plugin is exercised for real. **A new key in any `secrets.sops.yaml` needs a stand-in in `ci/stand-ins/` with the same name, or the lab goes red**
 - **Fixtures.** On a Docker network in 203.0.113.0/24, which no egress class treats as private, so the service users reach them through the real firewall: a throwaway rclone S3 server, which receives every backup the lab takes, and a Caddy front with its own internal CA, which the lab trusts and which also answers the dead-man stand-in. The lab replaces Docker's resolver with the runner's upstream, because `base_firewall`'s `flush ruleset` deletes the rules Docker's own depends on. The presence query is off in the lab only (`backup_presence_query_enabled`), and Caddy issues from its internal CA (`caddy_local_certs`)
 - **Running it locally.** Follow the steps of the `lab` job by hand on a Docker host, keeping every object named `deerlab-lab-*`, and pass `--skip-tags kernel` to `ansible-pull`, because the kernel play would set the Docker host's own kernel parameters. On arm64, RSSHub's image ships Playwright's Chromium for amd64 only, so its browser check needs `CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium` in the lab's copy of its record
 - **A flaked lab run is re-run by hand:** `gh run rerun <run id> --failed`. Nothing else re-runs it on a Renovate PR until `main` moves, and on `main` a re-run of the push's own run is what lets Promote ship it; a new `gh workflow run ci.yml` does not, because Promote follows pushes only
 - The lab's images are pinned in `LAB_*_IMAGE` in the job's `env:`, and Renovate bumps them like any other image. Debian's majors are disabled, because the hosts run Debian 13
+
+## Tailscale
+
+- **The tailnet is the operator's own**, created by hand in Tailscale's admin console, with MagicDNS on. Its DNS name (`tail<hex>.ts.net`), its 100.x addresses and the operator's login are identifiers: they never go in this repository
+- WireGuard still carries the edge's traffic to the services host. Nothing uses the tailnet yet
+- **On each host**, `base_tailscale` installs the `tailscale` package from Tailscale's stable trixie repository at the version in `roles/base_tailscale/defaults/main.yml`, and holds it there. Renovate bumps that version after its 7-day cooldown ([Bot pull requests](#bot-pull-requests)). Tailscale's own updater is off, and the hold keeps apt from moving it
+- **tailscaled reads its settings from `/etc/tailscale/tailscaled.json`, locked**: the inventory name as the machine name, MagicDNS accepted, other machines' routes refused, netfilter mode `on`, auto-update off. On the host, `tailscale set` and `tailscale up` are refused (`config file is locked`); change a setting in the role
+- **`/etc/tailscale/authkey` must exist, even empty.** The config file names it, and tailscaled refuses to start while it is missing (`error reading config file authKey`). It is empty except during an enrolment
+- **"Override DNS servers" must stay off** in the console's DNS settings. Off, MagicDNS adds the tailnet's names to systemd-resolved on `tailscale0` alone. On, every DNS query on both hosts, the service users' included, would go through tailscaled
+- **The firewall accepts everything that arrives on `tailscale0`**: the tailnet policy decides what reaches each port. Each reload of the ruleset is followed by a tailscaled restart ([Expected, not incidents](#expected-not-incidents))
+
+### Enrolling a host
+
+1. In the console, generate an auth key: one-off, pre-approved, **not ephemeral**, expiring in a day, and tagged `tag:edge` for `edge1` or `tag:svc` for `svc1`. A tag applied at the machine's first login turns its key expiry off; a tag added later leaves the 180-day expiry on
+2. `just enrol <host>`, and paste the key at the hidden prompt. It reaches the host only in the Ansible run's environment and the root-only `/etc/tailscale/authkey`, which the run empties again whether or not the login worked
+3. If the machine is not on the tailnet within a minute, the run fails with `tailscaled on <host> is <state>, not Running: <reason>`
+4. A host already on the tailnet is left alone, and the run says the key was not used
+
+`just bootstrap` asks for a key the same way.
+
+### The tailnet policy
+
+- `tailscale/policy.hujson` is the whole policy. `.github/workflows/tailscale-policy.yml` pushes it after a merge to `main` that changes it, or when run by hand: `gh workflow run tailscale-policy.yml --ref main`
+- **Every run waits for the operator's approval** in the `tailscale-policy` environment. The policy alone keeps the servers from opening connections to the operator's own devices, so anything that can push to `main`, which is already root on both hosts ([Delivery](#delivery)), can propose a policy but not push one
+- The environment requires the operator's approval, allows deployments from `main` only, and lets no admin bypass either. It holds three secrets: `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE`, the ID and audience of the federated identity in the console (Settings, Trust credentials), and `TS_ADMIN_LOGIN`, the operator's login
+- The federated identity trusts GitHub's OIDC tokens whose subject is `repo:aryonoco/deerlab:environment:tailscale-policy` and whose `repository_id` and `ref` claims are this repository's ID and `refs/heads/main`, so a run from any other branch is refused even once approved. Each run exchanges GitHub's token for a short-lived Tailscale one: no Tailscale secret is stored anywhere
+- Its scopes are Policy File and DNS, read and write. The workflow uses only the policy file; DNS was granted for managing the tailnet's DNS from this repository later, and until then an approved run could change it
+- The file holds `${TS_ADMIN_LOGIN}` where the login goes, and the run fills it in before pushing
+- **Grants:** `group:admins`, the operator's login alone, reaches every port on both hosts; `tag:edge` reaches `tag:svc` on 22 and 8080–8099. Nothing else is granted, so neither host can open a connection to the operator's devices
+- `cache-network-maps` lets a host restart from its cached map while Tailscale's control plane is down. It is a trial in 1.104; remove the `nodeAttrs` entry once caching is Tailscale's default
+- **A tailnet with no policy allows everything.** Push the policy before the first host joins
+- Tailscale runs the policy's `tests` on each push and refuses a policy that fails them. While no machine carries `tag:edge` or `tag:svc`, it may refuse tests that name them. Then paste the policy into the console without its `tests` block and with your login in place of the placeholder, enrol both hosts, and run the workflow by hand
 
 ## Reading state on a host
 
@@ -263,7 +297,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 
 | Channel | Reports | Wired by |
 | --- | --- | --- |
-| Pushover, direct from each host | a unit that **failed** | `OnFailure=` on every Quadlet, every backup unit, the pull unit, and `base_notify_onfailure_units` (`nftables.service`, `systemd-networkd.service`); the reboot-required timer posts the same way |
+| Pushover, direct from each host | a unit that **failed** | `OnFailure=` on every Quadlet, every backup unit, the pull unit, and `base_notify_onfailure_units` (`nftables.service`, `systemd-networkd.service`, `tailscaled.service`); the reboot-required timer posts the same way |
 | Dead-man push monitors, on an external uptime monitor | a host that **stopped running anything** | `ExecStartPost` curl on each successful pull and each successful backup, tried four times 30 s apart on any error; a ping still failing after that fails the unit and pages |
 
 - Notifications leave the host directly and depend on neither the edge nor the external monitor: an outage of the thing that watches must not silence the thing that reports
@@ -296,6 +330,7 @@ mise x -- ansible edge1 -b -m ansible.builtin.reboot
 | `just plan` lists services "awaiting verification" | Their units have started since their last verdict, and the next real pull will check them. Check mode runs no check and writes no marker |
 | A red `Lab svc1` or `Lab edge1` on a PR or on `main` | The change did not survive an upgrade in place, a re-run or a dry run in the CI lab, and nothing of it reached `release`. A Renovate PR stays unmerged. Read the failing step's log: the verify play names a failed check exactly as it would on a host. See [The CI lab](#the-ci-lab) |
 | A rebuilt host's first pull fails verification | Every marker is gone, so every service is checked, and a check that needs real data, such as Actual's `bootstrapped`, fails until the restore. Restore, then the next start of that service checks it again |
+| Tailnet connections drop for a few seconds after a firewall change, an SSH session over the tailnet included | Every reload of the ruleset is followed by a tailscaled restart: the reload's `flush ruleset` deletes the rules tailscaled installed, and only a restart puts them back ([tailscale/tailscale#11926](https://github.com/tailscale/tailscale/issues/11926)) |
 | A host briefly ahead of `release` after `just apply` | Reverted by the next pull, restarting the affected unit once. Resolves when the commit is promoted |
 
 - **linkding's web container logs `Error: Can't drop privilege as nonroot user` once per start.** Upstream's supervisord declares `[supervisord] user=root` and refuses to run in a non-root container. `bootstrap.sh` has no `set -e`, does not check it, and `exec`s uwsgi anyway — so the web app serves and, more importantly, keeps *enqueueing* work. `linkding-worker.service` is what drains the queue
@@ -632,7 +667,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
    - A replacement host must be given an endpoint one way or the other. Miss it and the *other* host has nothing to send to and no keepalive to hold the path open, so it cannot initiate
    - It does not fail outright, because the host that still has an endpoint keeps initiating. It stays hidden until *that* host is the one that reboots. **A rebuilt edge is the dangerous case**, its value being explicit rather than derived and so the one easy to leave empty
    - Confirm from the **peer** before calling the tunnel done: `mise x -- ansible <peer> -m ansible.builtin.shell -a 'wg show wg0 endpoints'`
-4. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`. That run connects as root with `base_pull_enabled=false`, because a host being bootstrapped is not yet a SOPS recipient and its first unattended pull could only fail to decrypt. Root login is closed by the end of the run
+4. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`. It first asks for a one-off auth key for the host, generated as in [Enrolling a host](#enrolling-a-host), step 1, and the run joins the host to the tailnet. That run connects as root with `base_pull_enabled=false`, because a host being bootstrapped is not yet a SOPS recipient and its first unattended pull could only fail to decrypt. Root login is closed by the end of the run
 5. The run prints `base_pull age public key for <host>: age1…`. Add it to the inventory rule in `.sops.yaml`, run `just secrets-rekey`, commit, merge it with "Rebase and merge", and wait for `Promote`
    - `just bootstrap` and `just apply` end with the verify play, like a pull, and it pages. On a rebuilt host a check that needs real data, such as Actual's `bootstrapped`, fails until the [restore](#restore); restore, and the service's next start checks it again
 6. Start the first pull by hand and confirm the dead-man goes green: `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
