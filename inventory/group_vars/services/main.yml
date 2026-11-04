@@ -3,6 +3,10 @@
 
 base_firewall_role: services
 
+# The tag the services host's one-off auth key carries; the tailnet policy
+# grants by it.
+base_tailscale_tag: tag:svc
+
 # A faithful copy of Docker/FreshRSS.Apache.conf at the pinned tag, with
 # Listen 80 changed to Listen 8080 and nothing else. Re-diff it against the
 # image on every Renovate bump; a drifted copy is a silent behaviour change.

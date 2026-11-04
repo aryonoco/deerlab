@@ -27,6 +27,13 @@ argument_specs:
         type: str
         required: true
         description: The machine's name on the tailnet; the inventory name by default.
+      base_tailscale_tag:
+        type: str
+        required: true
+        description: >
+          The tag this host's one-off auth key must carry (tag:edge or
+          tag:svc). Enrolment fails if the machine joins with any other tag,
+          none, or a key expiry.
       base_tailscale_accept_dns:
         type: bool
         default: true
