@@ -7,6 +7,9 @@ base_firewall_role: edge
 # by `just ssh`, which needs sshd to allow TCP forwarding.
 base_ssh_allow_tcp_forwarding: true
 
+# The tag the edge's one-off auth key carries; the tailnet policy grants by it.
+base_tailscale_tag: tag:edge
+
 # QUIC wants larger UDP buffers than Debian's default; raising them here
 # means Caddy does not need CAP_NET_ADMIN to do it itself.
 base_os_sysctl_extra:

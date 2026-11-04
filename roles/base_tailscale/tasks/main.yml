@@ -7,8 +7,9 @@
       - base_tailscale_version | length > 0
       - base_tailscale_keyring_checksum is match('sha256:[0-9a-f]{64}$')
       - base_tailscale_hostname | length > 0
+      - base_tailscale_tag is match('tag:[a-z0-9-]+$')
       - base_tailscale_port | int > 0
-    fail_msg: base_tailscale needs a version, the keyring's sha256, a hostname and a port
+    fail_msg: base_tailscale needs a version, the keyring's sha256, a hostname, a tag and a port
     quiet: true
 
 # Phase 1 — The pinned package from Tailscale's own repository

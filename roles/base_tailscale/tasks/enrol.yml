@@ -71,3 +71,33 @@
         group: root
         mode: "0600"
       no_log: true
+
+# A key with no tag leaves the machine owned by a user with a 180-day key
+# expiry, and one with the other host's tag gives it that host's grants.
+# Either passes the login, so the machine's own view of itself is checked,
+# for a host that was already on the tailnet as much as for a new one.
+- name: Read the machine's tags and key expiry
+  ansible.builtin.command: tailscale status --json
+  register: base_tailscale_self
+  changed_when: false
+  failed_when: base_tailscale_self.rc != 0
+  check_mode: false
+  no_log: true
+
+- name: Fail unless the machine carries its tag and no key expiry
+  ansible.builtin.assert:
+    that:
+      - base_tailscale_self_tags == [base_tailscale_tag]
+      - not base_tailscale_self_expiring
+    fail_msg: >-
+      {{ inventory_hostname }} joined as {{ base_tailscale_self_as }}, not as
+      {{ base_tailscale_tag }} with no expiry. Delete the machine in the console, then enrol
+      it again with a one-off key tagged {{ base_tailscale_tag }}.
+    quiet: true
+  vars:
+    base_tailscale_self_json: "{{ (base_tailscale_self.stdout | from_json)['Self'] | default({}) }}"
+    base_tailscale_self_tags: "{{ base_tailscale_self_json['Tags'] | default([], true) | list }}"
+    base_tailscale_self_expiring: "{{ base_tailscale_self_json['KeyExpiry'] is defined }}"
+    base_tailscale_self_as: >-
+      {{ (base_tailscale_self_tags | join(', ') or 'untagged')
+         ~ (', with key expiry on' if base_tailscale_self_expiring else '') }}
