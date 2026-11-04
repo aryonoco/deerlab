@@ -5,10 +5,22 @@
 # cannot run (base_os beyond its kernel parameters, base_ssh and
 # base_wireguard). The lab's first step runs this file from the base commit
 # with this commit's ci/ laid over it, so it imports nothing a base commit
-# may lack: no verify play, no kernel play, no base_tailscale (ci/lab.yml
-# installs it). See docs/runbook.md, The CI lab.
+# may lack: no verify play, no kernel play. See docs/runbook.md, The CI lab.
 - name: Install collections into the checkout
   ansible.builtin.import_playbook: ../playbooks/deps.yml
+
+# Before the firewall, whose reload restarts tailscaled, as base.yml orders
+# it on a host. Included only when the commit being deployed has the role:
+# a base older than it deploys without Tailscale, and a newer one installs
+# it, so the head side upgrades Tailscale in place as a host's pull does.
+# The overrides run it in userspace, sending no logs, never enrolled.
+- name: Install Tailscale as the hosts do, never enrolled
+  hosts: podman_hosts
+  tasks:
+    - name: Apply base_tailscale where this commit has it
+      ansible.builtin.include_role:
+        name: base_tailscale
+      when: (playbook_dir ~ '/../roles/base_tailscale') is directory
 
 - name: Configure the lab's base
   hosts: podman_hosts

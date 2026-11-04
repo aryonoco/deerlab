@@ -12,15 +12,6 @@
         name: base_os
         tasks_from: sysctl
 
-# Here and not in deploy.yml: the lab's base side runs deploy.yml from the
-# base commit, which may have no base_tailscale. Before deploy.yml, so the
-# firewall's restart of tailscaled finds the unit, as base.yml orders it on a
-# host. The overrides run it in userspace, sending no logs, never enrolled.
-- name: Install Tailscale as the hosts do, never enrolled
-  hosts: podman_hosts
-  roles:
-    - role: base_tailscale
-
 - name: Deploy as a host's pull does
   ansible.builtin.import_playbook: deploy.yml
 
