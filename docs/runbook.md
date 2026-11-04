@@ -56,14 +56,14 @@
 flowchart LR
   net["Internet"]
   subgraph edge1
-    nft1["nftables: accept 22, 8080, 8443, udp 8443, udp wg<br/>nat: 80 to 8080, 443 to 8443, udp 443 to 8443"]
+    nft1["nftables: accept 22 per-source limited, udp tailscale, udp wg,<br/>8080, 8443, udp 8443 as the redirect's target only, all of tailscale0<br/>nat: 80 to 8080, 443 to 8443, udp 443 to 8443"]
     caddy["Caddy, rootless Quadlet, uid 2000"]
   end
   subgraph svc1
-    nft2["nftables: accept 22, udp wg from edge public v4 only<br/>published ports on wg0 from edge tunnel addr only"]
+    nft2["nftables: accept 22 per-source limited, udp wg from edge public v4 only,<br/>all of tailscale0; published ports on wg0 from edge tunnel addr only"]
     app["app container, wildcard bind"]
   end
-  net -->|"tcp 80, 443, 22; udp 443"| nft1
+  net -->|"tcp 80, 443, 22; udp 443, tailscale"| nft1
   nft1 --> caddy
   caddy -->|"plain HTTP to peer tunnel addr and port"| wg(["wg0: both peers hold Endpoint and keepalive 25"])
   wg --> nft2
@@ -73,7 +73,8 @@ flowchart LR
 | | edge host `edge1` | services host `svc1` |
 | --- | --- | --- |
 | Groups | `edge`, `podman_hosts` | `services`, `podman_hosts` |
-| Public inbound | tcp 22, 80, 443, **8080, 8443**; udp 443, **8443**; udp WireGuard port | tcp 22; udp WireGuard port, **from the edge's public v4 only** |
+| Public inbound | tcp 22, limited per source, 80, 443; udp 443, 41641 (Tailscale), WireGuard port. 8080, 8443 and udp 8443 only as the target of the 80/443 redirect | tcp 22, limited per source; udp WireGuard port, **from the edge's public v4 only** |
+| Tailnet inbound | everything on `tailscale0`; the [tailnet policy](#the-tailnet-policy) decides what reaches it | everything on `tailscale0`; the [tailnet policy](#the-tailnet-policy) decides what reaches it |
 | Tunnel inbound | — | each published backend port on `wg0`, from the edge's tunnel v4/v6 only |
 | Runs | sshd, Caddy | sshd, application services |
 | Service users | one, uid 2000 | one per application, uid from 2001 |
@@ -197,7 +198,7 @@ flowchart LR
 
 - **The tailnet is the operator's own**, created by hand in Tailscale's admin console, with MagicDNS on. Its DNS name (`tail<hex>.ts.net`), its 100.x addresses and the operator's login are identifiers: they never go in this repository
 - WireGuard still carries the edge's traffic to the services host. Nothing uses the tailnet yet
-- **On each host**, `base_tailscale` installs the `tailscale` package from Tailscale's stable trixie repository at the version in `roles/base_tailscale/defaults/main.yml`, and holds it there. Renovate bumps that version after its 7-day cooldown ([Bot pull requests](#bot-pull-requests)). Tailscale's own updater is off, and the hold keeps apt from moving it
+- **On each host**, `base_tailscale` installs the `tailscale` package from Tailscale's stable trixie repository at the version in `roles/base_tailscale/defaults/main.yml`, and holds it there. Renovate bumps that version after its 7-day cooldown ([Bot pull requests](#bot-pull-requests)), and reverting a bump installs the older version again. Tailscale's own updater is off, and the hold keeps apt from moving it
 - **tailscaled reads its settings from `/etc/tailscale/tailscaled.json`, locked**: the inventory name as the machine name, MagicDNS accepted, other machines' routes refused, netfilter mode `on`, auto-update off. On the host, `tailscale set` and `tailscale up` are refused (`config file is locked`); change a setting in the role
 - **`/etc/tailscale/authkey` must exist, even empty.** The config file names it, and tailscaled refuses to start while it is missing (`error reading config file authKey`). It is empty except during an enrolment
 - **Every lookup on both hosts outside the tailnet's own names goes through tailscaled to the operator's DNS resolver.** The console's DNS settings name that resolver as the global nameserver with "Override DNS servers" on, and the hosts accept the tailnet's DNS, so tailscaled takes all of systemd-resolved's queries (`~.` on `tailscale0`), the service users' included, and sends them to the resolver over DNS-over-HTTPS. It answers the tailnet's names and its 100.x reverse lookups itself. The resolver sees every other lookup the servers make, with each one's machine name and tailnet address
@@ -208,9 +209,10 @@ flowchart LR
 ### Enrolling a host
 
 1. In the console, generate an auth key: one-off, pre-approved, **not ephemeral**, expiring in a day, and tagged `tag:edge` for `edge1` or `tag:svc` for `svc1`. A tag applied at the machine's first login turns its key expiry off; a tag added later leaves the 180-day expiry on
-2. `just enrol <host>`, and paste the key at the hidden prompt. It reaches the host only in the Ansible run's environment and the root-only `/etc/tailscale/authkey`, which the run empties again whether or not the login worked
+2. `just enrol <host>`, and paste the key at the hidden prompt. It never goes on a command line: it travels in the Ansible run's environment on your machine, then as the content of a file copy, staged in the connecting user's temporary directory while that task runs, into the root-only `/etc/tailscale/authkey`. The run empties that file again whether or not the login worked; if the run is interrupted first, the host's next pull empties it
 3. If the machine is not on the tailnet within a minute, the run fails with `tailscaled on <host> is <state>, not Running: <reason>`
-4. A host already on the tailnet is left alone, and the run says the key was not used
+4. The run then checks the machine's own view of itself: it must carry exactly its host's tag (`base_tailscale_tag`) and no key expiry. Otherwise it fails with `<host> joined as …`: delete the machine in the console and enrol it again with a correctly tagged key
+5. A host already on the tailnet is left alone, its tag and expiry checked the same way, and the run says the key was not used
 
 `just bootstrap` asks for a key the same way.
 
