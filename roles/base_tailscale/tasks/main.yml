@@ -56,6 +56,8 @@
     # above, and iproute2, which the base image already has.
     install_recommends: false
     allow_change_held_packages: true
+    # Reverting a bump pins an older version, which apt refuses without this.
+    allow_downgrade: true
   environment:
     DEBIAN_FRONTEND: noninteractive
 
