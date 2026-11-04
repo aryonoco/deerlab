@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: 0BSD
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+# Pushes tailscale/policy.hujson to the tailnet after a merge to main that
+# changes it, and on a manual run. Tailscale runs the policy's tests on the
+# push and refuses a policy that fails them.
+#
+# Every run waits for the operator's approval in the tailscale-policy
+# environment. The policy alone keeps the servers from opening connections to
+# the operator's own devices, so anything that can move main or run a
+# workflow here, which is root on both hosts (AGENTS.md, Delivery), may
+# propose a policy but not push one. The environment, not the repository,
+# holds the federated identity's ID and audience and the operator's login;
+# no Tailscale secret exists, because GitHub's OIDC token is exchanged for a
+# short-lived Tailscale one. See docs/runbook.md, Tailscale.
+
+name: Tailscale policy
+
+on:
+  push:
+    branches: [main]
+    paths: [tailscale/policy.hujson]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: tailscale-policy
+  cancel-in-progress: false
+
+jobs:
+  push:
+    name: Push the tailnet policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment: tailscale-policy
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The repository holds a placeholder where the login goes, and only
+      # that one variable is substituted.
+      - name: Fill in the operator's login
+        env:
+          TS_ADMIN_LOGIN: ${{ secrets.TS_ADMIN_LOGIN }}
+        run: envsubst "\$TS_ADMIN_LOGIN" < tailscale/policy.hujson > "$RUNNER_TEMP/policy.hujson"
+
+      - name: Push the policy
+        uses: tailscale/gitops-acl-action@5a4a17f5708e9bf96f4ee915a95e9f83c2eebe1a # v1.5.2
+        with:
+          tailnet: "-"
+          action: apply
+          policy-file: ${{ runner.temp }}/policy.hujson
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}

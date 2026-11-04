@@ -78,7 +78,8 @@ for Claude 5 Fable.
 - `just setup` — install the toolchain from `mise.toml`
 - `just plan HOST` — check and diff against a real host. Reports exactly **one** change on a converged host (a pip task that cannot resolve requirements under check mode); anything more is drift. Requires an already-bootstrapped host
 - `just apply HOST` — push directly; bootstrap and break-glass only. The next pull reverts anything not promoted
-- `just bootstrap HOST` — first run against a fresh image, as root, with the pull timer held off
+- `just bootstrap HOST` — first run against a fresh image, as root, with the pull timer held off; asks for a one-off Tailscale auth key
+- `just enrol HOST` — join a running host to the tailnet with a one-off, pre-approved, tagged auth key; see `docs/runbook.md`, Tailscale
 - `just idempotency HOST` — apply twice, fail if the second run changed anything
 - `just verify HOST` — run every service's working-use checks against a host now; pages nobody, records nothing
 - `just secrets-edit FILE`, `just secrets-rekey`

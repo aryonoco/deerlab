@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: 0BSD
+// SPDX-FileCopyrightText: 2026 Aryan Ameri <info@ameri.me>
+
+// The tailnet's policy. Pushed by .github/workflows/tailscale-policy.yml
+// after a merge to main, once the operator approves the run. The login is
+// filled in from the tailscale-policy environment; it is not in this file.
+{
+  "groups": { "group:admins": ["${TS_ADMIN_LOGIN}"] },
+  "tagOwners": {
+    "tag:edge": ["autogroup:admin"],
+    "tag:svc":  ["autogroup:admin"],
+  },
+  "grants": [
+    // The operator's own devices: every port on both servers.
+    { "src": ["group:admins"], "dst": ["tag:edge", "tag:svc"], "ip": ["*"] },
+    // The edge: SSH for the jump, and the backend range. Backends publish
+    // inside 8080-8099 (docs/runbook.md, Adding a service).
+    { "src": ["tag:edge"], "dst": ["tag:svc"], "ip": ["tcp:22", "tcp:8080-8099"] },
+  ],
+  // Lets a server restart from its cached map while Tailscale's control
+  // plane is down. A trial in 1.104; remove once it is the default.
+  "nodeAttrs": [
+    { "target": ["tag:edge", "tag:svc"], "attr": ["cache-network-maps"] },
+  ],
+  "tests": [
+    { "src": "group:admins", "proto": "tcp", "accept": ["tag:edge:22", "tag:edge:443", "tag:svc:22", "tag:svc:9090"] },
+    { "src": "tag:edge", "proto": "tcp", "accept": ["tag:svc:22", "tag:svc:8080", "tag:svc:8099"], "deny": ["tag:svc:8100", "tag:svc:5432"] },
+    { "src": "tag:svc", "deny": ["tag:edge:22", "tag:edge:443"] },
+  ],
+}
