@@ -150,7 +150,21 @@ enrol host:
     read -rsp "One-off auth key for {{ host }} (tag:edge or tag:svc): " DEERLAB_TAILSCALE_AUTH_KEY; echo
     [[ -n $DEERLAB_TAILSCALE_AUTH_KEY ]] || { echo "an auth key is required" >&2; exit 1; }
     export DEERLAB_TAILSCALE_AUTH_KEY
-    ansible-playbook playbooks/enrol.yml --limit {{ host }}
+    ansible-playbook playbooks/enrol.yml --limit {{ host }} --extra-vars ansible_ssh_common_args=
+
+# Open a shell on a host, or run ARGS there: the edge directly, every other host through it
+[positional-arguments]
+ssh host *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    host=$1; shift
+    # ansible.cfg's timer callback prints after the JSON, so jq reads only up to
+    # the object's closing brace.
+    cmd=$(ANSIBLE_LOAD_CALLBACK_PLUGINS=1 ANSIBLE_STDOUT_CALLBACK=ansible.posix.json \
+      ansible "$host" -m ansible.builtin.debug -a var=deerlab_ssh_command \
+      | sed '/^}$/q' | jq -r --arg h "$host" '.plays[0].tasks[0].hosts[$h].deerlab_ssh_command')
+    # eval splits the command's own quoting; ARGS reach ssh as given, unexpanded.
+    eval "exec $cmd \"\$@\""
 
 # Run the playbook twice and fail if the second run changed anything
 idempotency host:
