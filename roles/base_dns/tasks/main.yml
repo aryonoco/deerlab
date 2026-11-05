@@ -112,6 +112,118 @@
 - name: Apply it before anything else in the run looks a name up
   ansible.builtin.meta: flush_handlers
 
+# The provider's DHCP resolvers complete DNS-over-TLS as well, so while
+# tailscaled is not routing they would answer lookups beside the operator's
+# resolver. A drop-in beside the provider's generated network file stops
+# networkd handing them to resolved. It comes after the resolver's own
+# servers are in place, so the host is never without one.
+- name: Ask networkd which network file the uplink uses
+  ansible.builtin.command:
+    argv:
+      - networkctl
+      - status
+      - "{{ base_dns_uplink_interface }}"
+      - --json=short
+  register: base_dns_uplink_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  # Its JSON holds the host's addresses and the provider's resolvers.
+  no_log: true
+
+- name: Note the uplink's network file
+  ansible.builtin.set_fact:
+    base_dns_uplink_network: "{{ ((base_dns_uplink_status.stdout or '{}') | from_json).NetworkFile | default('') }}"
+
+- name: Refuse an uplink networkd does not manage
+  ansible.builtin.assert:
+    that: base_dns_uplink_network | length > 0
+    fail_msg: >-
+      networkd manages no network file for {{ base_dns_uplink_interface }},
+      so the provider's DHCP resolvers cannot be kept from resolved
+    quiet: true
+
+- name: Create the drop-in directory of the uplink's network file
+  ansible.builtin.file:
+    path: "/etc/systemd/network/{{ base_dns_uplink_network | basename }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Keep the uplink's resolvers from resolved
+  ansible.builtin.template:
+    src: network-nodns.conf.j2
+    dest: "/etc/systemd/network/{{ base_dns_uplink_network | basename }}.d/50-deerlab-dns.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd-networkd
+
+- name: Apply it before the checks below
+  ansible.builtin.meta: flush_handlers
+
+# A run that died after the write, or a reload that failed, leaves the
+# drop-in on disk but unapplied, and unchanged for the next run. So the
+# uplink's servers are read whatever happened above, and networkd is
+# reloaded while it still hands resolved any. no_log: the list would name
+# the provider's resolvers.
+- name: Read the uplink's DNS servers as resolved has them
+  ansible.builtin.command:
+    argv:
+      - resolvectl
+      - dns
+      - "{{ base_dns_uplink_interface }}"
+  register: base_dns_uplink_dns
+  retries: 5
+  delay: 1
+  until: base_dns_uplink_dns.rc == 0 and (base_dns_uplink_dns.stdout | regex_replace('^[^:]*:', '') | trim | length == 0)
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Reload networkd while the uplink still hands resolved servers
+  ansible.builtin.systemd_service:
+    name: systemd-networkd
+    state: reloaded
+  when:
+    - not ansible_check_mode
+    - base_dns_uplink_dns.stdout | default('') | regex_replace('^[^:]*:', '') | trim | length > 0
+
+- name: Read them again after that reload
+  ansible.builtin.command:
+    argv:
+      - resolvectl
+      - dns
+      - "{{ base_dns_uplink_interface }}"
+  register: base_dns_uplink_dns_again
+  retries: 10
+  delay: 1
+  until: base_dns_uplink_dns_again.rc == 0 and (base_dns_uplink_dns_again.stdout | regex_replace('^[^:]*:', '') | trim | length == 0)
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - base_dns_uplink_dns.stdout | default('') | regex_replace('^[^:]*:', '') | trim | length > 0
+
+- name: Fail when the uplink still hands resolved DNS servers
+  ansible.builtin.assert:
+    that:
+      - base_dns_uplink_final.rc == 0
+      - base_dns_uplink_final.stdout | regex_replace('^[^:]*:', '') | trim | length == 0
+    fail_msg: >-
+      {{ base_dns_uplink_interface }} still gives resolved DNS servers after
+      networkd reloaded; see `networkctl status {{ base_dns_uplink_interface }}`
+      and its network file
+    quiet: true
+  vars:
+    base_dns_uplink_final: "{{ base_dns_uplink_dns if base_dns_uplink_dns_again is skipped else base_dns_uplink_dns_again }}"
+  when: not ansible_check_mode
+
 - name: Look up a name the host needs
   ansible.builtin.command:
     argv:

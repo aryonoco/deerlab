@@ -9,9 +9,11 @@ argument_specs:
       over strict DNS-over-TLS, empties the fallback servers and turns LLMNR
       off, in a drop-in that leaves the provider's network file alone. A
       changed drop-in is written only after each address has passed a TLS
-      handshake for the name, and every run then checks a lookup. Once a host
-      is on the tailnet, tailscaled routes every name through its own link,
-      and these servers answer only while it is not routing.
+      handshake for the name, and every run then checks a lookup. A drop-in
+      beside the uplink's network file stops the provider's DHCP resolvers
+      reaching resolved. Once a host is on the tailnet, tailscaled routes
+      every name through its own link, and these servers answer only while
+      it is not routing.
     options:
       base_dns_tls_addresses:
         type: list
@@ -26,6 +28,13 @@ argument_specs:
         description: >
           The name the resolver's certificate must carry, also sent as SNI.
           By default the inventory name, a dash, then deerlab_dns_tls_name.
+      base_dns_uplink_interface:
+        type: str
+        required: true
+        description: >
+          The provider's DHCP interface, whose DNS servers stop reaching
+          resolved; the default route's interface by default. networkd must
+          manage it.
       base_dns_check_name:
         type: str
         required: true

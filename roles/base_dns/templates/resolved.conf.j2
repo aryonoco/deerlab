@@ -4,8 +4,8 @@
 {# Global settings, which every link that sets none of its own inherits. #}
 {# Strict: a server that cannot complete DNS-over-TLS with a certificate for #}
 {# the name gets no query at all, in plain text or otherwise. eth0's DHCP #}
-{# servers inherit this too, so the provider's network file stays as the #}
-{# image wrote it: they are offered TLS only, never plain text. #}
+{# servers would inherit it too, but they complete TLS as well, so the #}
+{# role keeps them from resolved with a networkd drop-in of their own. #}
 {# No Domains=~. on purpose. Once a host is on the tailnet, tailscaled puts #}
 {# ~. on tailscale0 and is the only path, over DoH; these servers answer only #}
 {# while it is not routing - before enrolment, and across its restarts. #}
