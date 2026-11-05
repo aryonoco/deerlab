@@ -8,3 +8,12 @@
   ansible.builtin.systemd_service:
     name: systemd-resolved
     state: reloaded
+
+# A reload re-reads the network files and their drop-ins and applies a
+# changed one with the DHCP lease and the address kept. `networkctl
+# reconfigure` re-reads nothing and drops the address first (both measured
+# on systemd 257).
+- name: Reload systemd-networkd
+  ansible.builtin.systemd_service:
+    name: systemd-networkd
+    state: reloaded

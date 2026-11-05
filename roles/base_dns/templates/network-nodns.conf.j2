@@ -1,0 +1,19 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+{# A drop-in beside the provider's generated network file, which stays as #}
+{# the image wrote it. The DNS servers its DHCP and router advertisements #}
+{# offer stop reaching resolved; the address, routes and lease stay. An #}
+{# empty DNS= clears any static servers the file lists, which UseDNS= #}
+{# does not cover. #}
+[Network]
+DNS=
+
+[DHCPv4]
+UseDNS=no
+
+[DHCPv6]
+UseDNS=no
+
+[IPv6AcceptRA]
+UseDNS=no

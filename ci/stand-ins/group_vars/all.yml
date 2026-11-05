@@ -33,4 +33,5 @@ vikunja_hostname: tasks.example.test
 actual_hostname: budget.example.test
 deerlab_dns_tls_addresses:
   - 192.0.2.53
+  - 2001:db8::53
 deerlab_dns_tls_name: dns.example.test
