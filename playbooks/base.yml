@@ -4,6 +4,9 @@
 - name: Configure every host
   hosts: podman_hosts
   roles:
+    # First, so every later lookup in the run, a bootstrap's apt included,
+    # goes to the operator's DNS resolver over TLS.
+    - role: base_dns
     - role: base_os
     - role: base_ssh
     - role: base_wireguard

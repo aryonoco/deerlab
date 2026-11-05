@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: The host's resolver over DNS-over-TLS only, without LLMNR
+    description: >
+      Points systemd-resolved's global servers at the operator's DNS resolver
+      over strict DNS-over-TLS, empties the fallback servers and turns LLMNR
+      off, in a drop-in that leaves the provider's network file alone. A
+      changed drop-in is written only after each address has passed a TLS
+      handshake for the name, and every run then checks a lookup. Once a host
+      is on the tailnet, tailscaled routes every name through its own link,
+      and these servers answer only while it is not routing.
+    options:
+      base_dns_tls_addresses:
+        type: list
+        elements: str
+        required: true
+        description: >
+          The resolver's DNS-over-TLS addresses, IPv4 or IPv6 literals. From
+          deerlab_dns_tls_addresses, which is encrypted.
+      base_dns_tls_name:
+        type: str
+        required: true
+        description: >
+          The name the resolver's certificate must carry, also sent as SNI.
+          By default the inventory name, a dash, then deerlab_dns_tls_name.
+      base_dns_check_name:
+        type: str
+        required: true
+        description: A name the host must resolve on every run; the repository's host by default.

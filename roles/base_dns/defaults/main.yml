@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The operator's DNS resolver over DNS-over-TLS: its addresses, and the name
+# its certificate carries. Both identify the resolver, so both live in the
+# inventory's secrets.sops.yaml.
+base_dns_tls_addresses: "{{ deerlab_dns_tls_addresses }}"
+# The resolver reads a leading label as the device's name, so its logs name
+# the host on this path as they do for lookups that come through tailscaled.
+base_dns_tls_name: "{{ inventory_hostname }}-{{ deerlab_dns_tls_name }}"
+# A name every pull needs: the repository's host.
+base_dns_check_name: "{{ deerlab_repo_url | urlsplit('hostname') }}"

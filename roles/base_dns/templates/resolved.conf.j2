@@ -1,0 +1,19 @@
+{# SPDX-License-Identifier: CPAL-1.0 #}
+{# Copyright (c) 2026 Aryan Ameri #}
+# {{ deerlab_managed }}
+{# Global settings, which every link that sets none of its own inherits. #}
+{# Strict: a server that cannot complete DNS-over-TLS with a certificate for #}
+{# the name gets no query at all, in plain text or otherwise. eth0's DHCP #}
+{# servers inherit this too, so the provider's network file stays as the #}
+{# image wrote it: they are offered TLS only, never plain text. #}
+{# No Domains=~. on purpose. Once a host is on the tailnet, tailscaled puts #}
+{# ~. on tailscale0 and is the only path, over DoH; these servers answer only #}
+{# while it is not routing - before enrolment, and across its restarts. #}
+{# Debian already builds FallbackDNS empty; the empty line keeps it so. #}
+{# LLMNR sends single-label names in plain text by multicast on eth0, and #}
+{# answers for the host's own name. Nothing here uses it. #}
+[Resolve]
+DNS={{ base_dns_tls_addresses | product([base_dns_tls_name]) | map('join', '#') | join(' ') }}
+DNSOverTLS=yes
+FallbackDNS=
+LLMNR=no
