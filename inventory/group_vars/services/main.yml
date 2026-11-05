@@ -8,7 +8,8 @@ base_firewall_role: services
 base_tailscale_tag: tag:svc
 
 # A faithful copy of Docker/FreshRSS.Apache.conf at the pinned tag, with
-# Listen 80 changed to Listen 8080 and nothing else. Re-diff it against the
+# Listen 80 changed to Listen 8080 and the tailnet's ranges added to
+# RemoteIPInternalProxy, as below. Re-diff it against the
 # image on every Renovate bump; a drifted copy is a silent behaviour change.
 #
 # The file is vendored because a non-root container uid cannot bind port 80 -
@@ -21,7 +22,9 @@ base_tailscale_tag: tag:svc
 # OIDC_ENABLED is never defined, the piped CustomLog duplicates what the edge
 # already records, and RemoteIPInternalProxy trusts three whole private ranges
 # where one host would do. All three are accepted so that diffing this against
-# a new release stays trivial.
+# a new release stays trivial. The one addition is the tailnet's two ranges on
+# RemoteIPInternalProxy, because the edge now arrives over the tailnet; the
+# record's upstream edits carry the same line.
 freshrss_apache_conf: |
   ServerName freshrss.localhost
   Listen 8080
@@ -36,7 +39,7 @@ freshrss_apache_conf: |
   	# Can be disabled by setting the TRUSTED_PROXY environment variable to 0:
   	RemoteIPHeader X-Forwarded-For
   	# Can be overridden by the TRUSTED_PROXY environment variable:
-  	RemoteIPInternalProxy 10.0.0.1/8 172.16.0.1/12 192.168.0.1/16
+  	RemoteIPInternalProxy 10.0.0.1/8 172.16.0.1/12 192.168.0.1/16 100.64.0.0/10 fd7a:115c:a1e0::/48
   </IfModule>
 
   # Default, will be overridden by p/.htaccess and p/api/.htaccess
@@ -450,7 +453,7 @@ podman_services:
       - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
     config_files:
       # A faithful copy of Docker/FreshRSS.Apache.conf at the pinned tag with
-      # Listen 80 changed to 8080, and nothing else. Re-diff it on every image
+      # the two edits listed under upstream:. Re-diff it on every image
       # bump. 0644, not Caddy's 0640: Caddy declares no user: and so runs as
       # namespace uid 0, which can read a root-owned group-restricted file.
       # This container runs as uid 100 and cannot - at 0640 Apache fails to
@@ -461,7 +464,10 @@ podman_services:
         banner: "#"
         upstream:
           path: /var/www/FreshRSS/Docker/FreshRSS.Apache.conf
-          edits: [{ from: Listen 80, to: "Listen 8080" }]
+          edits:
+            - { from: Listen 80, to: "Listen 8080" }
+            - from: "\tRemoteIPInternalProxy 10.0.0.1/8 172.16.0.1/12 192.168.0.1/16"
+              to: "\tRemoteIPInternalProxy 10.0.0.1/8 172.16.0.1/12 192.168.0.1/16 100.64.0.0/10 fd7a:115c:a1e0::/48"
     mounts:
       # The Alpine path. The entrypoint auto-detects it from a list that also
       # covers Debian's sites-available and Arch's conf/conf.d - do not copy a
@@ -655,9 +661,10 @@ podman_services:
       # Trust the edge's X-Forwarded-For, so logs, session lists and the
       # unauthenticated rate limit of 10 a minute per IP see real clients, not
       # the edge. CIDR only: a bare address is dropped with a warning
-      # (parseTrustedProxies in pkg/routes/ip.go).
+      # (parseTrustedProxies in pkg/routes/ip.go). The edge's tunnel address
+      # and both tailnet ranges, comma-separated.
       VIKUNJA_SERVICE_IPEXTRACTIONMETHOD: xff
-      VIKUNJA_SERVICE_TRUSTEDPROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32"
+      VIKUNJA_SERVICE_TRUSTEDPROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32,100.64.0.0/10,fd7a:115c:a1e0::/48"
       # SQLite with no DSN tricks: on 2.6.0 overlapping writes can fail at once
       # with HTTP 500 "database is locked", which is accepted and in the
       # runbook. Both paths are explicit so a future image cannot move the data
@@ -762,12 +769,13 @@ podman_services:
       # change the login method or the trusted proxies at the next start.
       ACTUAL_CONFIG_PATH: /app/config.json
       # IPv4 explicitly. The default :: logs "Listening" and exits 0 on a
-      # kernel without IPv6; the edge arrives over the IPv4 tunnel.
+      # kernel without IPv6; the edge dials it over IPv4.
       ACTUAL_HOSTNAME: 0.0.0.0
-      # The edge only, so the login limiter (5 failures per 15 minutes)
-      # keys on each real client. No spaces: a space after a comma makes the
-      # server exit 0 with nothing listening.
-      ACTUAL_TRUSTED_PROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32"
+      # Whose X-Forwarded-For to believe, so the login limiter (5 failures
+      # per 15 minutes) keys on each real client: the edge's tunnel address
+      # and both tailnet ranges. No spaces: a space after a comma
+      # makes the server exit 0 with nothing listening.
+      ACTUAL_TRUSTED_PROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32,100.64.0.0/10,fd7a:115c:a1e0::/48"
       # Keeps ANSI colour codes out of the request log in journald.
       NO_COLOR: "1"
       # Deliberately ABSENT, and must stay absent:
@@ -951,7 +959,7 @@ podman_services:
             const c=await p.content();await b.close();const ok=c.includes('Title1');
             process.stdout.write(ok?'Title1':'missing');process.exit(ok?0:1)})
         stdout_regex: Title1
-      # Through Caddy and the tunnel, as a reader arrives.
+      # Through Caddy and the tailnet, as a reader arrives.
       - name: edge
         where: host
         via: edge
