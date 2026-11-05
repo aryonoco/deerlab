@@ -6,7 +6,8 @@
 My personal homelab. Debian 13 VPSs configured
 entirely by Ansible: an edge host (`edge1`) that runs only Caddy, and a services
 host (`svc1`) that runs every application as a rootless Podman Quadlet under its
-own system user. They are linked by WireGuard.
+own system user. The edge reaches the services host over a Tailscale tailnet; the
+WireGuard link it used before stays up until it is retired.
 
 **`docs/runbook.md` is the tracked operational authority.** Read it before
 changing anything that touches delivery, backups, restore or the tunnel; it
@@ -80,6 +81,7 @@ for Claude 5 Fable.
 - `just apply HOST` — push directly; bootstrap and break-glass only. The next pull reverts anything not promoted
 - `just bootstrap HOST` — first run against a fresh image, as root, with the pull timer held off; asks for a one-off Tailscale auth key
 - `just enrol HOST` — join a running host to the tailnet with a one-off, pre-approved, tagged auth key; see `docs/runbook.md`, Tailscale
+- `just ssh HOST [ARGS]` — a shell on a host, or ARGS run there, the way Ansible reaches it: the edge directly, every other host through the edge over the tailnet
 - `just idempotency HOST` — apply twice, fail if the second run changed anything
 - `just verify HOST` — run every service's working-use checks against a host now; pages nobody, records nothing
 - `just secrets-edit FILE`, `just secrets-rekey`
@@ -91,7 +93,7 @@ for Claude 5 Fable.
 - **Accepted risk: write access to the repository is root on both hosts.** Whatever `release` points at is applied as root within about 35 minutes, and nothing pages when it changes. Anyone who can move it can do this: the operator's account, the Renovate App's private key (a repository secret that any workflow run from this repository can read, and the App holds `contents: write` and `workflows: write`), any workflow token with `contents: write` (Promote's `GITHUB_TOKEN` and Renovate's App token included), and any action running inside such a workflow. There are no branch rules, by choice
 - The `Promote` workflow fast-forwards `release` to the exact commit CI passed on a push to `main`, not to `main` at run time. A manual run ships a named commit on `main` without waiting for CI, for a recovery or an urgent fix (`gh workflow run promote.yml --ref main -f sha=<sha>`); it still only fast-forwards. It is the only workflow that pushes `release`
 - Renovate runs in GitHub Actions on a GitHub App token, every 3 hours, after every push to `main` and when CI finishes on a `renovate/**` branch, and also manages the Actions pins. Its PRs run CI themselves, and it merges its own green PRs, with "Rebase and merge" through the API, while the repository variable `DEERLAB_AUTOMERGE` is `enabled`; unset, empty or any other value stops it. The operator's PRs, and an agent's, still land by hand with "Rebase and merge" on GitHub. Read the merge box first: no check is required. A daily stall check fails when updates stop moving. See `docs/runbook.md`, Bot pull requests
-- After each deploy the last play of every pull runs the working-use checks of each service that has started since its last verdict, and pages once, by name, if one fails. See `docs/runbook.md`, Verification after a deploy
+- After each deploy a play at the end of every pull runs the working-use checks of each service that has started since its last verdict, and pages once, by name, if one fails. See `docs/runbook.md`, Verification after a deploy
 - **The pull is a live hazard during any manual work on a host.** Stopping the timer is self-trapping, because only a pull re-enables it. `systemctl is-active --quiet deerlab-pull.service` **lies** — a running `Type=oneshot` unit is `activating`. Use `systemctl show deerlab-pull.service -p ActiveState --value`
 
 ## Code Quality
@@ -155,10 +157,11 @@ secrets/            # operator-only credentials, outside the inventory
 ## Architecture
 
 - The edge terminates TLS for every public domain and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
-- The hosts are linked by kernel WireGuard through `systemd-networkd`. The services host's only public listeners are SSH and WireGuard, the latter scoped by the firewall to the edge's public address
+- The edge reaches the services host over the tailnet: Caddy dials svc1's MagicDNS name, and Ansible reaches every host but the edge through the edge (`ansible_ssh_common_args`). Every pull checks its own host is on the tailnet, and the edge's pull that it reaches svc1 over it (`tailnet_check`)
+- The kernel WireGuard link through `systemd-networkd` stays up until it is retired, but the sites no longer use it. The services host's only public listeners are SSH and WireGuard, the latter scoped by the firewall to the edge's public address
 - **Both peers carry an `Endpoint=`**, so either host can restore the tunnel alone.
 - The two endpoints are not configured the same way: the services host derives `base_wireguard_public_endpoint` in its `main.yml`, the edge carries an explicit value in its `secrets.sops.yaml`, and the role default is the empty string. The template silently drops both `Endpoint=` and `PersistentKeepalive=` when it is empty, so a host rebuilt without one leaves its *peer* unable to initiate — degraded, not failed, and therefore easy to miss. See `docs/runbook.md`, Bootstrapping a host
-- Backends publish on the wildcard address, never on the tunnel address; a unit that binds the tunnel address races the interface at boot and fails hard on Podman 5.4.2. The firewall is what scopes a backend to the tunnel
+- Backends publish on the wildcard address, never on the tunnel address; a unit that binds the tunnel address races the interface at boot and fails hard on Podman 5.4.2. Over the tailnet the policy scopes a backend (the edge gets ports 8080–8099 on svc1, the operator's devices every port), over the tunnel the firewall
 - Each host's own lookups go to the operator's DNS resolver: through tailscaled over DNS-over-HTTPS once the host is on the tailnet, otherwise over strict DNS-over-TLS (`base_dns`), with LLMNR off. Some paths can still send DNS in plain text: see `docs/runbook.md`, The hosts' resolver
 - Per-service restic backups to an object store, one repository and one prefix-scoped credential per service, verified on every run. Retention runs only from the operator's machine
 - Failure is reported by Pushover directly from each host; absence is reported by dead-man push monitors on an external uptime monitor.
