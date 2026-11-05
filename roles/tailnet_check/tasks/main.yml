@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Fails the pull when this host is off the tailnet, or when the edge cannot
+# reach another host's SSH port over it. The pull's OnFailure= then pages, at
+# most 3 pages an hour. SSH rather than each backend: backends restart during
+# svc1's own pulls (Wallabag's start_timeout is 900 s) and would page falsely,
+# while SSH proves the tailnet, the policy's grant and svc1's firewall at once.
+# Caddy's site checks still cover the backends after each Caddy start.
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - tailnet_check_enabled is boolean
+      - tailnet_check_retries | int >= 1
+      - tailnet_check_delay | int >= 1
+      - tailnet_check_ssh_port | int > 0
+    quiet: true
+
+- name: Check the tailnet
+  when: tailnet_check_enabled
+  block:
+    # no_log: the status names the tailnet and its addresses.
+    - name: Read tailscaled's state
+      ansible.builtin.command: tailscale status --json
+      register: tailnet_check_status
+      until: >-
+        tailnet_check_status.rc == 0 and
+        (tailnet_check_status.stdout | from_json)['BackendState'] == 'Running'
+      retries: "{{ tailnet_check_retries }}"
+      delay: "{{ tailnet_check_delay }}"
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Fail unless tailscaled is Running
+      ansible.builtin.assert:
+        that: tailnet_check_state == 'Running'
+        fail_msg: tailscaled on {{ inventory_hostname }} is {{ tailnet_check_state }}, not Running
+        quiet: true
+      vars:
+        tailnet_check_json: "{{ tailnet_check_status.stdout | from_json if tailnet_check_status.rc == 0 else {} }}"
+        tailnet_check_state: "{{ tailnet_check_json['BackendState'] | default('not answering') }}"
+
+    # The message names the host, not its MagicDNS name, which names the tailnet.
+    - name: Reach every other host's SSH port over the tailnet
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item]['deerlab_tailnet_fqdn'] }}"
+        port: "{{ tailnet_check_ssh_port }}"
+        timeout: 30
+        msg: the edge cannot reach {{ item }}'s port {{ tailnet_check_ssh_port }} over the tailnet
+      loop: "{{ groups['podman_hosts'] | default([]) | difference([inventory_hostname]) }}"
+      when: inventory_hostname in groups['edge'] | default([])
+      check_mode: false

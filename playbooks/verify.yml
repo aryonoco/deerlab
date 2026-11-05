@@ -8,3 +8,10 @@
   hosts: podman_hosts
   roles:
     - role: podman_service_verify
+
+# Fails the pull when a host is off the tailnet, or when the edge cannot reach
+# another host over it. Last, so it never holds a service back.
+- name: Check every host is on the tailnet
+  hosts: podman_hosts
+  roles:
+    - role: tailnet_check

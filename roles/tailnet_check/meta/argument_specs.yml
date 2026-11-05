@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+argument_specs:
+  main:
+    short_description: Fail the pull when a host is off the tailnet
+    description: >
+      Fails when tailscaled on this host is not Running, and, on the edge,
+      when another host's SSH port does not answer over the tailnet at its
+      MagicDNS name. A failed check fails the pull, whose OnFailure= pages.
+    options:
+      tailnet_check_enabled:
+        type: bool
+        default: false
+        description: Run the check. The inventory turns it on; the CI lab leaves it off.
+      tailnet_check_retries:
+        type: int
+        default: 6
+        description: How many more times to read tailscaled's state, after the first, before giving up.
+      tailnet_check_delay:
+        type: int
+        default: 10
+        description: Seconds between those reads.
+      tailnet_check_ssh_port:
+        type: int
+        default: 22
+        description: The port the edge probes on every other host over the tailnet.
