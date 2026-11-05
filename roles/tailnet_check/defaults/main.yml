@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Off unless the inventory turns it on; the CI lab's containers never join.
+tailnet_check_enabled: false
+
+# How long a host may take to come back to Running, as at a tailscaled
+# restart after a ruleset reload: retries times delay seconds.
+tailnet_check_retries: 6
+tailnet_check_delay: 10
+
+# What the edge probes on every other host over the tailnet.
+tailnet_check_ssh_port: 22

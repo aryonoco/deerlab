@@ -28,3 +28,7 @@ podman_service_verify_notify: false
 # lab must not report to Tailscale. It is installed and never enrolled.
 base_tailscale_userspace: true
 base_tailscale_no_logs: true
+
+# The lab's tailscaled is never enrolled, so the tailnet check would fail
+# every run.
+tailnet_check_enabled: false
