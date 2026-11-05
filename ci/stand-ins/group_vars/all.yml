@@ -35,3 +35,4 @@ deerlab_dns_tls_addresses:
   - 192.0.2.53
   - 2001:db8::53
 deerlab_dns_tls_name: dns.example.test
+deerlab_tailnet_domain: tailnet.example.test
