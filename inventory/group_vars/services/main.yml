@@ -613,7 +613,7 @@ podman_services:
     # The official image, FROM scratch: one static binary and a CA bundle, no
     # shell, no curl and no entrypoint script. docker.io/vikunja/vikunja serves
     # the same index digest; ghcr.io matches the image's own source label.
-    image: ghcr.io/go-vikunja/vikunja:2.7.1@sha256:f7dc8428d10aef17f3075886d3c1c022f566ec456f88985f02c137f4fc534576
+    image: ghcr.io/go-vikunja/vikunja:2.8.0@sha256:35d937baf3b5d5803bed6b9e11d007448b7b536df9e4346dc35551e1072636c3
     # The image's own USER, pinned rather than inherited, so an image that
     # changed it cannot make :U silently re-chown the volumes to a new uid.
     # group is explicit because the image names none, which means gid 0.
