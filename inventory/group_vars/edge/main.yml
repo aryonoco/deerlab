@@ -62,12 +62,22 @@ caddy_caddyfile: |
       respond /healthz 200
   }
 
+  # Every backend is on svc1, reached over the tailnet by its MagicDNS name.
+  # tcp4: Actual listens on IPv4 only, and no backend has been reached over
+  # IPv6. resolvers: the container's own list is pasta's forwarder and then
+  # the resolver's public addresses, which answer in plain DNS and know
+  # nothing of the tailnet; asking quad-100 directly keeps svc1's name off
+  # them even when the forwarder fails.
+
   wallabag.{{ deerlab_domain }} {
       log {
           output stdout
           format json
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8080 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8080 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           health_uri /login
           health_interval 15s
           health_timeout 5s
@@ -81,7 +91,10 @@ caddy_caddyfile: |
           output stdout
           format json
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8081 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8081 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # /health calls ensure_connection(), so an unhealthy backend is one
           # whose database is unreachable - not merely one whose socket closed.
           health_uri /health
@@ -100,7 +113,10 @@ caddy_caddyfile: |
           output stdout
           format json
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8082 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8082 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # Exactly 401, not 2xx. Every Baikal failure mode - unwritable config,
           # missing database, unwritable database directory - answers 200 with
           # an exception page, so a conventional check reports a dead server as
@@ -119,7 +135,10 @@ caddy_caddyfile: |
           output stdout
           format json
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8083 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8083 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # Liveness only, and deliberately so - unlike linkding's /health and
           # baikal's exact-401, this proves nothing about the database.
           # p/api/index.php calls initSystem() and never queries it, so /api/
@@ -139,7 +158,10 @@ caddy_caddyfile: |
           output stdout
           format json
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8084 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8084 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # Liveness only. /health opens a session and pings the database,
           # which on SQLite succeeds on any open handle: a deleted or empty
           # database answers 200. See the runbook.
@@ -175,7 +197,10 @@ caddy_caddyfile: |
       # instead (runbook, Actual).
       @refused path /openid/* /metrics* /account/bootstrap*
       respond @refused 404
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8085 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8085 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # Reads the auth table through the server's open database handle,
           # so a file deleted under a running server answers until a
           # restart; the container probe opens the file afresh.
@@ -201,7 +226,10 @@ caddy_caddyfile: |
               wrap json
           }
       }
-      reverse_proxy http://{{ hostvars['svc1']['base_wireguard_ipv4'] }}:8086 {
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8086 {
+          transport http {
+              resolvers 100.100.100.100
+          }
           # RSSHub builds absolute URLs from its own socket, so its 301s say
           # http://; a reader that saved one would send the key in clear.
           header_down Location ^http:// https://
@@ -246,7 +274,7 @@ podman_services:
       interval: 30s
       start_period: 30s
     # What a pull proves once Caddy has started. The site- checks reach each
-    # backend through TLS and the tunnel, with its Caddyfile health_uri and
+    # backend through TLS and the tailnet, with its Caddyfile health_uri and
     # health_status; host only, because the CI lab's upstreams are stand-ins.
     # The refusals, the redirect and the log redaction are Caddy's own, so
     # they run in the lab too.
