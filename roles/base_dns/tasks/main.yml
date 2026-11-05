@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+- name: Validate required inputs
+  ansible.builtin.assert:
+    that:
+      - base_dns_tls_addresses is sequence and base_dns_tls_addresses is not string
+      - base_dns_tls_addresses | length > 0
+      - base_dns_tls_addresses | reject('match', '[0-9a-fA-F.:]+$') | list | length == 0
+      - base_dns_tls_name is match('[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$')
+      - base_dns_check_name | length > 0
+    fail_msg: base_dns needs the resolver's DNS-over-TLS addresses, the name its certificate carries, and a name to check
+    quiet: true
+
+# On Debian's cloud image already. Listed so a host built from another image
+# fails here, not at its first lookup; openssl runs the TLS check below.
+- name: Install the resolver and the tools its check uses
+  ansible.builtin.apt:
+    name:
+      - systemd-resolved
+      - ca-certificates
+      - openssl
+    state: present
+
+- name: Keep systemd-resolved running
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    enabled: true
+    state: started
+
+- name: Create the resolver's drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Read the resolver's drop-in as it stands
+  ansible.builtin.slurp:
+    src: /etc/systemd/resolved.conf.d/50-deerlab.conf
+  register: base_dns_current
+  failed_when: false
+  no_log: true
+
+# Rendered once, so the file written below is exactly the text compared
+# with the one on disk. no_log, here and below: the name carries the
+# resolver's profile.
+- name: Render the resolver's drop-in
+  ansible.builtin.set_fact:
+    base_dns_dropin: "{{ lookup('ansible.builtin.template', 'resolved.conf.j2') }}"
+  no_log: true
+
+# Strict DNS-over-TLS fails every lookup when an address does not answer
+# TLS, or its certificate does not cover the name. So before a changed
+# drop-in is written, each address must complete a handshake with a
+# certificate valid for the name, from the system's CAs as resolved uses
+# them; such a value then fails the run here, while the host still resolves
+# through what it had. A name the certificate's wildcard covers passes, a
+# mistyped profile included: only the resolver's own logs show that. A
+# converged host opens no connection for it.
+- name: Check each address answers TLS for the name on port 853
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "15"
+      - openssl
+      - s_client
+      - -connect
+      - "{{ ('[' ~ item ~ ']') if ':' in item else item }}:853"
+      - -servername
+      - "{{ base_dns_tls_name }}"
+      - -verify_hostname
+      - "{{ base_dns_tls_name }}"
+      - -verify_return_error
+      - -brief
+    stdin: Q
+  loop: "{{ base_dns_tls_addresses }}"
+  register: base_dns_tls_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when: base_dns_dropin != (base_dns_current.content | default('') | b64decode)
+
+# Reads only each address and its exit code: the check's full result holds
+# the name, and a failed assert would print it.
+- name: Refuse an address that failed the TLS check
+  ansible.builtin.assert:
+    that: base_dns_tls_failed | length == 0
+    fail_msg: >-
+      the resolver at {{ base_dns_tls_failed | join(', ') }} did not complete a
+      verified TLS handshake for the configured name on port
+      853{{ base_dns_tls_silent_note }}; the host keeps its current DNS
+    quiet: true
+  vars:
+    base_dns_tls_failed: "{{ base_dns_tls_check.results | rejectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
+    base_dns_tls_silent: "{{ base_dns_tls_check.results | selectattr('rc', 'eq', 124) | map(attribute='item') | list }}"
+    base_dns_tls_silent_note: "{{ (' (no answer within 15 s from ' ~ (base_dns_tls_silent | join(', ')) ~ ')') if base_dns_tls_silent else '' }}"
+  when: base_dns_dropin != (base_dns_current.content | default('') | b64decode)
+
+- name: Write the resolver's drop-in
+  ansible.builtin.copy:
+    content: "{{ base_dns_dropin }}"
+    dest: /etc/systemd/resolved.conf.d/50-deerlab.conf
+    owner: root
+    group: root
+    mode: "0644"
+  diff: false
+  notify: Reload systemd-resolved
+
+- name: Apply it before anything else in the run looks a name up
+  ansible.builtin.meta: flush_handlers
+
+- name: Look up a name the host needs
+  ansible.builtin.command:
+    argv:
+      - resolvectl
+      - query
+      - --cache=no
+      - --legend=no
+      - "{{ base_dns_check_name }}"
+  register: base_dns_query
+  retries: 3
+  delay: 2
+  until: base_dns_query.rc == 0
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fail when the host cannot resolve
+  ansible.builtin.assert:
+    that: base_dns_query.rc == 0
+    fail_msg: "{{ base_dns_check_name }} did not resolve: the host has no working DNS"
+    quiet: true

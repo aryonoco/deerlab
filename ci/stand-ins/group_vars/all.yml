@@ -31,3 +31,6 @@ deerlab_admin_ssh_keys:
   - ssh-ed25519 AAAAlabstandin lab@example.test
 vikunja_hostname: tasks.example.test
 actual_hostname: budget.example.test
+deerlab_dns_tls_addresses:
+  - 192.0.2.53
+deerlab_dns_tls_name: dns.example.test

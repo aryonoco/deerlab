@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# A reload re-reads the drop-ins and rebuilds every link's servers, without
+# losing what tailscaled set on its own link over D-Bus. Rolling the drop-in
+# back needs a restart instead: a reload does not restore every default.
+- name: Reload systemd-resolved
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    state: reloaded
