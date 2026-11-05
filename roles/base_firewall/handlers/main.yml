@@ -8,8 +8,7 @@
 
 # Listens to the reload, so it runs after it. The ruleset begins with flush
 # ruleset, which deletes the rules tailscaled installed, and tailscaled puts
-# them back only when it restarts (tailscale/tailscale#11926). The restart
-# drops tailnet connections for a few seconds.
+# them back only when it restarts (tailscale/tailscale#11926).
 - name: Restart tailscaled after a ruleset reload
   ansible.builtin.systemd_service:
     name: tailscaled
