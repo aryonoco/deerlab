@@ -6,11 +6,10 @@
 My personal homelab. Debian 13 VPSs configured
 entirely by Ansible: an edge host (`edge1`) that runs only Caddy, and a services
 host (`svc1`) that runs every application as a rootless Podman Quadlet under its
-own system user. The edge reaches the services host over a Tailscale tailnet; the
-WireGuard link it used before stays up until it is retired.
+own system user. The edge reaches the services host over a Tailscale tailnet.
 
 **`docs/runbook.md` is the tracked operational authority.** Read it before
-changing anything that touches delivery, backups, restore or the tunnel; it
+changing anything that touches delivery, backups, restore or the tailnet; it
 carries the failure modes that are silent when they go wrong.
 
 The design document and implementation plan live in `.superpowers/`, which is
@@ -45,9 +44,9 @@ for Claude 5 Fable.
 - **This repository is public, and there are two categories here, not one.**
 
   *Encryption genuinely protects these — keep encrypting them with full rigour:*
-  public IP addresses, tunnel addresses and topology, the WireGuard port,
-  object-store bucket names and endpoints, dead-man URLs, SSH and WireGuard
-  keys, password hashes, and every credential. For a variable of this kind the
+  public IP addresses, the tailnet's name, object-store bucket names and
+  endpoints, dead-man URLs, SSH keys, password hashes, and every
+  credential. For a variable of this kind the
   default is to encrypt it — justify plaintext, never the reverse. The rule
   covers prose and comments as much as values: the only real leak ever found
   here was a comment naming a hosting provider.
@@ -129,7 +128,7 @@ for Claude 5 Fable.
 
 ## Development Environment
 
-- Tool versions come from `mise.toml`; run `just setup`. `wireguard-tools` and an HTTP/3-capable `curl` come from Homebrew alongside them
+- Tool versions come from `mise.toml`; run `just setup`. An HTTP/3-capable `curl` comes from Homebrew alongside them
 - The SOPS age identity is **not on disk**. It is fetched from the operator's password manager at runtime through `SOPS_AGE_KEY_CMD`, which the login shell exports. A process that does not inherit it cannot decrypt — prefix the command rather than writing the key to a file
 - **On the operator's machine**, never set `SOPS_AGE_KEY_FILE` or create a keys file. **On the hosts it is set deliberately** — `deerlab-pull.service` carries `Environment=SOPS_AGE_KEY_FILE=/etc/deerlab/age.key`, because there is no vault and no interactive shell there.
 - A `sops`, `ansible` or `just` command that **hangs** rather than failing means the vault is locked
@@ -137,11 +136,11 @@ for Claude 5 Fable.
 ## Secrets
 
 - Encrypted files (`*.sops.yaml`) are committed with values encrypted. Ciphertext in a public repository is world-readable and permanently archived by third parties, so an age key leak would be retroactive and total: never commit a value you would not accept being decrypted later
-- Encrypt identifiers, not just credentials — while being honest about which ones encryption actually protects. A reader of this repository must not be able to learn the hosts' public addresses, the tunnel's addressing or ports, where the backups live, or anything that authenticates. The public domains and their hostnames are the separate case described under CRITICAL above
+- Encrypt identifiers, not just credentials — while being honest about which ones encryption actually protects. A reader of this repository must not be able to learn the hosts' public addresses, the tailnet's name, where the backups live, or anything that authenticates. The public domains and their hostnames are the separate case described under CRITICAL above
 - `secrets/` has its own creation rule, listed first, encrypted to the operator key alone. Nothing on a host reads it: it holds the object-store credential that can erase backup history, so a host key on it would mean a compromise of either host also destroys the path back
-- The inventory rule is shared by design, and the cost is real: every `*.sops.yaml` under `inventory/` decrypts on **both** hosts, because `hostvars[<peer>]` in `base_wireguard` and `base_firewall` forces each host to compute the other's whole variable set. Per-service backup credentials are therefore readable by either host, so treat a compromise of one as reaching every service's repository. The object store's version retention, not the prefix scoping, is what makes that recoverable
+- The inventory rule is shared by design, and the cost is real: every `*.sops.yaml` under `inventory/` decrypts on **both** hosts, because the edge's Caddyfile reads `hostvars['svc1']` and `base_firewall` on svc1 reads the edge's, which forces each host to compute the other's whole variable set. Per-service backup credentials are therefore readable by either host, so treat a compromise of one as reaching every service's repository. The object store's version retention, not the prefix scoping, is what makes that recoverable
 - sops matches creation rules against the **absolute** path, so a `secrets/` rule must be anchored `(^|/)secrets/…`. An anchor that matches nothing makes `updatekeys` report success while changing nothing
-- Plaintext exceptions must earn it. `base_wireguard_public_key` is plaintext because it is derived from the private key, is handed to the peer by design, and keeping it clear stops each host having to decrypt the other's host vars
+- Plaintext exceptions must earn it. `deerlab_tailscale_port` is plaintext because it is Tailscale's documented default, which every installation uses
 
 ## Structure
 
@@ -158,10 +157,8 @@ secrets/            # operator-only credentials, outside the inventory
 
 - The edge terminates TLS for every public domain and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
 - The edge reaches the services host over the tailnet: Caddy dials svc1's MagicDNS name, and Ansible reaches every host but the edge through the edge (`ansible_ssh_common_args`). Every pull checks its own host is on the tailnet, and the edge's pull that it reaches svc1 over it (`tailnet_check`)
-- The kernel WireGuard link through `systemd-networkd` stays up until it is retired, but the sites no longer use it. The services host's only public listeners are SSH and WireGuard, the latter scoped by the firewall to the edge's public address
-- **Both peers carry an `Endpoint=`**, so either host can restore the tunnel alone.
-- The two endpoints are not configured the same way: the services host derives `base_wireguard_public_endpoint` in its `main.yml`, the edge carries an explicit value in its `secrets.sops.yaml`, and the role default is the empty string. The template silently drops both `Endpoint=` and `PersistentKeepalive=` when it is empty, so a host rebuilt without one leaves its *peer* unable to initiate — degraded, not failed, and therefore easy to miss. See `docs/runbook.md`, Bootstrapping a host
-- Backends publish on the wildcard address, never on the tunnel address; a unit that binds the tunnel address races the interface at boot and fails hard on Podman 5.4.2. Over the tailnet the policy scopes a backend (the edge gets ports 8080–8099 on svc1, the operator's devices every port), over the tunnel the firewall
+- The services host's only public listener is SSH, accepted from the edge's public address alone: `just enrol` and break-glass reach a services host that has left the tailnet through it. The provider offers no console
+- Backends publish on the wildcard address, never on an interface's own address: a unit that binds an address that only appears once an interface is up races it at boot and fails hard on Podman 5.4.2. The tailnet policy scopes a backend: the edge gets ports 8080–8099 on svc1, the operator's devices every port
 - Each host's own lookups go to the operator's DNS resolver: through tailscaled over DNS-over-HTTPS once the host is on the tailnet, otherwise over strict DNS-over-TLS (`base_dns`), with LLMNR off. Some paths can still send DNS in plain text: see `docs/runbook.md`, The hosts' resolver
 - Per-service restic backups to an object store, one repository and one prefix-scoped credential per service, verified on every run. Retention runs only from the operator's machine
 - Failure is reported by Pushover directly from each host; absence is reported by dead-man push monitors on an external uptime monitor.
