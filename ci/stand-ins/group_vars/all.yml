@@ -27,8 +27,9 @@ deerlab_admin_ssh_keys:
   - ssh-ed25519 AAAAlabstandin lab@example.test
 vikunja_hostname: tasks.example.test
 actual_hostname: budget.example.test
+# The fixture front, which hands DNS-over-HTTPS to ci/fixture/dnsdist.yml;
+# base_dns, the other reader, does not run in the lab.
 deerlab_dns_tls_addresses:
-  - 192.0.2.53
-  - 2001:db8::53
-deerlab_dns_tls_name: dns.example.test
+  - 203.0.113.10
+deerlab_dns_tls_name: lab.dns.example.test
 deerlab_tailnet_domain: tailnet.example.test

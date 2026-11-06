@@ -17,3 +17,8 @@ s3.example.test {
 deadman.example.test {
 	respond 200
 }
+
+# The forwarder's DNS-over-HTTPS upstream, served by ci/fixture/dnsdist.yml.
+dns.example.test {
+	reverse_proxy h2c://deerlab-lab-dns:8053
+}

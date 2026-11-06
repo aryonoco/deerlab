@@ -1,0 +1,146 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The CI lab's stand-in for the operator's DNS resolver, behind the fixture
+# front, which terminates TLS for dns.example.test with the CA the lab
+# trusts. The forwarder's request path names the service, and this answers
+# probe.example.test with that service's own address, 192.0.2.<uid - 1999>,
+# so a check that gets its own address proves its query left under its own
+# name. A service with no rule here gets NXDOMAIN, and its check fails.
+# dns.example.test itself answers as the real resolver's host name would,
+# for the forwarder's listeners check. Every other example.test name is
+# NXDOMAIN, answered here, and any other query goes to Docker's resolver.
+security_polling:
+  suffix: ""
+acl:
+  - 0.0.0.0/0
+binds:
+  - listen_address: "0.0.0.0:8053"
+    protocol: DoH
+    doh:
+      provider: nghttp2
+      paths:
+        - /lab/
+      exact_path_matching: false
+backends:
+  - name: docker
+    address: "127.0.0.11:53"
+    protocol: Do53
+    health_checks:
+      mode: up
+query_rules:
+  - name: caddy
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/caddy
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.1
+  - name: wallabag
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/wallabag
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.2
+  - name: linkding
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/linkding
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.3
+  - name: baikal
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/baikal
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.4
+  - name: freshrss
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/freshrss
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.5
+  - name: vikunja
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/vikunja
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.6
+  - name: actual
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/actual
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.7
+  - name: rsshub
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/rsshub
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.8
+  - name: resolver-host
+    selector:
+      type: QName
+      qname: dns.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 203.0.113.10
+  # Every other example.test name is answered here rather than by a slow
+  # trip to Docker's resolver, which would hold the forwarder's start-up
+  # health check past its timeout.
+  - name: example-test
+    selector:
+      type: QNameSuffix
+      suffixes:
+        - example.test.
+    action:
+      type: RCode
+      rcode: NXDOMAIN
