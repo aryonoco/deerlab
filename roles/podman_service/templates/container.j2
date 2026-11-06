@@ -48,6 +48,14 @@ PublishPort={{ port }}
 {% endfor %}
 {% if podman_service_container_spec.network is defined %}
 Network={{ podman_service_container_spec.network }}
+{% else %}
+{# pasta's DNS forwarder alone, which base_firewall steers to the service's #}
+{# own listener on the DNS forwarder. Left to itself, Podman lists the     #}
+{# host's upstream servers after it, in plain DNS, which an image that asks #}
+{# every server at once would query too, and the tailnet's name as a search #}
+{# domain, which would send <name>.<tailnet> to the resolver for a bare name. #}
+DNS=169.254.1.1
+DNSSearch=.
 {% endif %}
 {% for volume in podman_service_container_spec.volumes | default([]) %}
 {# :U makes Podman chown the volume's contents to the container user at every #}
