@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# ansible.builtin.copy will not create an intermediate directory, and a
+# config file's path may nest (config/Caddyfile). The bind mount in the same
+# service definition points at that directory, so a missing one is a start
+# failure rather than a cosmetic gap. Skipped when the path is a bare
+# filename: dirname is then empty and the target would be the home directory,
+# which podman_user owns and keeps at 0700.
+- name: Create the config directories of {{ podman_service_name }}
+  ansible.builtin.file:
+    path: "{{ podman_service_home }}/{{ item.path | dirname }}"
+    state: directory
+    owner: "{{ podman_service_name }}"
+    group: "{{ podman_service_name }}"
+    mode: "0750"
+  loop: "{{ podman_service_spec.config_files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | dirname }}"
+  when: item.path | dirname | length > 0
+
+# banner is the file format's comment marker, and carries the same "edit the
+# repository, not this file" line every other generated file on either host
+# gets. It is optional because config_files is generic: a format with no
+# comment syntax cannot take one.
+- name: Write the config files of {{ podman_service_name }}
+  ansible.builtin.copy:
+    content: |-
+      {% if item.banner is defined %}{{ item.banner }} {{ deerlab_managed }}
+      {% endif %}{{ item.content }}
+    dest: "{{ podman_service_home }}/{{ item.path }}"
+    owner: "{{ podman_service_name }}"
+    group: "{{ podman_service_name }}"
+    mode: "{{ item.mode | default('0640') }}"
+  loop: "{{ podman_service_spec.config_files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: not (item.sensitive | default(false) | bool)
+  register: podman_service_config_files_plain
+
+# A sensitive file holds an identifier that must reach no log: its content
+# never appears in a diff, a failed item or the task's result. It is written
+# exactly like the others otherwise.
+- name: Write the sensitive config files of {{ podman_service_name }}
+  ansible.builtin.copy:
+    content: |-
+      {% if item.banner is defined %}{{ item.banner }} {{ deerlab_managed }}
+      {% endif %}{{ item.content }}
+    dest: "{{ podman_service_home }}/{{ item.path }}"
+    owner: "{{ podman_service_name }}"
+    group: "{{ podman_service_name }}"
+    mode: "{{ item.mode | default('0640') }}"
+  loop: "{{ podman_service_spec.config_files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.sensitive | default(false) | bool
+  no_log: true
+  diff: false
+  register: podman_service_config_files_sensitive
+
+# One result for the restart decision, whichever kind of file moved.
+- name: Combine the config file results of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_config_files:
+      changed: "{{ (podman_service_config_files_plain.changed | default(false)) or (podman_service_config_files_sensitive.changed | default(false)) }}"
