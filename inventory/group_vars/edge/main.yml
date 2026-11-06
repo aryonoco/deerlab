@@ -243,7 +243,11 @@ caddy_caddyfile: |
       }
   }
 
+# The DNS forwarder's uid on this host (podman_hosts/main.yml).
+deerlab_dnsdist_uid: 2001
+
 podman_services:
+  dnsdist: "{{ deerlab_dnsdist_service }}"
   caddy:
     uid: 2000
     image: docker.io/library/caddy:2.11.7@sha256:685ae3d7c34d9b5f8caeddc5d14051db7bbd88ff1f5a2fa0c16bd8ca328fb7af

@@ -21,6 +21,11 @@
 # protected floor, so under host-wide pressure the kernel chooses what to
 # reclaim. zram (base_os) is what turns that from an OOM kill into a slowdown.
 deerlab_service_limits:
+  # The DNS forwarder, on both hosts.
+  dnsdist:
+    slice: { memory: 256M, cpu: "100%", tasks: 256 }
+    containers:
+      dnsdist: { memory: 256M, cpu: "100%", tasks: 256, pids: 256, start_timeout: 120 }
   caddy:
     slice: { memory: 1G, cpu: "200%", tasks: 512 }
     containers:

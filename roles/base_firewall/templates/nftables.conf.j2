@@ -12,6 +12,12 @@ table inet deerlab {
 
 {% for name, svc in base_firewall_services.items() %}
   chain svc_{{ name }} {
+{% if name == base_firewall_dns_forwarder %}
+{# The forwarder shares the host's network, so its health check and its    #}
+{# checks reach its own listeners as its user, and 127.0.0.0/8 is a private #}
+{# range below: accepted first, its listeners alone.                      #}
+    ip daddr {{ base_firewall_dns_listener_net }} meta l4proto { tcp, udp } th dport {{ base_firewall_dns_listener_port }} accept
+{% endif %}
 {% if svc.egress == 'any' %}
     accept
 {% elif svc.egress in ('web', 'platform', 'mail', 'public') %}

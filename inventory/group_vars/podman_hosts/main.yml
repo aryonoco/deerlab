@@ -13,3 +13,162 @@ podman_user_registries:
   # it widens what every service user on both hosts may pull from, which is
   # why it is a deliberate line rather than a side effect of adding a service.
   - ghcr.io
+
+# The services' DNS forwarder: dnsdist, one rootless container on each host,
+# with a listener per service (deerlab_dns_listeners, all/main.yml). Each
+# listener forwards over DNS-over-HTTPS to the operator's DNS resolver, with
+# its service's name in the request path, which the resolver logs as the
+# device: the name and the profile travel inside TLS. The profile and the
+# resolver's host name come from deerlab_dns_tls_name (<profile>.<host>),
+# which base_dns uses too, so the rendered config holds the profile and is
+# written as a sensitive file.
+deerlab_dnsdist_profile: "{{ deerlab_dns_tls_name.split('.')[0] }}"
+deerlab_dnsdist_doh_host: "{{ deerlab_dns_tls_name.split('.', 1)[1] }}"
+# dnsdist 2.1's YAML, which refuses an unknown key or a bad type rather than
+# ignoring it. Settings that are not tuning:
+#   - security polling off: it would ask a PowerDNS name through the host;
+#   - SERVFAIL when a pool has no server up, rather than silence;
+#   - any source may ask, because the listeners bind loopback alone and the
+#     kernel drops a packet from off the host addressed to 127/8. A query a
+#     service first sent off the host, which the firewall steers here,
+#     keeps the host's own address as its source, and the default ACL, or
+#     one of loopback alone, would drop it;
+#   - one packet cache per pool, so an answer is never credited to a service
+#     that did not ask;
+#   - lazy health checks: the default sends a query a second per backend,
+#     each under its service's name. A lazy check runs once at start, then
+#     once queries fail, then every 10 s while a backend is down, so a
+#     forwarder whose upstream was unreachable recovers within seconds of
+#     its return. 3 s, not the default 1 s, for a check: a slow first
+#     handshake would otherwise mark every backend down at start;
+#   - no plain-DNS backend anywhere, so plain DNS cannot leave by any path.
+# A query on a listener no rule names goes to the default pool, which is
+# empty: SERVFAIL.
+deerlab_dnsdist_config: |-
+  security_polling:
+    suffix: ""
+  load_balancing_policies:
+    servfail_on_no_server: true
+  acl:
+    - 0.0.0.0/0
+    - ::/0
+  binds:
+    - listen_address: "{{ deerlab_dns_health_listener }}:{{ deerlab_dns_listener_port }}"
+  {% for name, address in deerlab_dns_listeners.items() %}
+    - listen_address: "{{ address }}:{{ deerlab_dns_listener_port }}"
+  {% endfor %}
+  backends:
+  {% for name in deerlab_dns_listeners %}
+  {% for address in deerlab_dns_tls_addresses %}
+    - name: "{{ name }}-{{ loop.index }}"
+      address: "{{ ('[' ~ address ~ ']') if ':' in address else address }}:443"
+      protocol: DoH
+      pools:
+        - {{ name }}
+      tls:
+        subject_name: "{{ deerlab_dnsdist_doh_host }}"
+        validate_certificate: true
+        ca_store: /etc/ssl/deerlab-ca.crt
+      doh:
+        path: "/{{ deerlab_dnsdist_profile }}/{{ name }}"
+      health_checks:
+        mode: lazy
+        qname: "{{ deerlab_dnsdist_doh_host }}."
+        timeout: 3000
+        lazy:
+          interval: 10
+  {% endfor %}
+  {% endfor %}
+  packet_caches:
+  {% for name in deerlab_dns_listeners %}
+    - name: {{ name }}
+      size: 10000
+  {% endfor %}
+  pools:
+  {% for name in deerlab_dns_listeners %}
+    - name: {{ name }}
+      packet_cache: {{ name }}
+  {% endfor %}
+  query_rules:
+    - name: health
+      selector:
+        type: NetmaskGroup
+        netmasks:
+          - {{ deerlab_dns_health_listener }}/32
+        source: false
+      action:
+        type: Spoof
+        ips:
+          - 127.0.0.1
+  {% for name, address in deerlab_dns_listeners.items() %}
+    - name: {{ name }}
+      selector:
+        type: NetmaskGroup
+        netmasks:
+          - {{ address }}/32
+        source: false
+      action:
+        type: Pool
+        pool_name: {{ name }}
+  {% endfor %}
+
+# The forwarder's record, the first service of each host so that it runs
+# before every other; deerlab_dnsdist_uid is per host group.
+deerlab_dnsdist_service:
+  uid: "{{ deerlab_dnsdist_uid }}"
+  image: docker.io/powerdns/dnsdist-21:2.1.3@sha256:c70ae7363712188ab2878d22bc9f1801cae29190688474a224caee2089f74837
+  # The host's network namespace, so the listeners are the host's own
+  # loopback addresses and the upstream traffic leaves as this service's
+  # user, under its egress chain. user 0 is that user on the host, with every
+  # capability dropped. As anyone else inside the container it would open its
+  # sockets as a subordinate uid, which no egress chain filters, and
+  # podman_service_check refuses that.
+  network: host
+  user: 0
+  publish: []
+  mounts:
+    - { src: /var/lib/dnsdist/config, dst: /etc/deerlab, ro: true }
+    # The host's CA bundle, so Debian's updates reach the forwarder at its
+    # next start without an image bump, and the CI lab's fixture CA with them.
+    - { src: /etc/ssl/certs/ca-certificates.crt, dst: /etc/ssl/deerlab-ca.crt, ro: true }
+  tmpfs:
+    - "/tmp:rw,nosuid,nodev,noexec,size=16m"
+  config_files:
+    - { path: config/dnsdist.yml, content: "{{ deerlab_dnsdist_config }}", mode: "0640", banner: "#", sensitive: true }
+  exec: --config /etc/deerlab/dnsdist.yml
+  read_only: true
+  no_new_privileges: true
+  # A query to the health listener, which a local rule answers: it never
+  # leaves the host. The query, address and port follow the code as
+  # arguments, because Podman 5.4.2's Quadlet drops a HealthCmd's final
+  # double quote, which a value ending in the code's closing quote loses.
+  health:
+    cmd: >-
+      python3 -c "import socket, sys; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2);
+      s.sendto(bytes.fromhex(sys.argv[1]), (sys.argv[2], int(sys.argv[3]))); s.recv(512)"
+      5a5a01000001000000000000066865616c746807696e76616c69640000010001 {{ deerlab_dns_health_listener }} {{ deerlab_dns_listener_port }}
+    interval: 30s
+    start_period: 30s
+  # listeners: every listener reaches the resolver over verified
+  # DNS-over-HTTPS through the forwarder's egress chain, asking for the
+  # resolver's own host name; each lookup shows at the resolver under its
+  # listener's service, once per start. It does not prove the names, which
+  # need the resolver's own record of them. listeners-ci: in the CI lab the
+  # fixture answers each service with an address of its own, which proves
+  # each listener leaves under its own service's name.
+  checks:
+    - name: listeners
+      type: exec
+      where: both
+      timeout: 15
+      cmd: >-
+        {{ ['python3', '-c', deerlab_dns_probe_py, deerlab_dnsdist_doh_host, deerlab_dns_listener_port | string, 'any']
+           + (deerlab_dns_listeners.values() | list) }}
+    - name: listeners-ci
+      type: exec
+      where: ci
+      timeout: 15
+      cmd: >-
+        {{ ['python3', '-c', deerlab_dns_probe_py, 'probe.example.test', deerlab_dns_listener_port | string, 'index']
+           + (deerlab_dns_listeners.values() | list) }}
+  egress: platform

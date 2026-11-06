@@ -69,3 +69,66 @@ tailnet_check_enabled: true
 # Named globally because base_firewall renders the chains from it and
 # podman_user asserts its own inputs against it. One definition, two gates.
 deerlab_egress_classes: [any, web, platform, mail, public]
+
+# The services' DNS forwarder, the record deerlab_dnsdist_service in
+# podman_hosts/main.yml. Every other service on a host gets a listener of its
+# own on loopback, whose queries leave for the operator's DNS resolver under
+# that service's name. The address follows from the service's uid, as its
+# subordinate IDs do, so a new service needs no entry here. Every address
+# derives from the one prefix: the listeners, the forwarder's health listener
+# at .254, and the range its egress chain accepts. podman_service_check keeps
+# every uid within the 253 addresses below the health listener.
+deerlab_dns_forwarder: dnsdist
+deerlab_dns_listener_port: 5300
+deerlab_dns_listener_prefix: 127.0.53
+deerlab_dns_listener_net: "{{ deerlab_dns_listener_prefix }}.0/24"
+deerlab_dns_health_listener: "{{ deerlab_dns_listener_prefix }}.254"
+deerlab_dns_listeners: >-
+  {%- set ns = namespace(listeners={}) -%}
+  {%- for name in podman_services if name != deerlab_dns_forwarder -%}
+  {%- set ns.listeners = ns.listeners | combine({name: deerlab_dns_listener_prefix ~ '.' ~ (podman_services[name].uid | int - 1999)}) -%}
+  {%- endfor -%}
+  {{ ns.listeners }}
+
+# One DNS query per address, from python3's standard library, for the
+# forwarder's checks: python3 -c CODE QNAME PORT MODE ADDR... MODE any passes
+# on any A answer, index on 192.0.2.<the address's last octet>, which is how
+# the CI lab's fixture answers each service, and =<IPv4> on that address. It
+# prints ok and the address for each address, and never an answer.
+deerlab_dns_probe_py: |-
+  import socket, struct, sys
+  qname, port, mode, addrs = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4:]
+  query = struct.pack('>6H', 0x5a5a, 0x0100, 1, 0, 0, 0)
+  query += b''.join(bytes([len(label)]) + label.encode() for label in qname.rstrip('.').split('.'))
+  query += b'\0' + struct.pack('>2H', 1, 1)
+
+  def skip(msg, i):
+      while msg[i]:
+          if msg[i] >= 192:
+              return i + 2
+          i += msg[i] + 1
+      return i + 1
+
+  for addr in addrs:
+      sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+      sock.settimeout(2)
+      try:
+          sock.sendto(query, (addr, port))
+          reply = sock.recv(4096)
+      except OSError as err:
+          sys.exit(f'fail {addr}: {type(err).__name__}')
+      if reply[:2] != query[:2] or reply[3] & 15:
+          sys.exit(f'fail {addr}: rcode {reply[3] & 15}')
+      found, i = None, len(query)
+      for _ in range(struct.unpack('>H', reply[6:8])[0]):
+          i = skip(reply, i)
+          rtype, _, _, length = struct.unpack('>2HIH', reply[i:i + 10])
+          i += 10
+          if rtype == 1 and length == 4:
+              found = socket.inet_ntoa(reply[i:i + 4])
+              break
+          i += length
+      want = {'any': found, 'index': '192.0.2.' + addr.split('.')[-1]}.get(mode, mode[1:])
+      if found is None or found != want:
+          sys.exit(f'fail {addr}: no matching A answer')
+      print(f'ok {addr}')

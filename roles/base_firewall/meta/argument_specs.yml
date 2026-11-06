@@ -73,6 +73,17 @@ argument_specs:
         description: >-
           Resolver addresses web-, platform-, mail- and public-class
           services may reach on port 53.
+      base_firewall_dns_forwarder:
+        type: str
+        description: >-
+          The service key of the services' DNS forwarder, whose egress chain
+          accepts its own listeners.
+      base_firewall_dns_listener_net:
+        type: str
+        description: The loopback range the forwarder's listeners use.
+      base_firewall_dns_listener_port:
+        type: int
+        description: The port the forwarder's listeners use.
       base_firewall_egress_classes:
         type: list
         elements: str
