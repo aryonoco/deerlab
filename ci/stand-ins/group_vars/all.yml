@@ -32,4 +32,5 @@ actual_hostname: budget.example.test
 deerlab_dns_tls_addresses:
   - 203.0.113.10
 deerlab_dns_tls_name: lab.dns.example.test
+deerlab_dns_test_url: https://test.example.test
 deerlab_tailnet_domain: tailnet.example.test
