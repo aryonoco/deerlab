@@ -264,7 +264,7 @@
       {%- set rules = namespace(out=[]) -%}
       {%- if c.name is not defined or c.name is not string or c.name is not regex('[a-z0-9-]+', match_type='fullmatch') -%}
       {%- set rules.out = rules.out + ['name'] -%}
-      {%- elif n is regex('image(-.*)?|upstream-.*', match_type='fullmatch') -%}
+      {%- elif n is regex('image(-.*)?|upstream-.*|dns', match_type='fullmatch') -%}
       {%- set rules.out = rules.out + ['reserved name'] -%}
       {%- elif names | select('equalto', n) | list | length > 1 -%}
       {%- set rules.out = rules.out + ['duplicate name'] -%}

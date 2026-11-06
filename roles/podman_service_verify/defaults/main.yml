@@ -28,3 +28,11 @@ podman_service_verify_notify: true
 podman_service_verify_notify_url: "{{ deerlab_pushover_url }}"
 podman_service_verify_notify_token: "{{ deerlab_pushover_token }}"
 podman_service_verify_notify_user: "{{ deerlab_pushover_user }}"
+
+# Each steered service's listener on the DNS forwarder, and the probe the
+# built-in dns check runs, where ci only: the CI lab's fixture answers
+# probe.example.test with 192.0.2.<the listener's last octet> for that
+# service's request path alone (ci/fixture/dnsdist.yml).
+podman_service_verify_dns_listeners: "{{ deerlab_dns_listeners }}"
+podman_service_verify_dns_probe: "{{ deerlab_dns_probe_py }}"
+podman_service_verify_dns_probe_name: probe.example.test
