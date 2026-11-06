@@ -373,6 +373,16 @@ podman_services:
           path: /metrics/deerlab-log-__MARKER__
           headers: { X-Actual-Token: __SENTINEL__ }
           status: [404]
+      # Its lookups reach the operator's DNS resolver under its own name: the
+      # resolver's test endpoint answers with the name of the device that
+      # looked it up, and only to a curl User-Agent. The body also holds the
+      # resolver's profile and the host's address, which no_log keeps out.
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [wget, -U, curl/8, -T, "8", -qO-, "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"caddy"'
     egress: any
     backup:
       volumes: [data]

@@ -198,6 +198,18 @@ podman_services:
       - name: login-page
         path: /login
         body_regex: 'name="_csrf_token"'
+      # Its lookups reach the operator's DNS resolver under its own name: the
+      # resolver's test endpoint answers with the name of the device that
+      # looked it up, and only to a curl User-Agent. The body also holds the
+      # resolver's profile and the host's address, which no_log keeps out.
+      # The URL authenticates nothing: it is in SOPS only because it names
+      # the provider, so it may sit in cmd.
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"wallabag"'
     egress: web
     backup:
       sqlite: [{ volume: data, path: db/wallabag.sqlite }]
@@ -330,6 +342,13 @@ podman_services:
                 print("snapshot ok")
                 break
         stdout_regex: snapshot ok
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"linkding"'
     egress: web
     backup:
       sqlite: [{ volume: data, path: db.sqlite3 }]
@@ -421,6 +440,13 @@ podman_services:
         headers: { Authorization: "Basic {{ 'deerlab-nonexistent:x' | b64encode }}" }
         status: [401]
         body_regex: Username or password was incorrect
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [/usr/local/bin/frankenphp, php-cli, -r, 'ini_set("user_agent", "curl/8"); echo file_get_contents($argv[1]);', "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"baikal"'
     egress: platform
     backup:
       sqlite: [{ volume: data, path: Specific/db/db.sqlite }]
@@ -590,6 +616,13 @@ podman_services:
         where: ci
         cmd: [php, ./cli/user-info.php, --json]
         stdout_regex: '"unreads":\s*[1-9]'
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [php, -r, 'ini_set("user_agent", "curl/8"); echo file_get_contents($argv[1]);', "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"freshrss"'
     egress: web
     backup:
       # A glob, not a fixed path: FreshRSS keeps one database per user, and a
@@ -717,7 +750,11 @@ podman_services:
       start_period: 60s
     # platform plus 465 for the mailer. Webhooks stay enabled and can reach
     # any public address on 443 or 465.
-    # What a pull proves once Vikunja has started; none of it logs in.
+    # What a pull proves once Vikunja has started; none of it logs in. No
+    # dns-name check: the image is FROM scratch, with nothing to fetch the
+    # resolver's test endpoint, so Vikunja's name at the resolver stays
+    # unproven on the host; the CI lab's built-in dns check proves its
+    # steering.
     # database asks for a link share that does not exist: error 3006 comes
     # from the shares table.
     checks:
@@ -839,6 +876,19 @@ podman_services:
       - name: web
         path: /
         body_regex: <title>Actual</title>
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd:
+          - node
+          - -e
+          - >-
+            fetch(process.argv[1], {headers: {"user-agent": "curl/8"}, signal: AbortSignal.timeout(8000)})
+            .then(r => r.text()).then(t => process.stdout.write(t))
+          - "{{ deerlab_dns_test_url }}"
+        stdout_regex: '"deviceName":\s*"actual"'
     egress: platform
     backup:
       sqlite:
@@ -971,4 +1021,11 @@ podman_services:
         path: /robots.txt
         timeout: 35
         body_regex: "Disallow: /"
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"rsshub"'
     egress: public

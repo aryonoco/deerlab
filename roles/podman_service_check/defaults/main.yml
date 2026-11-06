@@ -23,5 +23,6 @@ podman_service_check_check_keys:
   send: [via, host, method, path, query, headers, status]
 
 # Seconds. The sum of every check's worst case, over the checks a pull runs on
-# one host. The two browser checks need about a minute each.
-podman_service_check_verify_budget: 300
+# one host. The two browser checks need about a minute each, and each
+# service's dns-name check up to 10 s.
+podman_service_check_verify_budget: 420

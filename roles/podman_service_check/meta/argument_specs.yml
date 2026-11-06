@@ -56,7 +56,7 @@ argument_specs:
           keys of a log check's send request. Any other key is refused.
       podman_service_check_verify_budget:
         type: int
-        default: 300
+        default: 420
         description: >
           Seconds. The most that the checks a pull runs on one host (where
           both or host) may take together, every check failing at every
