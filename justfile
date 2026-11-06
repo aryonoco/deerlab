@@ -126,8 +126,11 @@ verify host:
     ansible-playbook playbooks/verify.yml --limit {{ host }} --extra-vars podman_service_verify_force=true --extra-vars podman_service_verify_notify=false --extra-vars podman_service_verify_mark=false
 
 # Push the playbook to a host as the admin user (development and break-glass only)
+# Positional, so each argument reaches ansible-playbook whole: a JSON
+# --extra-vars value would otherwise be split on its spaces.
+[positional-arguments]
 apply host *ARGS:
-    ansible-playbook playbooks/site.yml --limit {{ host }} {{ ARGS }}
+    ansible-playbook playbooks/site.yml --limit "$1" "${@:2}"
 
 # The timer stays off: a host being bootstrapped is not yet a recipient of the
 # encrypted inventory, so its first unattended run could only fail to decrypt.
