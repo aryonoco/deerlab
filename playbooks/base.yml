@@ -9,7 +9,6 @@
     - role: base_dns
     - role: base_os
     - role: base_ssh
-    - role: base_wireguard
     - role: base_tailscale
     - role: base_firewall
     - role: base_notify
