@@ -18,6 +18,19 @@ table inet deerlab {
 {# range below: accepted first, its listeners alone.                      #}
     ip daddr {{ base_firewall_dns_listener_net }} meta l4proto { tcp, udp } th dport {{ base_firewall_dns_listener_port }} accept
 {% endif %}
+{% if name in base_firewall_dns_listeners %}
+{# Steered: output_nat sends every port-53 packet of this uid to its own    #}
+{# listener on the DNS forwarder, so that is its only DNS, in every class.  #}
+{# Any other port 53 or 853, IPv6 included, is a lookup that would leave    #}
+{# under another name or in plain text, and dies here.                     #}
+    ip daddr {{ base_firewall_dns_listeners[name] }} meta l4proto { tcp, udp } th dport {{ base_firewall_dns_listener_port }} accept
+{% if name in base_firewall_dns_tailnet_services %}
+{# Asks tailscaled for tailnet names itself, unsteered (output_nat).       #}
+    ip daddr 100.100.100.100 oifname "{{ base_firewall_tailscale_interface }}" meta l4proto { tcp, udp } th dport 53 accept
+{% endif %}
+    meta l4proto { tcp, udp } th dport { 53, 853 } limit rate 10/minute log prefix "nft-dns-{{ name }} " level info
+    meta l4proto { tcp, udp } th dport { 53, 853 } counter drop
+{% endif %}
 {% if svc.egress == 'any' %}
     accept
 {% elif svc.egress in ('web', 'platform', 'mail', 'public') %}
@@ -25,10 +38,12 @@ table inet deerlab {
 {# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
 {# resolver, a link-local metadata address - a drop placed above would make #}
 {# its own accept unreachable and silently break DNS for the whole class. #}
+{% if name not in base_firewall_dns_listeners %}
 {% for resolver in base_firewall_resolvers %}
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} udp dport 53 accept
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} tcp dport 53 accept
 {% endfor %}
+{% endif %}
     ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
     ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
 {% if svc.egress == 'public' %}
@@ -98,6 +113,21 @@ table inet deerlab {
 
   chain forward {
     type filter hook forward priority filter; policy drop;
+  }
+
+{# Each steered service's port-53 packets, to whatever address, go to its #}
+{# own listener on the DNS forwarder, which names the service at the      #}
+{# operator's DNS resolver. dstnat runs before the filter chains, so they #}
+{# see the listener. A service in base_firewall_dns_tailnet_services asks #}
+{# tailscaled for tailnet names itself, which never reach the resolver.  #}
+  chain output_nat {
+    type nat hook output priority dstnat; policy accept;
+{% for name, listener in base_firewall_dns_listeners.items() %}
+{% if name in base_firewall_dns_tailnet_services %}
+    meta skuid {{ base_firewall_services[name].uid }} ip daddr 100.100.100.100 accept
+{% endif %}
+    meta skuid {{ base_firewall_services[name].uid }} meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 dnat ip to {{ listener }}:{{ base_firewall_dns_listener_port }}
+{% endfor %}
   }
 
   chain output {
