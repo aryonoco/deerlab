@@ -26,7 +26,7 @@
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
 
-- name: Set the root password for the provider console
+- name: Set the root password
   ansible.builtin.user:
     name: root
     password: "{{ base_os_root_password_hash }}"

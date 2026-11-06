@@ -363,8 +363,8 @@ podman_services:
     user: 65532
     group: 65532
     # 8081 is the image's health listener and is deliberately NOT published:
-    # base_firewall derives the tunnel-scoped inbound rules from this list, so
-    # publishing it would open it to the edge.
+    # a published port answers on the wildcard address, so publishing it
+    # would open it to the tailnet.
     publish:
       - "8082:8080"
     volumes:
@@ -661,10 +661,10 @@ podman_services:
       # Trust the edge's X-Forwarded-For, so logs, session lists and the
       # unauthenticated rate limit of 10 a minute per IP see real clients, not
       # the edge. CIDR only: a bare address is dropped with a warning
-      # (parseTrustedProxies in pkg/routes/ip.go). The edge's tunnel address
-      # and both tailnet ranges, comma-separated.
+      # (parseTrustedProxies in pkg/routes/ip.go). Both tailnet ranges,
+      # comma-separated.
       VIKUNJA_SERVICE_IPEXTRACTIONMETHOD: xff
-      VIKUNJA_SERVICE_TRUSTEDPROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32,100.64.0.0/10,fd7a:115c:a1e0::/48"
+      VIKUNJA_SERVICE_TRUSTEDPROXIES: "100.64.0.0/10,fd7a:115c:a1e0::/48"
       # SQLite with no DSN tricks: on 2.6.0 overlapping writes can fail at once
       # with HTTP 500 "database is locked", which is accepted and in the
       # runbook. Both paths are explicit so a future image cannot move the data
@@ -772,10 +772,10 @@ podman_services:
       # kernel without IPv6; the edge dials it over IPv4.
       ACTUAL_HOSTNAME: 0.0.0.0
       # Whose X-Forwarded-For to believe, so the login limiter (5 failures
-      # per 15 minutes) keys on each real client: the edge's tunnel address
-      # and both tailnet ranges. No spaces: a space after a comma
-      # makes the server exit 0 with nothing listening.
-      ACTUAL_TRUSTED_PROXIES: "{{ hostvars['edge1']['base_wireguard_ipv4'] }}/32,100.64.0.0/10,fd7a:115c:a1e0::/48"
+      # per 15 minutes) keys on each real client: both tailnet ranges. No
+      # spaces: a space after a comma makes the server exit 0 with nothing
+      # listening.
+      ACTUAL_TRUSTED_PROXIES: "100.64.0.0/10,fd7a:115c:a1e0::/48"
       # Keeps ANSI colour codes out of the request log in journald.
       NO_COLOR: "1"
       # Deliberately ABSENT, and must stay absent:

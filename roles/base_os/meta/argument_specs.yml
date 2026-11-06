@@ -5,7 +5,7 @@ argument_specs:
   main:
     short_description: Debian 13 host baseline
     description: >
-      Packages, the admin account, the console root password, sysctl,
+      Packages, the admin account, the root password, sysctl,
       kernel command line, journald, chrony with NTS, needrestart,
       unattended-upgrades without automatic reboot, auditd with a minimal
       ruleset, and optional /proc hiding.
@@ -26,7 +26,7 @@ argument_specs:
       base_os_root_password_hash:
         type: str
         required: true
-        description: Crypt hash for root, used only at the provider console.
+        description: Crypt hash for root, for a console login; the current provider offers no console.
       base_os_packages:
         type: list
         elements: str

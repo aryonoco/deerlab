@@ -7,7 +7,7 @@ argument_specs:
     description: >
       Key-only authentication for one admin user, root login disabled,
       post-quantum key exchange first, per-source penalties with the
-      tunnel and the tailnet exempt, TCP forwarding on the jump host only,
+      tailnet exempt, TCP forwarding on the jump host only,
       and a validated drop-in that is removed again if sshd rejects it.
     options:
       base_ssh_admin_user:

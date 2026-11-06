@@ -5,9 +5,10 @@ argument_specs:
   main:
     short_description: nftables ruleset for an edge or services host
     description: >
-      One templated ruleset. Default-drop input with SSH, ICMP for path
-      MTU discovery, and either the edge's public ports and redirects
-      or the services host's backend ports scoped to the tunnel. Output
+      One templated ruleset. Default-drop input with ICMP for path MTU
+      discovery and the tailnet's interface accepted, the tailnet policy
+      deciding what reaches each port. The edge has public SSH, ports and
+      redirects; a services host accepts SSH only from the edge. Output
       is permissive for root and gets a per-UID chain for every service
       user according to its egress class.
     options:
@@ -24,26 +25,12 @@ argument_specs:
       base_firewall_ssh_port:
         type: int
         default: 22
-      base_firewall_wg_port:
-        type: int
-        required: true
-      base_firewall_wg_interface:
-        type: str
-        default: wg0
-        description: Tunnel interface that backend access is scoped to.
-      base_firewall_peer_ipv4:
-        type: str
-        default: ""
-        description: Tunnel IPv4 address of the edge, required on a services host.
-      base_firewall_peer_ipv6:
-        type: str
-        default: ""
-      base_firewall_peer_public_v4:
+      base_firewall_edge_public_v4:
         type: str
         default: ""
         description: >-
-          The peer's public address the tunnel port is accepted from,
-          required on a services host so the peer can initiate the tunnel.
+          The edge's public IPv4 address, the only source a services host
+          accepts SSH from outside the tailnet. Required on a services host.
       base_firewall_tailscale_interface:
         type: str
         default: tailscale0

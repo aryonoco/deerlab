@@ -3,8 +3,8 @@
 
 # Public data shared by every host. This repository is public, so anything that
 # would help a stranger reach, impersonate or map the estate lives in
-# secrets.sops.yaml instead — addresses, accounts, keys and the tunnel's
-# internal prefixes included. What is left here is either already public
+# secrets.sops.yaml instead — addresses, accounts and keys included. What is
+# left here is either already public
 # knowledge or meaningless on its own.
 
 deerlab_timezone: Etc/UTC
@@ -29,11 +29,6 @@ deerlab_repo_url: https://github.com/aryonoco/deerlab.git
 # base_notify and podman_user render the same curl configuration from it.
 deerlab_pushover_url: https://api.pushover.net/1/messages.json
 
-# deerlab_wg_port, deerlab_wg_ipv4_prefix and deerlab_wg_ipv6_prefix are in
-# secrets.sops.yaml. They are RFC 1918 and ULA ranges rather than reachable
-# addresses, but they still describe the topology, and hiding them costs
-# nothing.
-
 # GitHub's SSH host key is not needed: hosts clone over HTTPS.
 
 # tailscaled's UDP port, Tailscale's default. Plaintext because it is the
@@ -47,15 +42,21 @@ deerlab_tailscale_port: 41641
 deerlab_tailnet_fqdn: "{{ inventory_hostname }}.{{ deerlab_tailnet_domain }}"
 
 # How Ansible reaches each host. The edge is the one host reached directly, at
-# its public address; every other host is reached through it, over the
-# tailnet, so Ansible works from any network. ansible_host stays each host's
-# public address all the same: ssh checks the host key in known_hosts against
-# it, and svc1's WireGuard endpoint and the firewall's peer address are
-# derived from it. `just bootstrap` and `just enrol` clear these arguments,
-# because a host they reach is not on the tailnet yet.
+# its public address; every other host is reached through it, so Ansible
+# works from any network. deerlab_ssh_route picks where the edge forwards
+# to: `tailnet`, the host's MagicDNS name, or `public`, its public address
+# (any other value fails),
+# which a services host's firewall accepts SSH on from the edge alone.
+# `just enrol` takes the public route, because a host being enrolled may not
+# be on the tailnet; `just bootstrap` clears these arguments, because a fresh
+# host has no firewall yet. ansible_host stays each host's public address
+# either way, because ssh checks the host key in known_hosts against it.
+deerlab_ssh_route: tailnet
 ansible_ssh_common_args: >-
   {{ '' if inventory_hostname in groups['edge']
-     else '-o ProxyCommand="ssh -W %s:22 %s@%s"' | format(deerlab_tailnet_fqdn, deerlab_admin_user, hostvars[groups['edge'][0]]['ansible_host']) }}
+     else '-o ProxyCommand="ssh -W %s:22 %s@%s"' | format(
+       {'tailnet': deerlab_tailnet_fqdn, 'public': ansible_host}[deerlab_ssh_route],
+       deerlab_admin_user, hostvars[groups['edge'][0]]['ansible_host']) }}
 
 # The same route as one command, for `just ssh`, so the jump is defined once.
 deerlab_ssh_command: "ssh {{ ansible_ssh_common_args }} {{ deerlab_admin_user }}@{{ ansible_host }}"

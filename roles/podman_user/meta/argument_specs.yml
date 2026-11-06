@@ -7,7 +7,7 @@ argument_specs:
     description: >
       Creates the service accounts with explicit UIDs, allocates
       non-overlapping subordinate ID ranges as whole templated files,
-      enables lingering, orders each user manager after the tunnel,
+      enables lingering, orders each user manager after the network,
       applies resource ceilings on the per-user slice, and gives each
       user its own copy of the Pushover credential.
     options:
@@ -55,6 +55,3 @@ argument_specs:
         description: >
           The subordinate GID file, written whole from subid.j2. A variable
           only so that a test can point the role at a synthetic file.
-      podman_user_wg_interface:
-        type: str
-        default: wg0
