@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: CPAL-1.0
 # Copyright (c) 2026 Aryan Ameri
 
-- name: Reconfigure wg
+# A reload re-reads the network files and keeps every other link as it is;
+# eth0 keeps its address. systemd-networkd itself is never stopped.
+- name: Reload systemd-networkd
   ansible.builtin.command:
-    cmd: "networkctl reload"
+    cmd: networkctl reload
+  register: base_wireguard_reload
   changed_when: true
-  notify: Reconfigure wg interface
-
-- name: Reconfigure wg interface
-  ansible.builtin.command:
-    cmd: "networkctl reconfigure {{ base_wireguard_interface }}"
-  changed_when: true
-  failed_when: false
+  failed_when: base_wireguard_reload.rc != 0

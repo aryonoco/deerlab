@@ -103,7 +103,8 @@ jobs:
       # every run, with no Dockerfile: a root systemd image fails Trivy's
       # DS002, and suppressions are not allowed. base_os does not run in the
       # lab, so the image carries the packages of its that the lab's roles
-      # use. No wg0 exists, so nothing may wait for it.
+      # use. A base from before the tunnel's removal orders each user manager
+      # after wg0, which no lab container has, so nothing may wait for it.
       - name: Build the lab image
         run: |
           docker run --name deerlab-lab-build "$LAB_DEBIAN_IMAGE" sh -c '

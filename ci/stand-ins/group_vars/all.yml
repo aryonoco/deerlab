@@ -3,7 +3,8 @@
 
 # Stand-ins for inventory/group_vars/all/secrets.sops.yaml,
 # encrypted per run to the lab's throwaway age key. Every key that file
-# holds, and no real value.
+# holds, and no real value; plus its old WireGuard keys, which the lab's
+# base side still reads until the release that deletes base_wireguard.
 deerlab_domain: example.test
 deerlab_acme_email: lab@example.test
 deerlab_root_password_hash: lab-stand-in

@@ -70,28 +70,22 @@ table inet deerlab {
     iifname "{{ base_firewall_tailscale_interface }}" accept
     meta l4proto icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept
     meta l4proto icmpv6 icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, nd-router-solicit, mld-listener-query } accept
+{% if base_firewall_role == 'edge' %}
+{# The jump host keeps public SSH, limited per source. #}
     tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate4 { ip saddr limit rate over 10/minute burst 10 packets } drop
     tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate6 { ip6 saddr limit rate over 10/minute burst 10 packets } drop
     tcp dport {{ base_firewall_ssh_port }} ct state new accept
-{% if base_firewall_role == 'edge' %}
 {# Caddy's own ports only as the redirect's target: the internet sees 80 and #}
 {# 443. Loopback and the tailnet reach them directly through the accepts above. #}
     tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } ct status dnat accept
     udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } ct status dnat accept
     udp dport {{ base_firewall_tailscale_port }} accept
-    udp dport {{ base_firewall_wg_port }} accept
 {% else %}
-{% if base_firewall_peer_public_v4 | length > 0 %}
-    ip saddr {{ base_firewall_peer_public_v4 }} udp dport {{ base_firewall_wg_port }} ct state new accept
-{% endif %}
-{% for proto, ports in [('tcp', base_firewall_backend_tcp_ports), ('udp', base_firewall_backend_udp_ports)] %}
-{% if ports | length > 0 %}
-    iifname "{{ base_firewall_wg_interface }}" ip saddr {{ base_firewall_peer_ipv4 }} {{ proto }} dport { {{ ports | join(', ') }} } ct state new accept
-{% if base_firewall_peer_ipv6 | length > 0 %}
-    iifname "{{ base_firewall_wg_interface }}" ip6 saddr {{ base_firewall_peer_ipv6 }} {{ proto }} dport { {{ ports | join(', ') }} } ct state new accept
-{% endif %}
-{% endif %}
-{% endfor %}
+{# A services host is reached over the tailnet, accepted above. Its one #}
+{# public door is SSH from the edge's public address, so that a host which #}
+{# has left the tailnet can be enrolled again through the edge: the provider #}
+{# offers no console. #}
+    ip saddr {{ base_firewall_edge_public_v4 }} tcp dport {{ base_firewall_ssh_port }} ct state new accept
 {% endif %}
     limit rate 5/minute log prefix "nft-in-drop " level info
   }
@@ -110,7 +104,7 @@ table inet deerlab {
 {% endfor %}
 {# Below the per-UID jumps on purpose. Linux routes a packet addressed to any #}
 {# local address out lo - 127.0.0.0/8, the host's own public addresses and #}
-{# its own tunnel address alike - so an accept placed above the jumps exempts #}
+{# its own tailnet address alike - so an accept placed above the jumps exempts #}
 {# every egress class from its own rules, and a request-forgery bug in a #}
 {# confined service could reach sshd or anything a neighbour publishes on the #}
 {# wildcard address. The svc chains emit their resolver accepts before the #}

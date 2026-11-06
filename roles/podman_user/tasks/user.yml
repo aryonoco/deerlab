@@ -53,13 +53,13 @@
     - "/etc/systemd/system/user@{{ podman_user_item.value.uid }}.service.d"
     - "/etc/systemd/system/user-{{ podman_user_item.value.uid }}.slice.d"
 
-- name: Order the user manager after the tunnel for {{ podman_user_item.key }}
+- name: Order the user manager after the network for {{ podman_user_item.key }}
   ansible.builtin.copy:
     content: |
       # {{ deerlab_managed }}
       [Unit]
-      Wants=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
-      After=network-online.target systemd-networkd-wait-online@{{ podman_user_wg_interface }}.service
+      Wants=network-online.target
+      After=network-online.target
     dest: "/etc/systemd/system/user@{{ podman_user_item.value.uid }}.service.d/10-wait-network.conf"
     owner: root
     group: root

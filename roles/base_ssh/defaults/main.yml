@@ -6,8 +6,6 @@ base_ssh_admin_user: "{{ deerlab_admin_user }}"
 # edge arrives from the edge's tailnet address: penalising that one address
 # for someone else's failures would block every jump.
 base_ssh_penalty_exempt:
-  - "{{ deerlab_wg_ipv4_prefix }}"
-  - "{{ deerlab_wg_ipv6_prefix }}"
   - 100.64.0.0/10
   - fd7a:115c:a1e0::/48
 # Only the jump host forwards (inventory/group_vars/edge/main.yml).
@@ -18,7 +16,7 @@ base_ssh_allow_tcp_forwarding: false
 # value buys no brute-force resistance. It does lock out an operator whose agent
 # holds several keys, because ssh offers them in agent order until one is
 # accepted — verified here, the deerlab key is the fourth offered, so a limit of
-# 3 would have made both hosts console-only. PerSourcePenalties below is the
+# 3 would have locked both hosts out. PerSourcePenalties below is the
 # actual brute-force control.
 base_ssh_max_auth_tries: 6
 base_ssh_login_grace_time: 30

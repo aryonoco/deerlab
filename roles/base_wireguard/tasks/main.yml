@@ -1,88 +1,53 @@
 # SPDX-License-Identifier: CPAL-1.0
 # Copyright (c) 2026 Aryan Ameri
 
-- name: Validate required inputs
-  ansible.builtin.assert:
-    that:
-      - base_wireguard_private_key | length > 0
-      - base_wireguard_private_key != 'CHANGE-ME'
-      - base_wireguard_preshared_key | length > 0
-      - base_wireguard_preshared_key != 'CHANGE-ME'
-      - base_wireguard_public_key | length > 0
-      - base_wireguard_ipv4 | length > 0
-      - base_wireguard_ipv6 | length > 0
-    fail_msg: base_wireguard needs this host's keys and tunnel addresses
-    quiet: true
+# The WireGuard tunnel between the hosts is retired: the edge reaches svc1
+# over the tailnet. This role removes what the tunnel's role left, and stays
+# for one release so that every host has run it before it is deleted. It
+# reloads systemd-networkd but never stops or disables it: it also manages
+# eth0.
 
-- name: Build the peer list from the other hosts
-  ansible.builtin.set_fact:
-    base_wireguard_peers: >-
-      {{ base_wireguard_peers | default([]) + [{
-           'name': item,
-           'public_key': hostvars[item]['base_wireguard_public_key'],
-           'ipv4': hostvars[item]['base_wireguard_ipv4'],
-           'ipv6': hostvars[item]['base_wireguard_ipv6'],
-           'endpoint': hostvars[item]['base_wireguard_public_endpoint'] | default('')
-         }] }}
-  loop: "{{ groups['podman_hosts'] | difference([inventory_hostname]) }}"
+- name: Remove the tunnel's key and network files
+  ansible.builtin.file:
+    path: "/etc/systemd/network/{{ item }}"
+    state: absent
+  loop: [wg0.key, wg0.psk, 50-wg0.netdev, 50-wg0.network]
+  notify: Reload systemd-networkd
 
-- name: Write the private key
-  ansible.builtin.copy:
-    content: "{{ base_wireguard_private_key }}\n"
-    dest: "/etc/systemd/network/{{ base_wireguard_interface }}.key"
-    owner: root
-    group: systemd-network
-    mode: "0640"
-  no_log: true
-  notify: Reconfigure wg
-
-- name: Write the preshared key
-  ansible.builtin.copy:
-    content: "{{ base_wireguard_preshared_key }}\n"
-    dest: "/etc/systemd/network/{{ base_wireguard_interface }}.psk"
-    owner: root
-    group: systemd-network
-    mode: "0640"
-  no_log: true
-  notify: Reconfigure wg
-
-- name: Define the WireGuard netdev
-  ansible.builtin.template:
-    src: wg.netdev.j2
-    dest: "/etc/systemd/network/50-{{ base_wireguard_interface }}.netdev"
-    owner: root
-    group: systemd-network
-    mode: "0640"
-  notify: Reconfigure wg
-
-- name: Define the WireGuard network
-  ansible.builtin.template:
-    src: wg.network.j2
-    dest: "/etc/systemd/network/50-{{ base_wireguard_interface }}.network"
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Reconfigure wg
-
-- name: Enable systemd-networkd
+- name: Stop waiting for the tunnel at boot
   ansible.builtin.systemd_service:
-    name: systemd-networkd
-    enabled: true
-    state: started
+    name: systemd-networkd-wait-online@wg0.service
+    enabled: false
 
-- name: Wait for the tunnel interface at boot
-  ansible.builtin.systemd_service:
-    name: "systemd-networkd-wait-online@{{ base_wireguard_interface }}.service"
-    enabled: true
-
-- name: Name the peers in /etc/hosts
+- name: Remove the peers' tunnel names from /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    regexp: '\s{{ item.name }}\.wg(\s|$)'
-    line: "{{ item.ipv4 }} {{ item.name }}.wg"
-  loop: "{{ base_wireguard_peers }}"
-  loop_control:
-    label: "{{ item.name }}"
+    regexp: '\s\S+\.wg$'
+    state: absent
 
-- name: Flush handlers so the tunnel is up before the firewall runs
+- name: Remove the WireGuard tools
+  ansible.builtin.apt:
+    name: wireguard-tools
+    state: absent
+
+# networkd forgets the files at the reload, but a reload never deletes a
+# netdev it already made, so the interface goes after it: deleting it first
+# would let a reload with the files still present make it again.
+- name: Reload networkd before deleting the interface
   ansible.builtin.meta: flush_handlers
+
+- name: Read whether the tunnel interface still exists
+  ansible.builtin.command:
+    argv: [ip, link, show, wg0]
+  register: base_wireguard_link
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Delete the tunnel interface
+  ansible.builtin.command:
+    argv: [networkctl, delete, wg0]
+  register: base_wireguard_delete
+  when: base_wireguard_link.rc == 0
+  changed_when: true
+  failed_when: base_wireguard_delete.rc != 0

@@ -1,20 +1,6 @@
 # SPDX-License-Identifier: 0BSD
 # Copyright (c) 2026 Aryan Ameri
 
-# The WireGuard public key is not a secret: it is derived from the private key,
-# it is published to the peer by design, and knowing it grants nothing. Holding
-# it in the clear also keeps the peer list buildable without one host decrypting
-# the other's file. Everything else about this host — its address, its tunnel
-# addresses and its private key — is in secrets.sops.yaml.
-base_wireguard_public_key: "K0IwugKaMJ+y0tTMeCnND/fBIs8xQxFgkZIYYi4T9CI="
-
-# Derived rather than stored: base_wireguard builds each peer's Endpoint= from
-# this, and deriving it from ansible_host means changing the host's address in
-# one encrypted place moves the tunnel with it. The edge needs this to initiate
-# after a reboot; without it the edge loses the endpoint it learned and the
-# tunnel waits out REJECT_AFTER_TIME.
-base_wireguard_public_endpoint: "{{ ansible_host }}:{{ deerlab_wg_port }}"
-
 # svc1's services log far more than the edge (Baikal's access log alone records
 # a health probe every 30 s), and at the role's 512M the system journal held
 # about four days of pull and deploy history against a 90-day retention. 2G

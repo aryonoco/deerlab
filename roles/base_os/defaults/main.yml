@@ -20,7 +20,6 @@ base_os_packages:
   - sqlite3
   - systemd-zram-generator
   - unattended-upgrades
-  - wireguard-tools
 
 base_os_packages_absent:
   - fail2ban

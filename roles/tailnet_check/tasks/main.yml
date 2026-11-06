@@ -53,3 +53,18 @@
       loop: "{{ groups['podman_hosts'] | default([]) | difference([inventory_hostname]) }}"
       when: inventory_hostname in groups['edge'] | default([])
       check_mode: false
+
+    # A services host's one public door, SSH from the edge's public address,
+    # is the way back in once it has left the tailnet, and the provider offers
+    # no console. Probing it every pull notices a door that stopped answering
+    # while the tailnet still works. Each probe costs sshd's 1 s noauth
+    # penalty, far below its 15 s threshold.
+    - name: Reach every other host's public SSH door
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item]['ansible_host'] }}"
+        port: "{{ tailnet_check_ssh_port }}"
+        timeout: 30
+        msg: the edge cannot reach {{ item }}'s public SSH door on port {{ tailnet_check_ssh_port }}
+      loop: "{{ groups['podman_hosts'] | default([]) | difference([inventory_hostname]) }}"
+      when: inventory_hostname in groups['edge'] | default([])
+      check_mode: false

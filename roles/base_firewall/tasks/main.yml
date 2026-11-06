@@ -5,9 +5,8 @@
   ansible.builtin.assert:
     that:
       - base_firewall_role in ['edge', 'services']
+      - base_firewall_role == 'edge' or base_firewall_edge_public_v4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
       - base_firewall_services is mapping
-      - base_firewall_role == 'edge' or base_firewall_peer_ipv4 | length > 0
-      - base_firewall_role == 'edge' or base_firewall_peer_public_v4 | length > 0
       # `that:` stops at the first false condition, so the defined check has to
       # come before the value check - rejectattr on an undefined attribute dies
       # as a raw Jinja error rather than this fail_msg.
@@ -15,27 +14,9 @@
       - base_firewall_services | dict2items | rejectattr('value.egress', 'in', base_firewall_egress_classes) | list | length == 0
     fail_msg: >-
       base_firewall_role must be edge or services, a services host needs the
-      edge's tunnel address and public address, and every service needs an
-      egress class from {{ base_firewall_egress_classes | join(', ') }}. An
+      edge's public IPv4 address as a literal, and every service needs an egress class from {{ base_firewall_egress_classes | join(', ') }}. An
       unrecognised class renders the template's fail-closed branch, which
       would drop the nightly backup and the alert about it.
-
-# Split by protocol. A publish entry may carry a /udp suffix, and collapsing
-# both into one list would emit a tcp accept for a udp service: the rendered
-# ruleset would look correct, nft --check would pass, and the port would simply
-# be unreachable at runtime.
-- name: Collect the backend ports published on this host
-  ansible.builtin.set_fact:
-    base_firewall_backend_tcp_ports: >-
-      {{ base_firewall_services.values() | map(attribute='publish') | flatten
-         | reject('search', '/udp$')
-         | map('regex_replace', '^([0-9]+):.*$', '\1')
-         | map('int') | unique | sort }}
-    base_firewall_backend_udp_ports: >-
-      {{ base_firewall_services.values() | map(attribute='publish') | flatten
-         | select('search', '/udp$')
-         | map('regex_replace', '^([0-9]+):.*$', '\1')
-         | map('int') | unique | sort }}
 
 - name: Write the ruleset
   ansible.builtin.template:

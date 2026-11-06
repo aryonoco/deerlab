@@ -150,7 +150,7 @@ enrol host:
     read -rsp "One-off auth key for {{ host }} (tag:edge or tag:svc): " DEERLAB_TAILSCALE_AUTH_KEY; echo
     [[ -n $DEERLAB_TAILSCALE_AUTH_KEY ]] || { echo "an auth key is required" >&2; exit 1; }
     export DEERLAB_TAILSCALE_AUTH_KEY
-    ansible-playbook playbooks/enrol.yml --limit {{ host }} --extra-vars ansible_ssh_common_args=
+    ansible-playbook playbooks/enrol.yml --limit {{ host }} --extra-vars deerlab_ssh_route=public
 
 # Open a shell on a host, or run ARGS there: the edge directly, every other host through it
 [positional-arguments]
