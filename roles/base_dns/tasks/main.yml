@@ -18,6 +18,11 @@
   ansible.builtin.apt:
     name:
       - systemd-resolved
+      # glibc's lookups through resolved's socket rather than port 53, so a
+      # service user's image pulls, backups and alerts are not steered to its
+      # DNS listener (docs/runbook.md, The services' DNS forwarder). Only a
+      # Recommends of systemd-resolved, so named here.
+      - libnss-resolve
       - ca-certificates
       - openssl
     state: present
