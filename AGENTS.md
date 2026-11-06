@@ -4,7 +4,7 @@
 # deerlab
 
 My personal homelab. Debian 13 VPSs configured
-entirely by Ansible: an edge host (`edge1`) that runs only Caddy, and a services
+entirely by Ansible: an edge host (`edge1`) that runs Caddy, and a services
 host (`svc1`) that runs every application as a rootless Podman Quadlet under its
 own system user. The edge reaches the services host over a Tailscale tailnet.
 
@@ -113,7 +113,7 @@ for Claude 5 Fable.
 - Validate required inputs with `ansible.builtin.assert` at the top of every role
 - Prefer native modules over `command`/`shell`
 - Playbooks are thin — a list of roles with `hosts:`, no inline tasks
-- Data belongs in inventory (`group_vars/`, `host_vars/`), logic belongs in roles. A new service is an inventory change
+- Data belongs in inventory (`group_vars/`, `host_vars/`), logic belongs in roles. A new service is an inventory change, plus its rule in `ci/fixture/dnsdist.yml` (`docs/runbook.md`, Adding a service)
 - One role = one concern. Split early, merge never
 - **Never pass a secret through `environment:` on a `command` task.** Ansible renders it as a `KEY=value` prefix on the command string, so the value lands in the argv of the `sh`, the `sudo` and the interpreter. `/proc/<pid>/cmdline` is mode 0444 and any local account can read it, including one service user reading another's. Deliver credentials through a root-written file and `systemd-run --property=EnvironmentFile=`, and pass Ansible nothing but paths
 
@@ -155,7 +155,8 @@ secrets/            # operator-only credentials, outside the inventory
 
 ## Architecture
 
-- The edge terminates TLS for every public domain and runs only Caddy; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
+- The edge terminates TLS for every public domain and runs only Caddy and the DNS forwarder; the services host runs every application as a rootless Podman Quadlet under its own locked-down system user
+- Each host runs a DNS forwarder, dnsdist, as a service of its own, with a listener per service that forwards over DNS-over-HTTPS under that service's name. See `docs/runbook.md`, The services' DNS forwarder
 - The edge reaches the services host over the tailnet: Caddy dials svc1's MagicDNS name, and Ansible reaches every host but the edge through the edge (`ansible_ssh_common_args`). Every pull checks its own host is on the tailnet, and the edge's pull that it reaches svc1 over it (`tailnet_check`)
 - The services host's only public listener is SSH, accepted from the edge's public address alone: `just enrol` and break-glass reach a services host that has left the tailnet through it. The provider offers no console
 - Backends publish on the wildcard address, never on an interface's own address: a unit that binds an address that only appears once an interface is up races it at boot and fails hard on Podman 5.4.2. The tailnet policy scopes a backend: the edge gets ports 8080–8099 on svc1, the operator's devices every port
