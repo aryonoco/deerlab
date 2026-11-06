@@ -46,6 +46,11 @@ base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
 base_firewall_dns_forwarder: "{{ deerlab_dns_forwarder }}"
 base_firewall_dns_listener_net: "{{ deerlab_dns_listener_net }}"
 base_firewall_dns_listener_port: "{{ deerlab_dns_listener_port }}"
+# Each service's listener, keyed by service name: output_nat steers that
+# service's DNS there. The services that also ask tailscaled directly for
+# tailnet names, unsteered: Caddy, for svc1's MagicDNS name.
+base_firewall_dns_listeners: "{{ deerlab_dns_listeners }}"
+base_firewall_dns_tailnet_services: []
 
 # Sourced from deerlab_egress_classes so this role's assert and its template
 # cannot drift from podman_user's own gate. Adding a class still needs a

@@ -84,6 +84,18 @@ argument_specs:
       base_firewall_dns_listener_port:
         type: int
         description: The port the forwarder's listeners use.
+      base_firewall_dns_listeners:
+        type: dict
+        description: >-
+          Each steered service's listener address on the DNS forwarder, keyed
+          by service name. Every port-53 packet of that service's uid is
+          DNATed there, and its egress chain drops any other port 53 or 853.
+      base_firewall_dns_tailnet_services:
+        type: list
+        elements: str
+        description: >-
+          Steered services that may also ask 100.100.100.100 on the tailnet
+          interface directly, unsteered, for tailnet names.
       base_firewall_egress_classes:
         type: list
         elements: str

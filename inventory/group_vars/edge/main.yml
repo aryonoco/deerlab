@@ -64,10 +64,10 @@ caddy_caddyfile: |
 
   # Every backend is on svc1, reached over the tailnet by its MagicDNS name.
   # tcp4: Actual listens on IPv4 only, and no backend has been reached over
-  # IPv6. resolvers: the container's own list is pasta's forwarder and then
-  # the resolver's public addresses, which answer in plain DNS and know
-  # nothing of the tailnet; asking quad-100 directly keeps svc1's name off
-  # them even when the forwarder fails.
+  # IPv6. resolvers: the container's own server is pasta's forwarder, which
+  # base_firewall steers to Caddy's listener on the DNS forwarder, whose
+  # resolver knows nothing of the tailnet. Asking quad-100 directly keeps
+  # svc1's name off it, and works while the forwarder is down.
 
   wallabag.{{ deerlab_domain }} {
       log {
@@ -245,6 +245,11 @@ caddy_caddyfile: |
 
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2001
+
+# Caddy asks tailscaled for svc1's MagicDNS name itself (its upstreams'
+# resolvers in the Caddyfile above), so that name never reaches the operator's DNS
+# resolver; every other lookup of Caddy's goes through its listener.
+base_firewall_dns_tailnet_services: [caddy]
 
 podman_services:
   dnsdist: "{{ deerlab_dnsdist_service }}"
