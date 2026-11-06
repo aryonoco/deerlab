@@ -3,7 +3,7 @@
 
 # deerlab runbook
 
-- Two Debian 13 VPSs, Ansible only. `edge1` runs Caddy; `svc1` runs each application as a rootless Podman Quadlet under its own system user; the edge reaches svc1 over a Tailscale tailnet, with the earlier WireGuard link still up until it is retired; delivery by `ansible-pull` from the `release` branch
+- Two Debian 13 VPSs, Ansible only. `edge1` runs Caddy; `svc1` runs each application as a rootless Podman Quadlet under its own system user; the edge reaches svc1 over a Tailscale tailnet; delivery by `ansible-pull` from the `release` branch
 - Written for someone holding only this repository, under time pressure, with nobody to ask: it records what is silent when it goes wrong
 - Read [What is not proven](#what-is-not-proven) before trusting any procedure here in a real disaster
 - `<svc>` is a service name, which is also its username; `<uid>` is its uid. Substitute `<placeholders>` and `{{ inventory_variable }}` from the decrypted inventory, and never paste a real value back into this file
@@ -42,7 +42,7 @@
 
 ### The object store's version-retention window
 
-- Every `*.sops.yaml` under `inventory/` is encrypted to **both** host keys. `base_wireguard` and `base_firewall` read `hostvars[<peer>]`, forcing each host to compute the peer's whole variable set, so a host that cannot decrypt the other's vars cannot parse the inventory at all
+- Every `*.sops.yaml` under `inventory/` is encrypted to **both** host keys. The edge's Caddyfile reads `hostvars['svc1']` and `base_firewall` on svc1 reads the edge's, forcing each host to compute the peer's whole variable set, so a host that cannot decrypt the other's vars cannot parse the inventory at all
 - Both hosts therefore hold every service's restic password and object-store keys, and the ciphertext is in a public repository besides. **Assume a compromise of either host reaches every service's repository**
 - Prefix scoping is real — one service's key is refused at the `Stat` of another's repository config object — but it buys no per-host blast radius
 - Those credentials can delete, and must: `restic backup` takes and releases a lock under `locks/` on every run
@@ -56,36 +56,33 @@
 flowchart LR
   net["Internet"]
   subgraph edge1
-    nft1["nftables: accept 22 per-source limited, udp tailscale, udp wg,<br/>8080, 8443, udp 8443 as the redirect's target only, all of tailscale0<br/>nat: 80 to 8080, 443 to 8443, udp 443 to 8443"]
+    nft1["nftables: accept 22 per-source limited, udp tailscale,<br/>8080, 8443, udp 8443 as the redirect's target only, all of tailscale0<br/>nat: 80 to 8080, 443 to 8443, udp 443 to 8443"]
     caddy["Caddy, rootless Quadlet, uid 2000"]
   end
   subgraph svc1
-    nft2["nftables: accept 22 per-source limited, udp wg from edge public v4 only,<br/>all of tailscale0; published ports on wg0 from edge tunnel addr only"]
+    nft2["nftables: accept all of tailscale0;<br/>22 from the edge's public v4 only"]
     app["app container, wildcard bind"]
   end
   net -->|"tcp 80, 443, 22; udp 443, tailscale"| nft1
   nft1 --> caddy
   caddy -->|"plain HTTP to svc1's MagicDNS name and port, IPv4"| ts(["tailscale0: the tailnet"])
   ts --> nft2
-  wg(["wg0: still up, no longer carries the sites"]) -.- nft2
   nft2 --> app
 ```
 
 | | edge host `edge1` | services host `svc1` |
 | --- | --- | --- |
 | Groups | `edge`, `podman_hosts` | `services`, `podman_hosts` |
-| Public inbound | tcp 22, limited per source, 80, 443; udp 443, 41641 (Tailscale), WireGuard port. 8080, 8443 and udp 8443 only as the target of the 80/443 redirect | tcp 22, limited per source; udp WireGuard port, **from the edge's public v4 only** |
+| Public inbound | tcp 22, limited per source, 80, 443; udp 443, 41641 (Tailscale). 8080, 8443 and udp 8443 only as the target of the 80/443 redirect | tcp 22, **from the edge's public v4 only** |
 | Tailnet inbound | everything on `tailscale0`; the [tailnet policy](#the-tailnet-policy) decides what reaches it | everything on `tailscale0`; the [tailnet policy](#the-tailnet-policy) decides what reaches it |
-| Tunnel inbound | — | each published backend port on `wg0`, from the edge's tunnel v4/v6 only |
 | Runs | sshd, Caddy | sshd, application services |
 | Service users | one, uid 2000 | one per application, uid from 2001 |
 
 - Stock Debian 13, dual-stack on the public side, `base_*` roles only; nothing installed by hand. **Ansible is the only executor** — no hypervisor, no OpenTofu, no orchestrator. The one control plane outside the repository is Tailscale's, for the tailnet
 - Host ports 80/443 reach Caddy through an nftables redirect to 8080/8443. Caddy still listens on 80 and 443 inside its namespace, so its own redirects and ACME challenges work unchanged
-- **The edge reaches the services host over the tailnet** ([Tailscale](#tailscale)). Caddy proxies plain HTTP to svc1's MagicDNS name over IPv4, because Actual listens on IPv4 only, and asks quad-100 for the name; the tailnet's WireGuard supplies confidentiality, integrity and peer authentication
-- Tunnel: kernel WireGuard via `systemd-networkd`, one `.netdev` and one `.network` per host. **Both peers carry `Endpoint=`**, an explicit `ListenPort` and `PersistentKeepalive=25`, so either can initiate and neither depends on the other being up first. It stays up, and the backends still accept the edge's tunnel address, but the sites no longer use it
+- **The edge reaches the services host over the tailnet** ([Tailscale](#tailscale)). Caddy proxies plain HTTP to svc1's MagicDNS name over IPv4, because Actual listens on IPv4 only, and asks quad-100 for the name; the tailnet's own WireGuard encryption supplies confidentiality and integrity, its machine keys authenticate the peers, and the [policy](#the-tailnet-policy) decides what each may reach
 - The edge serves more than one registrable domain: most sites are hostnames under `deerlab_domain`, and Vikunja and Actual have their own, `vikunja_hostname` and `actual_hostname`. Every certificate comes from the same ACME account, so a new domain needs only DNS records pointing at the edge, plus, if the domain publishes a CAA record, one that allows the CA
-- Backends publish on the wildcard address, never the tunnel address — a unit binding the tunnel address races the interface at boot and fails hard on Podman 5.4.2. **The bind address does not scope a backend: over the tailnet the [policy](#the-tailnet-policy) does, granting the edge 8080–8099 on svc1 and the operator's devices every port, and over the tunnel the firewall does**
+- Backends publish on the wildcard address, never on an interface's own address — a unit binding an address that only appears once an interface is up races it at boot and fails hard on Podman 5.4.2. **The bind address does not scope a backend: the [policy](#the-tailnet-policy) does, granting the edge 8080–8099 on svc1 and the operator's devices every port**
 - One `podman_services` entry derives the service user, its 65536-wide subordinate ID range, its firewall egress chain, its slice limits, its Quadlet units, its Podman secrets, and, where it has a `backup:` block, its backup unit and timer
 - **Subordinate ID ranges are arithmetic, not allocated:** `podman_user_subid_base + (uid - podman_user_uid_base) * podman_user_subid_count`, from `roles/podman_user/templates/subid.j2`. A rebuilt host derives the same mapping from the same inventory, which is what makes a restore portable
 - Corollary, and a live hazard: **changing a service's `uid`, or `podman_user_uid_base` / `podman_user_subid_base` / `podman_user_subid_count`, silently invalidates the file ownership recorded in every existing snapshot for that service**
@@ -112,7 +109,6 @@ flowchart LR
 | User-manager ordering drop-in | `/etc/systemd/system/user@<uid>.service.d/10-wait-network.conf` |
 | Per-service slice limits | `/etc/systemd/system/user-<uid>.slice.d/50-deerlab.conf` |
 | Firewall ruleset | `/etc/nftables.conf` |
-| WireGuard | `/etc/systemd/network/50-wg0.{netdev,network}`, `wg0.key`, `wg0.psk` |
 
 - Quadlet units are `root:root` 0644: the service user reads its unit, never rewrites it
 - The bare `/etc/containers/systemd/users/` directory is never used; a unit placed there runs under *every* lingering user
@@ -199,13 +195,14 @@ flowchart LR
 ## Tailscale
 
 - **The tailnet is the operator's own**, created by hand in Tailscale's admin console, with MagicDNS on. Its DNS name (`tail<hex>.ts.net`), its 100.x addresses and the operator's login are identifiers: they never go in this repository
-- **The edge reaches the services host over the tailnet.** Caddy's upstreams dial svc1's MagicDNS name, and Ansible and `just ssh` reach every host but the edge through the edge, with `ssh -W` to the host's MagicDNS name. Each host's MagicDNS name is `deerlab_tailnet_fqdn`, built from the tailnet's own name, `deerlab_tailnet_domain`, in SOPS. WireGuard stays up until it is retired, but the sites no longer use it
+- **The edge reaches the services host over the tailnet.** Caddy's upstreams dial svc1's MagicDNS name, and Ansible and `just ssh` reach every host but the edge through the edge, with `ssh -W` to the host's MagicDNS name. Each host's MagicDNS name is `deerlab_tailnet_fqdn`, built from the tailnet's own name, `deerlab_tailnet_domain`, in SOPS. The WireGuard tunnel the hosts used before is gone
+- **svc1 has one public door: SSH from the edge's public address.** Its only other public answers are ICMP's. A services host that has left the tailnet is reached through it: `just enrol` takes that route (`deerlab_ssh_route=public`), and so can any Ansible run, `just apply svc1 --extra-vars deerlab_ssh_route=public`. **The provider offers no console**, so this door and svc1's own pull are the only ways back in when the tailnet fails
 - **Every pull checks the tailnet** (`tailnet_check`, the last play of every pull). On each host tailscaled must be `Running`; on the edge, every other host's SSH port must also answer at its MagicDNS name. A failure fails the pull, which pages `deerlab-pull.service failed on <host>`. The pull's journal names the cause, `tailscaled on <host> is <state>, not Running` or `the edge cannot reach <host>'s port 22 over the tailnet`: `journalctl -u deerlab-pull.service --since -2h -o cat --no-pager | grep -E 'not Running|over the tailnet'`. SSH rather than each backend, because backends restart during svc1's own pulls and would page falsely, while SSH proves the tailnet, the policy's grant and svc1's firewall at once. Caddy's site checks cover the backends only after each Caddy start, so between Caddy starts nothing pages for a backend the edge cannot reach while SSH still answers, as after a policy edit that loses 8080–8099. The CI lab turns the check off, because its tailscaled never joins
 - **On each host**, `base_tailscale` installs the `tailscale` package from Tailscale's stable trixie repository at the version in `roles/base_tailscale/defaults/main.yml`, and holds it there. Renovate bumps that version after its 7-day cooldown ([Bot pull requests](#bot-pull-requests)), and reverting a bump installs the older version again. Tailscale's own updater is off, and the hold keeps apt from moving it
 - **tailscaled reads its settings from `/etc/tailscale/tailscaled.json`, locked**: the inventory name as the machine name, MagicDNS accepted, other machines' routes refused, netfilter mode `on`, auto-update off. On the host, `tailscale set` and `tailscale up` are refused (`config file is locked`); change a setting in the role
 - **`/etc/tailscale/authkey` must exist, even empty.** The config file names it, and tailscaled refuses to start while it is missing (`error reading config file authKey`). It is empty except during an enrolment
 - **Every lookup on both hosts outside the tailnet's own names goes through tailscaled to the operator's DNS resolver.** The console's DNS settings name that resolver as the global nameserver with "Override DNS servers" on, and the hosts accept the tailnet's DNS, so tailscaled takes all of systemd-resolved's queries (`~.` on `tailscale0`), the service users' included, and sends them to the resolver over DNS-over-HTTPS. It answers the tailnet's names and its 100.x reverse lookups itself. The resolver sees every other lookup the servers make, with each one's machine name and tailnet address
-- **A hung tailscaled, or the resolver down or blocking a name, stops DNS on that host** with no fallback: pulls, image pulls, certificate renewals, backups and the Pushover alerts fail together. The dead-man monitors still notice the silence. On a host with no public SSH, a fix pushed to `release` cannot arrive while its DNS is down, because the pull cannot resolve GitHub ([Break-glass](#break-glass)). If tailscaled crashes or stops, `tailscale0` goes away and the host's own servers, the resolver over DNS-over-TLS, take over again ([The hosts' resolver](#the-hosts-resolver))
+- **A hung tailscaled, or the resolver down or blocking a name, stops DNS on that host** with no fallback: pulls, image pulls, certificate renewals, backups and the Pushover alerts fail together. The dead-man monitors still notice the silence. A fix pushed to `release` cannot arrive while a host's DNS is down, because its pull cannot resolve GitHub: reach svc1 through the edge's public path instead ([Break-glass](#break-glass)). If tailscaled crashes or stops, `tailscale0` goes away and the host's own servers, the resolver over DNS-over-TLS, take over again ([The hosts' resolver](#the-hosts-resolver))
 - **The resolver's profile must not block what the hosts need.** Above all `*.tailscale.com`: a blocked answer for the control plane can take a host off the tailnet, and tailscaled's own fallback does not cover it ([tailscale/tailscale#14947](https://github.com/tailscale/tailscale/issues/14947)). Then GitHub, the container registries, the object store and the alert endpoint
 - **The firewall accepts everything that arrives on `tailscale0`**: the tailnet policy decides what reaches each port. Each reload of the ruleset is followed by a tailscaled restart ([Expected, not incidents](#expected-not-incidents))
 
@@ -233,7 +230,7 @@ flowchart LR
 
 **A rebuilt host: delete its old machine in the console first.** Otherwise the new one joins under a de-duplicated MagicDNS name, `<host>.<tailnet>` still names the old, offline machine, and every site that reaches it is down while the host itself reports `Running`; only the edge's tailnet check fails
 
-`just bootstrap` asks for a key the same way. Both connect to the host directly, at its public address, not through the edge: a host being enrolled is not on the tailnet yet
+`just bootstrap` asks for a key the same way, and connects to the host directly, at its public address: a fresh host has no firewall yet. `just enrol` reaches a services host through the edge to its public address (`deerlab_ssh_route=public`), because a host being enrolled may not be on the tailnet
 
 ### The tailnet policy
 
@@ -291,12 +288,12 @@ zramctl
 ```mermaid
 flowchart TD
   boot["boot"] --> nd["systemd-networkd"]
-  nd --> wo["systemd-networkd-wait-online@wg0"]
+  nd --> wo["network-online.target"]
   wo --> um["user@UID.service<br/>ordered here by 10-wait-network.conf"]
   um --> vol["svc-volume.service, Type=oneshot RemainAfterExit=yes"]
   vol --> ctr["svc.service, Notify=healthy, Restart=always"]
   ctr --> ok["active, NRestarts=0"]
-  um -.->|"drop-in lost"| race["container races the tunnel,<br/>NRestarts above 0"]
+  um -.->|"drop-in lost"| race["container races the network,<br/>NRestarts above 0"]
 ```
 
 - Order: **services host first, then the edge**
@@ -308,7 +305,7 @@ mise x -- ansible svc1 -b -m ansible.builtin.shell \
 mise x -- ansible edge1 -b -m ansible.builtin.reboot
 ```
 
-- **Services host:** back in about a minute. The unit is `activating` immediately and reaches `active` 30–60s later; `NRestarts` stays `0`. Non-zero `NRestarts` means the wait-network drop-in has been lost and the unit is racing the tunnel at boot
+- **Services host:** back in about a minute. The unit is `activating` immediately and reaches `active` 30–60s later; `NRestarts` stays `0`. Non-zero `NRestarts` means the wait-network drop-in has been lost and the unit is racing the network at boot. The services wait for the network, not the tailnet, so the sites fail until tailscaled is `Running` on both hosts
 - **Edge host:** not measured since the sites moved to the tailnet. The sites answer once Caddy is up and tailscaled on both hosts is `Running`
 - **Minutes of `503 no upstreams available` after either host reboots mean Caddy cannot reach svc1 over the tailnet.** Check `tailscale status` on both hosts, each `Running` and seeing the other, then the edge's pull journal for the tailnet check's message ([Tailscale](#tailscale))
 
@@ -659,7 +656,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 
 ### The sequence
 
-> - **This sequence has never been run end to end.** Every restore drill so far was onto a host that already had its service user, subordinate ranges, Quadlet units, pulled image, Podman secrets, backup credentials, user manager, tunnel and firewall
+> - **This sequence has never been run end to end.** Every restore drill so far was onto a host that already had its service user, subordinate ranges, Quadlet units, pulled image, Podman secrets, backup credentials, user manager, network and firewall
 > - Steps 2 and 3 are drilled; step 1 is inference from the fact that these hosts were themselves built this way
 > - Expect to debug, budget accordingly, and read [What is not proven](#what-is-not-proven) first
 
@@ -675,25 +672,11 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 ## Bootstrapping a host
 
 1. Create the VPS from the stock Debian 13 image with your SSH key on root
-2. Fill in that host's encrypted vars in `inventory/host_vars/<host>/secrets.sops.yaml`: `ansible_host`, `base_wireguard_ipv4`, `base_wireguard_ipv6`, `base_wireguard_private_key`
-   - Generate the keypair with `wg genkey` / `wg pubkey`; write the private half with `mise x -- sops set` so no plaintext key touches disk, and put the public half in `inventory/host_vars/<host>/main.yml` as `base_wireguard_public_key`
-   - That one is plaintext: derived from the private key, handed to the peer by design, and keeping it clear stops each host having to decrypt the other's host vars
-3. **`base_wireguard_public_endpoint` is not uniform across the two hosts, and getting it wrong degrades the tunnel silently**
-
-   | Where | Value |
-   | --- | --- |
-   | role default | empty string |
-   | `svc1` | derived in `inventory/host_vars/svc1/main.yml` from `ansible_host` and the WireGuard port |
-   | `edge1` | explicit, in `inventory/host_vars/edge1/secrets.sops.yaml`; nothing in its `main.yml` |
-
-   - Each host builds its peer list from the **other** host's value, and `roles/base_wireguard/templates/wg.netdev.j2` emits **neither `Endpoint=` nor `PersistentKeepalive=`** when that value is empty
-   - A replacement host must be given an endpoint one way or the other. Miss it and the *other* host has nothing to send to and no keepalive to hold the path open, so it cannot initiate
-   - It does not fail outright, because the host that still has an endpoint keeps initiating. It stays hidden until *that* host is the one that reboots. **A rebuilt edge is the dangerous case**, its value being explicit rather than derived and so the one easy to leave empty
-   - Confirm from the **peer** before calling the tunnel done: `mise x -- ansible <peer> -m ansible.builtin.shell -a 'wg show wg0 endpoints'`
-4. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`. It first asks for a one-off auth key for the host, generated as in [Enrolling a host](#enrolling-a-host), step 1, and the run joins the host to the tailnet. That run connects as root with `base_pull_enabled=false`, because a host being bootstrapped is not yet a SOPS recipient and its first unattended pull could only fail to decrypt. Root login is closed by the end of the run
-5. The run prints `base_pull age public key for <host>: age1…`. Add it to the inventory rule in `.sops.yaml`, run `just secrets-rekey`, commit, merge it with "Rebase and merge", and wait for `Promote`
+2. Fill in that host's encrypted vars in `inventory/host_vars/<host>/secrets.sops.yaml`: `ansible_host`
+3. `ssh-keyscan -H <ip> >> ~/.ssh/known_hosts`, then `just bootstrap <host>`. It first asks for a one-off auth key for the host, generated as in [Enrolling a host](#enrolling-a-host), step 1, and the run joins the host to the tailnet before the firewall closes a services host's public SSH to everything but the edge. That run connects as root with `base_pull_enabled=false`, because a host being bootstrapped is not yet a SOPS recipient and its first unattended pull could only fail to decrypt. Root login is closed by the end of the run. A run that fails after the firewall step cannot simply be run again, because root can no longer log in and a services host's public SSH answers only the edge: continue with `just apply <host> --extra-vars base_pull_enabled=false`, which reaches the host over the tailnet, or add `--extra-vars deerlab_ssh_route=public` if it never joined
+4. The run prints `base_pull age public key for <host>: age1…`. Add it to the inventory rule in `.sops.yaml`, run `just secrets-rekey`, commit, merge it with "Rebase and merge", and wait for `Promote`
    - `just bootstrap` and `just apply` end with the verify play, like a pull, and it pages. On a rebuilt host a check that needs real data, such as Actual's `bootstrapped`, fails until the [restore](#restore); restore, and the service's next start checks it again
-6. Start the first pull by hand and confirm the dead-man goes green: `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
+5. Start the first pull by hand and confirm the dead-man goes green: `mise x -- ansible <host> -b -m ansible.builtin.shell -a 'systemctl start deerlab-pull.service'`
 
 - `secrets/` is matched by its own creation rule, listed **first** so it wins, and is encrypted to the operator key alone
 - Nothing on a host reads that directory: the credential it holds can erase a repository's history, so a host key on it would mean a compromise of either host also destroys the path back
@@ -853,7 +836,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
   4. Audit what changed while the old key was live: the recent history of `main` and `release`, and `.github/workflows/`
   5. A token already minted expires within an hour of being minted
 - `just secrets-edit <file>`, commit, merge, promote. The next pull recreates the Podman secret and restarts the unit that consumes it
-- WireGuard keys rotate the same way, and **both hosts must be updated in the same commit** — a half-rotated tunnel is a broken tunnel
+- There are no tunnel keys to rotate. A tagged machine's Tailscale key does not expire; to replace it, delete the machine in the console and [enrol](#enrolling-a-host) the host again. For svc1 every site is down until `just enrol svc1`, through the edge's public path, has joined it again
 - **FreshRSS's admin password is create-only.** `create-user.php` exits 3 once the account exists, so changing `freshrss_admin_password` and promoting appears to succeed and changes nothing. Change it in the FreshRSS UI, or with FreshRSS's `cli/update-user.php --user <user> --password <password>`; `cli/user-info.php` only reports. Prefer the UI: `update-user.php` takes the password as a command-line argument, which any local account can read from `/proc/<pid>/cmdline` while it runs
 - **Vikunja's `vikunja_service_secret`** signs access tokens, link-share tokens and API-token keys. Rotating it invalidates the link-share and access tokens in flight. The share links survive, and so do sessions: refresh tokens are stored hashed in the database, so nobody is logged out
 - **Actual has no service secret.** Its server password lives in its own database: change it with `reset-password.js`, then revoke every device, as in [Actual](#actual)
@@ -877,10 +860,12 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 
 ## Break-glass
 
-- **If the edge is down**, Ansible and `just ssh` cannot reach svc1 through it. While svc1 still has public SSH, reach it directly: `just apply svc1 --extra-vars ansible_ssh_common_args=`, or ssh to its public address
-- **If a host's DNS is down because tailscaled is hung** ([Tailscale](#tailscale)), restart it with `systemctl restart tailscaled`: over SSH while the host still has public SSH, and from the provider's console once it has none. `resolvectl revert tailscale0` hands DNS back to the host's own servers, the resolver over DNS-over-TLS, without a restart, until tailscaled next sets the link up
-- **If a host's DNS is down because the resolver cannot be reached over TLS** while tailscaled is not routing, then from the provider's console: `rm -f /etc/systemd/resolved.conf.d/50-deerlab.conf /etc/systemd/network/*.network.d/50-deerlab-dns.conf && networkctl reload && systemctl restart systemd-resolved`. Both drop-ins go: with only the first removed, eth0 still hands resolved no servers and the host has none. Restart, not reload: a reload does not restore every default. The host then resolves through the provider's DHCP resolvers, in plain text. Every pull after that runs the TLS check again and fails there, first in the run, so it deploys nothing and pages, until the resolver answers over TLS; the next pull then writes both drop-ins back. A corrected address or name goes through `release`
-- If SSH is unreachable, use the provider's console. The root password is the one whose hash is in the inventory as `deerlab_root_password_hash`: decrypt `inventory/group_vars/all/secrets.sops.yaml` for the plaintext you set, or set a new one and re-apply. `base_os` sets it precisely so the console is a usable route when the network path is not
+- **If the edge is down**, Ansible and `just ssh` cannot reach svc1. A device of yours on the tailnet still reaches svc1, because the [policy](#the-tailnet-policy) grants your login every port (disconnect any other VPN first): `ssh -o HostKeyAlias=<svc1 public address> <admin>@svc1.<tailnet>`, and for Ansible `just apply svc1 --extra-vars 'ansible_ssh_common_args=-o HostName=svc1.<tailnet> -o HostKeyAlias=<svc1 public address>'`. svc1's own pull still applies what reaches `release`, as long as its DNS works
+- **Never pass `--extra-vars ansible_host=…`.** Extra vars apply to every host's variables, the edge's included, and svc1's firewall reads the edge's `ansible_host` for its one public door, so the run would move the door to whatever was passed. A rebuilt edge with a new address is accepted by svc1 only once svc1's own pull has applied the inventory change; until then reach svc1 over the tailnet
+- **If svc1 has left the tailnet**, reach it through the edge's public path: `just enrol svc1`, or `just apply svc1 --extra-vars deerlab_ssh_route=public`
+- **If a host's DNS is down because tailscaled is hung** ([Tailscale](#tailscale)), restart it: on the edge over its public SSH, `mise x -- ansible edge1 -b -m ansible.builtin.systemd_service -a 'name=tailscaled state=restarted'`; on svc1 through the edge's public path, because the tailnet's leg into svc1 is what failed, `mise x -- ansible svc1 --extra-vars deerlab_ssh_route=public -b -m ansible.builtin.systemd_service -a 'name=tailscaled state=restarted'`. `resolvectl revert tailscale0` hands DNS back to the host's own servers, the resolver over DNS-over-TLS, without a restart, until tailscaled next sets the link up
+- **If a host's DNS is down because the resolver cannot be reached over TLS** while tailscaled is not routing, then over SSH as above: `rm -f /etc/systemd/resolved.conf.d/50-deerlab.conf /etc/systemd/network/*.network.d/50-deerlab-dns.conf && networkctl reload && systemctl restart systemd-resolved`. Both drop-ins go: with only the first removed, eth0 still hands resolved no servers and the host has none. Restart, not reload: a reload does not restore every default. The host then resolves through the provider's DHCP resolvers, in plain text. Every pull after that runs the TLS check again and fails there, first in the run, so it deploys nothing and pages, until the resolver answers over TLS; the next pull then writes both drop-ins back. A corrected address or name goes through `release`
+- **There is no console.** The provider offers none, so a host that no route above reaches can be fixed only by what its own pull applies from `release`. `deerlab_root_password_hash` sets a root password all the same, for a console the next provider may have
 - **Never `systemctl stop nftables`.** Debian's unit flushes every rule and leaves the host wide open with no ruleset at all. Use `systemctl reload nftables`, or `nft -f /etc/nftables.conf` after editing. The template task validates with `nft --check` before writing, so a rendered ruleset that reaches disk has at least parsed
 - Break-glass changes made with `just apply` are reverted by the next pull. If the fix must stick, promote it
 
@@ -892,7 +877,7 @@ systemctl --user --machine=<svc>@ show <svc>-<job>.timer -p ActiveState --value 
 - **Migrations are proven on fresh data only.** The lab's data is what the base deploy created minutes earlier. A migration over months of real data is proven only on the host, after the fact, by its checks
 - **The browser checks prove that Chromium starts and renders** under each container's confinement, not RSSHub's own launch path through a route, nor any third-party route
 - **Renovate breaking itself is seen only through the stall check**, within a day. The repair is a PR by hand
-- **The full rebuild path has never been run end to end.** Every restore so far was onto a host that kept its service user, subordinate ranges, Quadlet units, pulled image, Podman secrets, backup credentials, user manager, tunnel and firewall. What is evidenced is the *last* link: data back into a host that was already built. The honest test is a third VPS, bootstrapped from this repository with nothing but an address and a DNS change, then restored
+- **The full rebuild path has never been run end to end.** Every restore so far was onto a host that kept its service user, subordinate ranges, Quadlet units, pulled image, Podman secrets, backup credentials, user manager, network and firewall. What is evidenced is the *last* link: data back into a host that was already built. The honest test is a third VPS, bootstrapped from this repository with nothing but an address and a DNS change, then restored
 - **Restoring onto a host with a different subordinate base has not been demonstrated.** The argument that `podman unshare` makes it portable follows from where the kernel applies the mapping and is sound, but both ends of every drill so far were the same host with the same `/etc/subuid`
 - **Restore A in its current form has never been drilled.** Neither the nested staging path — the staging copy at its full path relative to `_data`, such as baikal's `Specific/db/db.sqlite` — nor `d=` pointing at the volume's `_data` root has been run end to end
 - **The raw volume copy of a database inside a snapshot is a hot copy.** Every snapshot holds each database twice: the staging copy, written by SQLite's online `.backup` and integrity-checked by the unit, consistent by construction; and the plain file read of the live database inside the volume tree, consistent only by luck. A volume-level restore (Restore B) takes the second. On a busy instance it can carry a torn page set and nothing in the pipeline would notice — `restic check` verifies the repository, not the database inside it. **A torn copy has never been produced, restored or detected.** Given the choice, restore the volumes and then overwrite the database with the snapshot's staging copy per Restore A
