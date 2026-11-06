@@ -3,9 +3,5 @@
 
 # Stand-ins for inventory/host_vars/svc1/secrets.sops.yaml,
 # encrypted per run to the lab's throwaway age key. Every key that file
-# holds, and no real value; plus its old WireGuard keys, which the lab's
-# base side still reads until the release that deletes base_wireguard.
-base_wireguard_private_key: lab-stand-in
+# holds, and no real value.
 ansible_host: 198.51.100.2
-base_wireguard_ipv4: 10.99.0.2
-base_wireguard_ipv6: fd99::2

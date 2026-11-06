@@ -101,10 +101,9 @@ jobs:
 
       # Debian 13 is the only Podman 5.4.2; no runner image has it. Built on
       # every run, with no Dockerfile: a root systemd image fails Trivy's
-      # DS002, and suppressions are not allowed. base_os does not run in the
-      # lab, so the image carries the packages of its that the lab's roles
-      # use. A base from before the tunnel's removal orders each user manager
-      # after wg0, which no lab container has, so nothing may wait for it.
+      # DS002, and suppressions are not allowed. The lab runs only base_os's
+      # kernel parameters, so the image carries the packages of its that the
+      # lab's roles use.
       - name: Build the lab image
         run: |
           docker run --name deerlab-lab-build "$LAB_DEBIAN_IMAGE" sh -c '
@@ -113,7 +112,6 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
               systemd systemd-sysv dbus dbus-user-session libpam-systemd sudo python3 python3-venv \
               ca-certificates git age nftables curl restic sqlite3 acl procps
-            ln -s /dev/null /etc/systemd/system/systemd-networkd-wait-online@.service
             git config --system --add safe.directory "*"
             apt-get clean'
           docker commit --change 'CMD ["/sbin/init"]' --change 'STOPSIGNAL SIGRTMIN+3' \
