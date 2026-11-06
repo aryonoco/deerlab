@@ -67,6 +67,21 @@ argument_specs:
         default: host
         choices: [host, ci]
         description: Runs the checks whose where is both or this site.
+      podman_service_verify_dns_listeners:
+        type: dict
+        description: >-
+          Each steered service's listener address on the DNS forwarder, keyed
+          by service name. Where ci, each such service gets the built-in dns
+          check.
+      podman_service_verify_dns_probe:
+        type: str
+        description: >-
+          The probe the dns check runs with python3 -c: QNAME PORT MODE
+          ADDR..., MODE =<IPv4> passing only on that answer.
+      podman_service_verify_dns_probe_name:
+        type: str
+        default: probe.example.test
+        description: The name the CI lab's fixture answers per service.
       podman_service_verify_edge_port:
         type: int
         default: 443

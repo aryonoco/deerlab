@@ -14,7 +14,8 @@
 
 # Jobs are left out of the units: their InvocationID changes at every run.
 # The built-in checks come first: the running image of the primary and each
-# worker, then each config file copied from the image.
+# worker, then each config file copied from the image, then, in the CI lab,
+# a steered service's dns check.
 - name: List the units and checks of {{ podman_service_verify_name }}
   ansible.builtin.set_fact:
     podman_service_verify_workers: >-
@@ -32,6 +33,9 @@
       {%- set ns.out = ns.out + [d | combine({'name': 'upstream-' ~ (f.path | basename | lower | regex_replace('[^a-z0-9]+', '-')),
                                               'type': 'upstream', 'upstream': f.upstream, 'content': f.content})] -%}
       {%- endfor -%}
+      {%- if podman_service_verify_site == 'ci' and n in podman_service_verify_dns_listeners -%}
+      {%- set ns.out = ns.out + [d | combine({'name': 'dns', 'type': 'dns'})] -%}
+      {%- endif -%}
       {%- for c in podman_service_verify_spec.checks | default([])
            if c.where | default('both') in ['both', podman_service_verify_site] -%}
       {%- set ns.out = ns.out + [d | combine({'type': 'http'}, c)] -%}

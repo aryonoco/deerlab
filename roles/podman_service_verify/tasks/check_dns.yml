@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# Built in, for each steered service, in the CI lab only. A lookup sent as
+# the service's user, from the host, to an address off the host, must come
+# back with the fixture's answer for this service alone. That proves
+# base_firewall steered the uid to its own listener and the forwarder sent
+# the lookup under its own name. Only the fixture answers so, which is why
+# it never runs on a host. From the host, not a container, so a service
+# whose image has nothing to resolve with (Vikunja's) is proven too; pasta
+# sends a container's lookups as the same uid.
+- name: Ask as the user of {{ podman_service_verify_name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "{{ podman_service_verify_dns_probe }}"
+      - "{{ podman_service_verify_dns_probe_name }}"
+      - "53"
+      - "=192.0.2.{{ podman_service_verify_dns_listeners[podman_service_verify_name].split('.')[-1] }}"
+      - 192.0.2.53
+  become: true
+  become_user: "{{ podman_service_verify_name }}"
+  register: podman_service_verify_dns
+  timeout: "{{ podman_service_verify_check.timeout }}"
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+
+- name: Assert the answer of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
+  ansible.builtin.assert:
+    that:
+      - podman_service_verify_dns.rc | default(-1) == 0
+    fail_msg: "rc {{ podman_service_verify_dns.rc | default(-1) }}"
+    quiet: true
