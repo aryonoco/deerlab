@@ -124,7 +124,11 @@ freshrss_apache_conf: |
   	Include /var/www/FreshRSS/p/themes/.htaccess
   </Directory>
 
+# The DNS forwarder's uid on this host (podman_hosts/main.yml).
+deerlab_dnsdist_uid: 2008
+
 podman_services:
+  dnsdist: "{{ deerlab_dnsdist_service }}"
   wallabag:
     uid: 2001
     # The image runs as root inside and rewrites its application tree on

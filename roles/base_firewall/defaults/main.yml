@@ -39,6 +39,14 @@ base_firewall_private_v6:
 
 base_firewall_resolvers: "{{ ansible_facts['dns']['nameservers'] }}"
 
+# The services' DNS forwarder (inventory/group_vars/all/main.yml) and the
+# loopback range and port its listeners use. Its own chain accepts them: its
+# health check and its checks ask its listeners from inside its container,
+# which shares the host's network, so they leave as its user.
+base_firewall_dns_forwarder: "{{ deerlab_dns_forwarder }}"
+base_firewall_dns_listener_net: "{{ deerlab_dns_listener_net }}"
+base_firewall_dns_listener_port: "{{ deerlab_dns_listener_port }}"
+
 # Sourced from deerlab_egress_classes so this role's assert and its template
 # cannot drift from podman_user's own gate. Adding a class still needs a
 # branch in the template as well as an entry in the global list.
