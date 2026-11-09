@@ -238,13 +238,14 @@ restore-drill service:
         echo "ERROR: restored nothing to $target. Wrong repository, or an empty snapshot." >&2
         exit 1
     fi
-    # Both extensions are in use: wallabag writes .sqlite, linkding writes
-    # .sqlite3. Enumerated rather than globbed as *.sqlite* on purpose - that
-    # would also match the -wal and -shm sidecars, and handing those to
-    # integrity_check fails on a perfectly good snapshot.
-    mapfile -t dbs < <(find "$target" -type f \( -name '*.sqlite' -o -name '*.sqlite3' \))
+    # Three extensions are in use: wallabag writes .sqlite, linkding writes
+    # .sqlite3, Mealie writes .db. Enumerated rather than globbed as *.sqlite*
+    # or *.db* on purpose - that would also match the -wal, -shm and -journal
+    # sidecars, and handing those to integrity_check fails on a perfectly
+    # good snapshot.
+    mapfile -t dbs < <(find "$target" -type f \( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \))
     if [[ ${#dbs[@]} -eq 0 ]]; then
-        echo "ERROR: ${#restored[@]} file(s) restored to $target, but no *.sqlite or *.sqlite3 to check." >&2
+        echo "ERROR: ${#restored[@]} file(s) restored to $target, but no *.sqlite, *.sqlite3 or *.db to check." >&2
         echo "If {{ service }} keeps a database, the snapshot has lost it. If it keeps none, this drill can prove nothing about it: read the restored tree by hand." >&2
         exit 1
     fi
