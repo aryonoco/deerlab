@@ -30,6 +30,12 @@ deerlab_service_limits:
     slice: { memory: 1G, cpu: "200%", tasks: 512 }
     containers:
       caddy: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }
+  # The speed test, on the edge. In a lab, on arm64, about 1 Gbps took 6-10 %
+  # of one core and peaked at 126 MiB, its upload spool included.
+  librespeed:
+    slice: { memory: 256M, cpu: "100%", tasks: 128 }
+    containers:
+      librespeed: { memory: 256M, cpu: "100%", tasks: 128, pids: 64, start_timeout: 120 }
 
   wallabag:
     slice: { memory: 2G, cpu: "200%", tasks: 1024 }
