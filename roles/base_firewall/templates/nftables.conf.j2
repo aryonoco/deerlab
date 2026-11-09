@@ -33,7 +33,7 @@ table inet deerlab {
 {% endif %}
 {% if svc.egress == 'any' %}
     accept
-{% elif svc.egress in ('web', 'platform', 'mail', 'public') %}
+{% elif svc.egress in ('web', 'platform', 'mail', 'public', 'web-mail') %}
 {# The resolver accepts come first on purpose. drop is terminal, so if a #}
 {# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
 {# resolver, a link-local metadata address - a drop placed above would make #}
@@ -46,23 +46,30 @@ table inet deerlab {
 {% endif %}
     ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
     ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
+{% if svc.egress in ('public', 'web-mail') %}
+{# A packet for any of the host's own addresses leaves by lo, and the input #}
+{# chain accepts lo, so a request-forgery bug could otherwise reach sshd and #}
+{# every backend a neighbour publishes on the wildcard address. public opens #}
+{# every port, so it needs this drop outright. web-mail opens only 80, 443 #}
+{# and 465, where nothing on the host listens today, but its application #}
+{# fetches any address a user hands it, so the drop keeps that true whatever #}
+{# listens there later. #}
+    fib daddr type local counter drop
+{% endif %}
 {% if svc.egress == 'public' %}
 {# public is any TCP port, but only to public addresses, for a service whose #}
-{# routes reach sites on arbitrary ports. With every port open, the host's #}
-{# own addresses need a drop of their own: a packet for any of them leaves #}
-{# by lo, and the input chain accepts lo, so a request-forgery bug could #}
-{# otherwise reach sshd and every backend a neighbour publishes on the #}
-{# wildcard address. UDP stays DNS-only, as in web, platform and mail. #}
-    fib daddr type local counter drop
+{# routes reach sites on arbitrary ports. UDP stays DNS-only, as in every #}
+{# other port class. #}
     meta l4proto tcp accept
 {% else %}
 {# platform is web without port 80. Both still need DNS and 443, because the #}
 {# service user itself pulls the image, runs restic and posts to Pushover. #}
 {# No class can deny everything, which is why there is no longer one that #}
 {# claims to. mail is platform plus 465, SMTP submission over implicit TLS, #}
-{# for an application that sends its own mail through a relay. Like the #}
-{# others it is port-based: 465 is open to any public address. #}
-    tcp dport { {{ {'web': '80, 443', 'platform': '443', 'mail': '443, 465'}[svc.egress] }} } accept
+{# for an application that sends its own mail through a relay. web-mail is #}
+{# web plus 465, for one that both fetches from the web and sends mail. Like #}
+{# the others they are port-based: 465 is open to any public address. #}
+    tcp dport { {{ {'web': '80, 443', 'platform': '443', 'mail': '443, 465', 'web-mail': '80, 443, 465'}[svc.egress] }} } accept
 {% endif %}
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop

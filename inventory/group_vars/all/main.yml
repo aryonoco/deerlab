@@ -68,7 +68,7 @@ tailnet_check_enabled: true
 
 # Named globally because base_firewall renders the chains from it and
 # podman_user asserts its own inputs against it. One definition, two gates.
-deerlab_egress_classes: [any, web, platform, mail, public]
+deerlab_egress_classes: [any, web, platform, mail, public, web-mail]
 
 # The services' DNS forwarder, the record deerlab_dnsdist_service in
 # podman_hosts/main.yml. Every other service on a host gets a listener of its
