@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: 0BSD
+# Copyright (c) 2026 Aryan Ameri
+
+# The fixture front, 203.0.113.10, is in a documentation range that Python
+# counts as private, so Mealie's scraper refuses it unless it is named here.
+# Mealie's ci-scrape check fetches the front's plain-http recipe page; on the
+# host the list stays empty.
+mealie_http_allow_list: "203.0.113.10"

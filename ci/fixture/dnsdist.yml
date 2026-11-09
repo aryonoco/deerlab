@@ -138,6 +138,18 @@ query_rules:
       type: Spoof
       ips:
         - 192.0.2.8
+  - name: mealie
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/mealie
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.10
   - name: resolver-host
     selector:
       type: QName

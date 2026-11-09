@@ -33,4 +33,7 @@ backup_vikunja_s3_secret_key: lab-secret-key
 backup_actual_restic_password: lab-stand-in-restic
 backup_actual_s3_access_key: lab-access
 backup_actual_s3_secret_key: lab-secret-key
+backup_mealie_restic_password: lab-stand-in-restic
+backup_mealie_s3_access_key: lab-access
+backup_mealie_s3_secret_key: lab-secret-key
 rsshub_access_key: lab-stand-in-rsshub
