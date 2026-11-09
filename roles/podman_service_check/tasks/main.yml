@@ -39,6 +39,10 @@
       - podman_service_check_definition_name in podman_service_check_limits[podman_service_check_definition_name].containers
       - podman_service_check_limits[podman_service_check_definition_name].containers[podman_service_check_definition_name].pids is defined
       - (podman_service_check_definition_spec.secrets | default([])) | map(attribute='value') | select('equalto', 'CHANGE-ME') | list | length == 0
+      # A placeholder in a config file reaches the service as written:
+      # as the hash in Caddy's basic_auth file it fails the whole
+      # configuration, every site with it.
+      - (podman_service_check_definition_spec.config_files | default([])) | map(attribute='content') | select('search', 'CHANGE-ME') | list | length == 0
       # fullmatch, not match: re.match's $ also matches before a trailing
       # newline, and a newline here would split the unit file.
       - >-
@@ -57,7 +61,7 @@
       service {{ podman_service_check_definition_name }} needs a fully qualified digest-pinned image, publish,
       health.cmd not ending in a double quote, a uid from 2000 to 2252 (the DNS forwarder's listeners are
       127.0.53.<uid - 1999>), user 0, no userns and no SETUID or SETGID if it sets network: host, an entry with a pids limit in deerlab_service_limits, no
-      CHANGE-ME secrets, a stop_signal, if set, of the form SIGNAME, and a
+      CHANGE-ME secrets or config files, a stop_signal, if set, of the form SIGNAME, and a
       success_exit_status, if set, that is a list of integers from 1 to 255
     quiet: true
   # A failed loop result contains its complete item, and the CHANGE-ME check

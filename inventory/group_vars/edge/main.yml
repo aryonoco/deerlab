@@ -62,7 +62,8 @@ caddy_caddyfile: |
       respond /healthz 200
   }
 
-  # Every backend is on svc1, reached over the tailnet by its MagicDNS name.
+  # Every backend but the speed test's is on svc1, reached over the tailnet by
+  # its MagicDNS name.
   # tcp4: Actual listens on IPv4 only, and no backend has been reached over
   # IPv6. resolvers: the container's own server is pasta's forwarder, which
   # base_firewall steers to Caddy's listener on the DNS forwarder, whose
@@ -241,6 +242,77 @@ caddy_caddyfile: |
           health_status 200
           lb_try_duration 30s
       }
+  }
+
+  # The speed test's backend is on the edge itself, at pasta's address for
+  # the host: the test measures the link to this machine.
+  speedtest.{{ deerlab_domain }} {
+      # HTTP/1.1 for this site alone. Over HTTP/2 Caddy gives each connection
+      # one fixed 1 MiB upload window, which held uploads to a fraction of
+      # the link, and HTTP/3 cost several times the CPU and was the slowest
+      # at every round-trip time. ALPN covers TLS; a browser learns of QUIC
+      # from the Alt-Svc header Caddy puts on every response before any
+      # handler runs. It is set to clear here, at once: a deletion is
+      # deferred to the responses the handlers write, and misses the 401
+      # Caddy itself sends before the login, a browser's first answer. clear
+      # also drops an h3 a browser learned earlier. A DNS HTTPS record
+      # advertising h3 would undo it: the name's record is a plain A/AAAA.
+      tls {
+          alpn http/1.1
+      }
+      header Alt-Svc clear
+      log {
+          output stdout
+          # Caddy logs the username of an authenticated request as user_id,
+          # and every chunk of a test is one.
+          format filter {
+              user_id delete
+              wrap json
+          }
+      }
+      # The login, in a file of its own so that neither the username nor the
+      # hash is in this file, its diff or the Quadlet.
+      import /etc/caddy/librespeed-auth.caddy
+      # Writes a fake result on every request and shows database errors.
+      @refused path /results/sanitycheck.php*
+      respond @refused 404
+      reverse_proxy 169.254.1.2:8082 {
+          # LibreSpeed records the first of these it finds as the client's
+          # address, trusting any sender, so anyone past the login could set
+          # the address of their result.
+          header_up -Client-IP
+          header_up -CF-Connecting-IPv6
+          header_up X-Real-IP {remote_host}
+          # Liveness only: no endpoint proves the database without a login or
+          # a write.
+          health_uri /backend/empty.php
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          lb_try_duration 30s
+      }
+  }
+
+# The speed test's login, imported by its site block from a file of Caddy's
+# record that is written with no log and no diff. bcrypt at cost 10, not
+# Caddy's default 14: a wrong password always costs a full hash, and at 14
+# forty concurrent guesses held Caddy's whole CPU quota and slowed another
+# site. The password's length is the protection, not the cost.
+#
+# A value Caddy cannot load (empty, a placeholder, a hash neither $-prefixed
+# nor base64, a username that breaks the Caddyfile) fails its whole
+# configuration at its next start, every site with it. So this refuses
+# anything but a plain username and a bcrypt hash at cost 10, and the pull
+# fails before Caddy's files are written, with Caddy still serving.
+# A damaged hash of the right shape loads, and refuses every login.
+caddy_librespeed_auth: |
+  basic_auth bcrypt {
+      {{ librespeed_auth_user
+         if (librespeed_auth_user | string) is regex('[A-Za-z0-9._-]+', match_type='fullmatch')
+         else undef(hint='librespeed_auth_user is not letters, digits, dots, hyphens and underscores') }} {{
+         librespeed_auth_hash
+         if (librespeed_auth_hash | string) is regex('[$]2[aby][$]10[$][./A-Za-z0-9]{53}', match_type='fullmatch')
+         else undef(hint='librespeed_auth_hash is not a bcrypt hash at cost 10') }}
   }
 
 # LibreSpeed's vendored configuration. Apache starts directly from these, in
@@ -871,6 +943,7 @@ podman_services:
       TZ: Etc/UTC
     config_files:
       - { path: config/Caddyfile, content: "{{ caddy_caddyfile }}", mode: "0640", banner: "#" }
+      - { path: config/librespeed-auth.caddy, content: "{{ caddy_librespeed_auth }}", mode: "0640", banner: "#", sensitive: true }
     # The official binary carries a file capability and will not exec with
     # everything dropped. NET_BIND_SERVICE is confined to Caddy's namespace.
     capabilities:
@@ -945,6 +1018,14 @@ podman_services:
         host: "{{ actual_hostname }}"
         path: /account/bootstrap
         status: [404]
+      # The speed test's login is Caddy's: a request without credentials
+      # gets 401. That proves the site is loaded, its certificate served and
+      # its login on.
+      - name: login-speedtest
+        via: edge
+        host: "speedtest.{{ deerlab_domain }}"
+        path: /
+        status: [401]
       - name: http-redirect
         path: /
         headers: { Host: "wallabag.{{ deerlab_domain }}" }
