@@ -133,6 +133,14 @@
       ]
     },
     {
+      "description": "Mealie: releases every one to three weeks migrate the schema at every start, and there is no downgrade",
+      "matchPackageNames": ["docker.io/hkotel/mealie"],
+      "addLabels": ["stateful", "backup-first"],
+      "prBodyNotes": [
+        "**The host backs Mealie up before it switches image,** and the pull fails if that backup does. The CI lab upgrades the base commit's Mealie in place, so this migration ran on lab data before the merge. An older Mealie exits 3 on a newer schema; the only rollback is a restore. The backup's presence query needs a second account and a first recipe, so this bump cannot land until they exist. The CI lab compares `mealie_log_config` with this image's `logconf.prod.json`, so a drifted copy, or a Python bump that moves its path, turns this PR red. See docs/runbook.md, Mealie, Upgrading."
+      ]
+    },
+    {
       "description": "Actual has more tags than Docker Hub will list, so Renovate gets no push times for it and the cooldown would hold every release forever",
       "matchPackageNames": ["docker.io/actualbudget/actual-server"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"

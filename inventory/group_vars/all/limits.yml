@@ -99,3 +99,14 @@ deerlab_service_limits:
       # in a lab, six renders at once all answered, with 1.1 GiB swapped and
       # nothing killed.
       rsshub: { memory: 3G, cpu: "200%", tasks: 2048, pids: 1024, start_timeout: 120 }
+
+  mealie:
+    slice: { memory: 1G, cpu: "200%", tasks: 256 }
+    containers:
+      # Measured on arm64: 207-255 MiB idle; 547 MiB at peak, unlimited,
+      # after every flow (the ingredient parser, 3.8 MB uploads, a backup and
+      # a restore), and every flow still passed under 384M by giving back
+      # file cache. An exec check adds about 130 MiB, and the 256m /tmp tmpfs
+      # counts against the container. Photo imports and amd64 are not
+      # measured.
+      mealie: { memory: 1G, cpu: "200%", tasks: 256, pids: 128, start_timeout: 300 }
