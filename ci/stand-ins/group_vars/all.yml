@@ -20,6 +20,7 @@ deerlab_deadman_urls:
     vikunja: https://deadman.example.test/backup-vikunja
     actual: https://deadman.example.test/backup-actual
     librespeed: https://deadman.example.test/backup-librespeed
+    mealie: https://deadman.example.test/backup-mealie
 backup_s3_bucket: s3:https://s3.example.test/lab
 deerlab_pushover_token: lab-stand-in
 deerlab_pushover_user: lab-stand-in
@@ -28,6 +29,7 @@ deerlab_admin_ssh_keys:
   - ssh-ed25519 AAAAlabstandin lab@example.test
 vikunja_hostname: tasks.example.test
 actual_hostname: budget.example.test
+mealie_hostname: recipes.example.test
 # The fixture front, which hands DNS-over-HTTPS to ci/fixture/dnsdist.yml;
 # base_dns, the other reader, does not run in the lab.
 deerlab_dns_tls_addresses:

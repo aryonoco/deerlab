@@ -22,3 +22,21 @@ deadman.example.test {
 dns.example.test {
 	reverse_proxy h2c://deerlab-lab-dns:8053
 }
+
+# A recipe page over plain http, which Mealie's ci-scrape check fetches
+# through the web-mail egress class's port 80. Its own host name is the
+# front's address, so no lab name resolves to it.
+http://203.0.113.10 {
+	handle /mealie-recipe.html {
+		header Content-Type "text/html; charset=utf-8"
+		respond <<HTML
+			<!doctype html>
+			<html><head><title>deerlab lab pancakes</title>
+			<script type="application/ld+json">
+			{"@context": "https://schema.org", "@type": "Recipe", "name": "deerlab lab pancakes", "recipeIngredient": ["2 cups flour", "1 1/2 cups milk", "2 large eggs"], "recipeInstructions": [{"@type": "HowToStep", "text": "Mix and fry."}]}
+			</script></head>
+			<body><h1>deerlab lab pancakes</h1></body></html>
+			HTML 200
+	}
+	respond 404
+}
