@@ -7,3 +7,12 @@
 backup_caddy_restic_password: lab-stand-in-restic
 backup_caddy_s3_access_key: lab-access
 backup_caddy_s3_secret_key: lab-secret-key
+librespeed_auth_user: lab-speedtest
+librespeed_auth_password: lab-stand-in-speedtest-password
+# bcrypt at cost 10 of the password above, made once with the pinned Caddy's
+# hash-password. It guards nothing.
+librespeed_auth_hash: "$2a$10$hnbhsNWXCSGzPr/nnjnseOrhgrjUX1KgJol3hb9yVqT601VUH22zu"
+librespeed_stats_password: lab-stand-in-stats
+backup_librespeed_restic_password: lab-stand-in-restic
+backup_librespeed_s3_access_key: lab-access
+backup_librespeed_s3_secret_key: lab-secret-key

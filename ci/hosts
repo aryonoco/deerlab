@@ -4,4 +4,4 @@
 # store and the dead-man stand-in, both on documentation-range addresses the
 # egress classes allow. The sites resolve to the lab itself.
 203.0.113.10 s3.example.test deadman.example.test
-127.0.0.1 wallabag.example.test linkding.example.test baikal.example.test freshrss.example.test tasks.example.test budget.example.test rsshub.example.test
+127.0.0.1 wallabag.example.test linkding.example.test baikal.example.test freshrss.example.test tasks.example.test budget.example.test rsshub.example.test speedtest.example.test

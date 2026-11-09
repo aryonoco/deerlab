@@ -19,6 +19,7 @@ deerlab_deadman_urls:
     freshrss: https://deadman.example.test/backup-freshrss
     vikunja: https://deadman.example.test/backup-vikunja
     actual: https://deadman.example.test/backup-actual
+    librespeed: https://deadman.example.test/backup-librespeed
 backup_s3_bucket: s3:https://s3.example.test/lab
 deerlab_pushover_token: lab-stand-in
 deerlab_pushover_user: lab-stand-in

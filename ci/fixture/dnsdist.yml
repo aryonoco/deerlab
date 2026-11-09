@@ -41,6 +41,19 @@ query_rules:
       type: Spoof
       ips:
         - 192.0.2.1
+  # The edge's speed test, uid 2002.
+  - name: librespeed
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/librespeed
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.3
   - name: wallabag
     selector:
       type: And
