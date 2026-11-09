@@ -334,7 +334,7 @@
       {%- endif -%}
       {%- if c.body_regex is defined and c.body_regex is not string -%}{%- set rules.out = rules.out + ['body_regex'] -%}{%- endif -%}
       {%- if c.body_version is defined and (c.body_version is not boolean
-             or (c.body_version and podman_service_check_checks_tag is not match('[0-9]+(\.[0-9]+)*'))) -%}
+             or (c.body_version and podman_service_check_checks_tag is not match('v?[0-9]+(\.[0-9]+)*'))) -%}
       {%- set rules.out = rules.out + ['body_version'] -%}
       {%- endif -%}
       {%- elif t == 'exec' -%}

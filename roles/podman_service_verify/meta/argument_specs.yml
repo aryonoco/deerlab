@@ -40,8 +40,9 @@ argument_specs:
           headers (string to string; may hold secrets, never printed), body
           and body_format (json or form-urlencoded, together), status (list
           of codes, default [200]; redirects are not followed), body_regex,
-          and body_version (the tag's leading version number appears in the
-          body). exec takes container (a worker; default the primary), cmd
+          and body_version (the tag's leading version number, after one
+          optional v, appears in the body). exec takes container (a worker;
+          default the primary), cmd
           (argv list; never a secret), stdin (where a secret goes) and
           stdout_regex, run with podman exec as the service user. unit
           takes workload (a job) and start (true runs it first; where ci
