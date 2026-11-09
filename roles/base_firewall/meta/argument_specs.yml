@@ -71,8 +71,8 @@ argument_specs:
         type: list
         elements: str
         description: >-
-          Resolver addresses web-, platform-, mail- and public-class
-          services may reach on port 53.
+          Resolver addresses web-, platform-, mail-, public- and
+          web-mail-class services may reach on port 53.
       base_firewall_dns_forwarder:
         type: str
         description: >-
@@ -107,6 +107,9 @@ argument_specs:
           to Pushover. mail is platform plus 465, for an application that sends
           its own mail through a relay over implicit TLS. public is any TCP
           port outside the private ranges and the host's own addresses, for
-          a service whose routes reach sites on arbitrary ports. A value outside this
-          list is refused rather than rendered, because the template's fallback
-          drops everything including the backup and the alert about it.
+          a service whose routes reach sites on arbitrary ports. web-mail is
+          web plus 465, also outside the host's own addresses, for an
+          application that fetches any address a user gives it and sends its
+          own mail. A value outside this list is refused rather than
+          rendered, because the template's fallback drops everything
+          including the backup and the alert about it.
