@@ -124,6 +124,103 @@ freshrss_apache_conf: |
   	Include /var/www/FreshRSS/p/themes/.htaccess
   </Directory>
 
+# A faithful copy of the image's logconf.prod.json at the pinned tag
+# (mealie/core/logger/), loaded through LOG_CONFIG_OVERRIDE, with two lines
+# changed, as the record's upstream edits say:
+# - the file handler writes to /dev/null, not ${DATA_DIR}/mealie.log, so no
+#   log lands in the backed-up volume. Python never rotates a file that is
+#   not a regular one;
+# - uvicorn.access goes to the stderr handler, which passes WARNING and
+#   above, instead of the access handler on stdout. Every access line is
+#   INFO, so the journal gets none of them: their URLs carry the iCal,
+#   share, reset, invite and download tokens. Caddy's access log, filtered,
+#   is the one kept.
+# Whole-line edits that each match one line: the level lines are identical
+# across handlers and loggers, so the logger's handler is changed instead.
+# The drift check fails a bump whose file differs, and the path names
+# python3.14, so a Python bump in the image fails it too.
+mealie_log_config: |
+  {
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+      "simple": {
+        "format": "%(levelname)-8s %(asctime)s - %(message)s",
+        "datefmt": "%Y-%m-%dT%H:%M:%S"
+      },
+      "detailed": {
+        "format": "[%(levelname)s|%(module)s|L%(lineno)d] %(asctime)s: %(message)s",
+        "datefmt": "%Y-%m-%dT%H:%M:%S"
+      },
+      "access": {
+        "()": "uvicorn.logging.AccessFormatter",
+        "fmt": "%(levelname)-8s %(asctime)s - [%(client_addr)s] %(status_code)s \"%(request_line)s\"",
+        "datefmt": "%Y-%m-%dT%H:%M:%S"
+      }
+    },
+    "handlers": {
+      "stderr": {
+        "class": "logging.StreamHandler",
+        "level": "WARNING",
+        "formatter": "simple",
+        "stream": "ext://sys.stderr"
+      },
+      "stdout": {
+        "class": "logging.StreamHandler",
+        "level": "${LOG_LEVEL}",
+        "formatter": "simple",
+        "stream": "ext://sys.stdout"
+      },
+      "access": {
+        "class": "logging.StreamHandler",
+        "level": "${LOG_LEVEL}",
+        "formatter": "access",
+        "stream": "ext://sys.stdout"
+      },
+      "file": {
+        "class": "logging.handlers.RotatingFileHandler",
+        "level": "DEBUG",
+        "formatter": "detailed",
+        "filename": "/dev/null",
+        "maxBytes": 10000000,
+        "backupCount": 3
+      }
+    },
+    "loggers": {
+      "root": {
+        "level": "${LOG_LEVEL}",
+        "handlers": [
+          "stderr",
+          "file",
+          "stdout"
+        ]
+      },
+      "uvicorn.error": {
+        "handlers": [
+          "stderr",
+          "file",
+          "stdout"
+        ],
+        "level": "${LOG_LEVEL}",
+        "propagate": false
+      },
+      "uvicorn.access": {
+        "handlers": [
+          "stderr",
+          "file"
+        ],
+        "level": "${LOG_LEVEL}",
+        "propagate": false
+      }
+    }
+  }
+
+# Hosts Mealie's scraper may fetch although they resolve to a private
+# address (HTTP_ALLOW_LIST, comma-separated). Empty here. The CI lab names
+# its fixture front, in a documentation range Python counts as private
+# (ci/inventory/group_vars/services/overrides.yml).
+mealie_http_allow_list: ""
+
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2008
 
@@ -1029,3 +1126,189 @@ podman_services:
         cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
         stdout_regex: '"deviceName":\s*"rsshub"'
     egress: public
+
+  mealie:
+    uid: 2009
+    # Docker Hub, not ghcr.io, because it records push times, which
+    # Renovate's cooldown needs; ghcr.io/mealie-recipes/mealie serves the
+    # same index digest. Tags carry a leading v, which body_version allows.
+    image: docker.io/hkotel/mealie:v3.30.0@sha256:90f83da6f3ab0a421efc827118a556168573930105f13fa3321768f42163d784
+    # The image's own abc user, uid 911. The image sets no USER, so it would
+    # start as root, and its entry script's root steps (usermod, chown -R
+    # /app, gosu) run only for uid 0: under 911 it prints a banner and
+    # starts the server. gid 911, the entry script's own PGID default:
+    # everything the image ships is root's, so the group shows only in the
+    # volume.
+    user: 911
+    group: 911
+    publish:
+      # 9000 is above 1024, so binding it needs no capability.
+      - "8087:9000"
+    volumes:
+      # One volume: mealie.db, every recipe's images, and .secret and
+      # .session_secret, which sign every session. chown renders :U. A fresh
+      # volume is root-owned, and uid 911 exits 1 at start with "Permission
+      # denied: '/app/data/groups'".
+      - { name: data, mount: /app/data, chown: true }
+    tmpfs:
+      # The template's ReadOnlyTmpfs=true already makes /tmp a writable tmpfs;
+      # this entry caps it at 256m. Starlette spools a request body over 1 MB
+      # here, and NLTK's tagger (the ingredient parser), restores and imports
+      # from other apps use it too. With no writable /tmp at all (Docker,
+      # read-only, no tmpfs) a recipe photo upload answered 400. tmpfs pages
+      # count against the container's memory limit in limits.yml.
+      - "/tmp:rw,nosuid,nodev,size=256m,mode=1777"
+    config_files:
+      # 0644: uid 911 cannot read a group-restricted file. No banner: JSON
+      # has no comment syntax.
+      - path: config/logconf.json
+        content: "{{ mealie_log_config }}"
+        mode: "0644"
+        upstream:
+          path: /opt/mealie/lib/python3.14/site-packages/mealie/core/logger/logconf.prod.json
+          edits:
+            - { from: '      "filename": "${DATA_DIR}/mealie.log",', to: '      "filename": "/dev/null",' }
+            - { from: '        "access",', to: '        "stderr",' }
+    # The file, not its directory: config_files makes the directory 0750 for
+    # the service user, which is namespace root, so uid 911 could not enter
+    # it.
+    mounts:
+      - { src: /var/lib/mealie/config/logconf.json, dst: /etc/deerlab/logconf.json, ro: true }
+    env:
+      # Builds every invite, password-reset and notification link, and the
+      # installed app's scope.
+      BASE_URL: "https://{{ mealie_hostname }}"
+      # The default, written down. The operator creates each account; an
+      # invite link still registers into its household.
+      ALLOW_SIGNUP: "false"
+      # Hours: 9600 is the maximum, 400 days from logging in. A login does not
+      # slide forward with use; the app renews it only while it is open after
+      # 60 % of its remaining life has passed.
+      TOKEN_TIME: "9600"
+      # Hours. Five wrong passwords lock that account, even against the right
+      # one; the count is per user, and there is no limit per address.
+      SECURITY_USER_LOCKOUT_TIME: "1"
+      # Whose X-Forwarded-For to believe: both tailnet ranges, which the edge
+      # arrives from.
+      HOST_IP: "100.64.0.0/10,fd7a:115c:a1e0::/48"
+      # Removes /docs. /redoc and /openapi.json still answer.
+      API_DOCS: "false"
+      # The daily tasks run at 23:45 local time, and meal plans are dated.
+      TZ: Australia/Sydney
+      # Vikunja's relay and sender, over implicit TLS on 465, which the
+      # web-mail class opens. Mealie does not verify the relay's certificate:
+      # it uses smtplib.SMTP_SSL with no context.
+      SMTP_HOST: "{{ vikunja_mailer_host }}"
+      SMTP_PORT: "465"
+      SMTP_AUTH_STRATEGY: SSL
+      SMTP_FROM_NAME: Mealie
+      SMTP_FROM_EMAIL: "{{ vikunja_mailer_from }}"
+      # The vendored copy above, mounted below.
+      LOG_CONFIG_OVERRIDE: /etc/deerlab/logconf.json
+      # Hosts the scraper may fetch although they are private: none here.
+      HTTP_ALLOW_LIST: "{{ mealie_http_allow_list }}"
+      # Deliberately ABSENT, and must stay absent:
+      # - every OPENAI_* variable. At v3.30.0 AI providers live in the
+      #   database, and the key is typed into the group settings; these
+      #   configure nothing on a fresh store;
+      # - OIDC_*, LDAP_* and REVERSE_PROXY_AUTH_*: Mealie's own login only;
+      # - SCRAPER_PROXY_*: the scraper fetches directly, under the firewall;
+      # - SQLITE_MIGRATE_JOURNAL_WAL: journal mode stays delete, one file;
+      # - UVICORN_WORKERS: each worker would run its own scheduler.
+    secrets:
+      # type: env, never the role's default mount: a 0400 root-owned file in
+      # /run/secrets named after a settings field crashes Mealie at start
+      # under a non-root uid. The username too, as Vikunja's.
+      - { name: smtp-user, value: "{{ vikunja_mailer_username }}", type: env, target: SMTP_USER }
+      - { name: smtp-password, value: "{{ vikunja_mailer_password }}", type: env, target: SMTP_PASSWORD }
+    # No capability was needed: every failure in the confinement experiment
+    # was a write, and the volume and /tmp cover both.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # No stop_signal: on Podman's default SIGTERM it exits 0, unless a
+    # request is in flight: it waits for that, and a long one outlasts the
+    # stop timeout (the runbook, Mealie, Stopping and restarting).
+    health:
+      # Opens mealie.db afresh, read-only, and reads users, then asks the
+      # server for /api/app/about, each with a 5 s timeout. The image's own
+      # check (curl /api/app/about) passes over a deleted database, because
+      # the connection pool keeps the deleted file open; this one fails. A
+      # JSON array with no leading "CMD" (see baikal's record); the fold
+      # joins the lines with spaces.
+      cmd: >-
+        ["python","-I","-c","import sqlite3,urllib.request;
+        c=sqlite3.connect('file:/app/data/mealie.db?mode=ro',uri=True,timeout=5);
+        c.execute('SELECT count(*) FROM users').fetchone(); c.close();
+        urllib.request.urlopen('http://127.0.0.1:9000/api/app/about',timeout=5)"]
+      interval: 30s
+      start_period: 60s
+    # Web and SMTP submission to public addresses only, never svc1's own:
+    # the scraper fetches any address a user hands it, and the AI provider's
+    # base URL and the notifiers skip Mealie's own request-forgery guard.
+    egress: web-mail
+    # What a pull proves once Mealie has started; none of it logs in or
+    # reads the live database.
+    checks:
+      # tokenTime proves the environment reached the server.
+      - name: version
+        path: /api/app/about
+        body_regex: '"allowSignup":\s*false,.*"tokenTime":\s*9600[,}]'
+        body_version: true
+      # A lookup in household_preferences that must find nothing.
+      - name: database
+        path: /api/households/mealplans/ical/deerlab-nonexistent
+        status: [404]
+        body_regex: Calendar not found
+      # The lab's store is fresh: the default admin's email is still there.
+      - name: fresh-store
+        where: ci
+        path: /api/app/about/startup-info
+        body_regex: '"isFirstLogin":\s*true'
+      - name: frontend
+        path: /
+        body_regex: <title>Mealie</title>
+      # The installed app's manifest, with the phone's share target.
+      - name: manifest
+        path: /manifest.webmanifest
+        body_regex: '"share_target"'
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [curl, --fail, --silent, --location, --max-time, "8", -A, curl/8, "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"mealie"'
+      # The vendored log config is in force: Mealie's own would write this
+      # file at every start, so a bump that stopped reading
+      # LOG_CONFIG_OVERRIDE fails here rather than logging tokens again.
+      - name: log-file-absent
+        type: exec
+        cmd: [test, "!", -e, /app/data/mealie.log]
+      # Mealie's own scraper on the CI fixture front's plain-http recipe
+      # page: port 80 under web-mail, pasta, the guard's allow list and the
+      # recipe parser. It touches no database.
+      - name: ci-scrape
+        type: exec
+        where: ci
+        timeout: 30
+        cmd:
+          - python
+          - -I
+          - -c
+          - >-
+            import asyncio,sys; from mealie.services.scraper.scraper_strategies import RecipeScraperPackage;
+            s=asyncio.run(RecipeScraperPackage(sys.argv[1],None,None).scrape_url());
+            print(s.title() if s else 'no recipe')
+          - http://203.0.113.10/mealie-recipe.html
+        stdout_regex: deerlab lab pancakes
+    backup:
+      sqlite:
+        # Prints 1 only once a second account and a first recipe exist. A
+        # fresh store already holds the default admin, so users > 0 would
+        # pass on a lost and re-created store. Journal mode delete: one file.
+        - volume: data
+          path: mealie.db
+          presence_query: >-
+            SELECT (SELECT count(*) FROM users) > 1 AND (SELECT count(*) FROM recipes) > 0
+      volumes: [data]
