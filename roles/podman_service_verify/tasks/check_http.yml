@@ -21,8 +21,9 @@
     quiet: true
   when: podman_service_verify_check.body_regex is defined
 
-# The tag's leading version number, bounded: 2.7.1 matches inside v2.7.1 but
-# not inside 2.7.10 or 12.7.1.
+# The tag's leading version number, after one optional v (Mealie tags
+# v3.30.0), bounded: 2.7.1 matches inside v2.7.1 but not inside 2.7.10 or
+# 12.7.1.
 - name: Assert the version of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
   ansible.builtin.assert:
     that:
@@ -32,5 +33,5 @@
   vars:
     podman_service_verify_version: >-
       {{ podman_service_verify_spec.image | regex_replace('^[^@]*:([^:/@]+)@.*$', '\1')
-         | regex_search('^[0-9]+([.][0-9]+)*') }}
+         | regex_replace('^v(?=[0-9])', '') | regex_search('^[0-9]+([.][0-9]+)*') }}
   when: podman_service_verify_check.body_version | default(false) | bool
