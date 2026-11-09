@@ -243,6 +243,605 @@ caddy_caddyfile: |
       }
   }
 
+# LibreSpeed's vendored configuration. Apache starts directly from these, in
+# place of upstream's start script, which rewrites /etc/apache2 and the web
+# root and chowns them, so it cannot run on a read-only root, and which sets
+# secrets into PHP source with an unescaped sed. Each file is mounted beside
+# the image's own copy, never over it, so the built-in upstream- checks read
+# the image's file and catch a drifted copy. Re-diff all three on every bump.
+#
+# A faithful copy of /etc/apache2/httpd.conf at the pinned tag, with the edits
+# listed under upstream: in the record. Listen 8080: a non-root container uid
+# cannot bind port 80. DocumentRoot /speedtest: the image's application tree,
+# served in place. The two logs: logs/ is /var/log/apache2, which uid 100
+# cannot open, and the journal is where every other service's log goes.
+librespeed_httpd_conf: |
+  #
+  # This is the main Apache HTTP server configuration file.  It contains the
+  # configuration directives that give the server its instructions.
+  # See <URL:http://httpd.apache.org/docs/2.4/> for detailed information.
+  # In particular, see
+  # <URL:http://httpd.apache.org/docs/2.4/mod/directives.html>
+  # for a discussion of each configuration directive.
+  #
+  # Do NOT simply read the instructions in here without understanding
+  # what they do.  They're here only as hints or reminders.  If you are unsure
+  # consult the online docs. You have been warned.
+  #
+  # Configuration and logfile names: If the filenames you specify for many
+  # of the server's control files begin with "/" (or "drive:/" for Win32), the
+  # server will use that explicit path.  If the filenames do *not* begin
+  # with "/", the value of ServerRoot is prepended -- so "logs/access_log"
+  # with ServerRoot set to "/usr/local/apache2" will be interpreted by the
+  # server as "/usr/local/apache2/logs/access_log", whereas "/logs/access_log"
+  # will be interpreted as '/logs/access_log'.
+
+  #
+  # ServerTokens
+  # This directive configures what you return as the Server HTTP response
+  # Header. The default is 'Full' which sends information about the OS-Type
+  # and compiled in modules.
+  # Set to one of:  Full | OS | Minor | Minimal | Major | Prod
+  # where Full conveys the most information, and Prod the least.
+  #
+  ServerTokens OS
+
+  #
+  # ServerRoot: The top of the directory tree under which the server's
+  # configuration, error, and log files are kept.
+  #
+  # Do not add a slash at the end of the directory path.  If you point
+  # ServerRoot at a non-local disk, be sure to specify a local disk on the
+  # Mutex directive, if file-based mutexes are used.  If you wish to share the
+  # same ServerRoot for multiple httpd daemons, you will need to change at
+  # least PidFile.
+  #
+  ServerRoot /var/www
+
+  #
+  # Mutex: Allows you to set the mutex mechanism and mutex file directory
+  # for individual mutexes, or change the global defaults
+  #
+  # Uncomment and change the directory if mutexes are file-based and the default
+  # mutex file directory is not on a local disk or is not appropriate for some
+  # other reason.
+  #
+  # Mutex default:/run/apache2
+
+  #
+  # Listen: Allows you to bind Apache to specific IP addresses and/or
+  # ports, instead of the default. See also the <VirtualHost>
+  # directive.
+  #
+  # Change this to Listen on specific IP addresses as shown below to
+  # prevent Apache from glomming onto all bound IP addresses.
+  #
+  #Listen 12.34.56.78:80
+  Listen 8080
+
+  #
+  # Dynamic Shared Object (DSO) Support
+  #
+  # To be able to use the functionality of a module which was built as a DSO you
+  # have to place corresponding `LoadModule' lines at this location so the
+  # directives contained in it are actually available _before_ they are used.
+  # Statically compiled modules (those listed by `httpd -l') do not need
+  # to be loaded here.
+  #
+  # Example:
+  # LoadModule foo_module modules/mod_foo.so
+  #
+  #LoadModule mpm_event_module modules/mod_mpm_event.so
+  LoadModule mpm_prefork_module modules/mod_mpm_prefork.so
+  #LoadModule mpm_worker_module modules/mod_mpm_worker.so
+  LoadModule authn_file_module modules/mod_authn_file.so
+  #LoadModule authn_dbm_module modules/mod_authn_dbm.so
+  #LoadModule authn_anon_module modules/mod_authn_anon.so
+  #LoadModule authn_dbd_module modules/mod_authn_dbd.so
+  #LoadModule authn_socache_module modules/mod_authn_socache.so
+  LoadModule authn_core_module modules/mod_authn_core.so
+  LoadModule authz_host_module modules/mod_authz_host.so
+  LoadModule authz_groupfile_module modules/mod_authz_groupfile.so
+  LoadModule authz_user_module modules/mod_authz_user.so
+  #LoadModule authz_dbm_module modules/mod_authz_dbm.so
+  #LoadModule authz_owner_module modules/mod_authz_owner.so
+  #LoadModule authz_dbd_module modules/mod_authz_dbd.so
+  LoadModule authz_core_module modules/mod_authz_core.so
+  LoadModule access_compat_module modules/mod_access_compat.so
+  LoadModule auth_basic_module modules/mod_auth_basic.so
+  #LoadModule auth_form_module modules/mod_auth_form.so
+  #LoadModule auth_digest_module modules/mod_auth_digest.so
+  #LoadModule allowmethods_module modules/mod_allowmethods.so
+  #LoadModule file_cache_module modules/mod_file_cache.so
+  #LoadModule cache_module modules/mod_cache.so
+  #LoadModule cache_disk_module modules/mod_cache_disk.so
+  #LoadModule cache_socache_module modules/mod_cache_socache.so
+  #LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
+  #LoadModule socache_dbm_module modules/mod_socache_dbm.so
+  #LoadModule socache_memcache_module modules/mod_socache_memcache.so
+  #LoadModule socache_redis_module modules/mod_socache_redis.so
+  #LoadModule watchdog_module modules/mod_watchdog.so
+  #LoadModule macro_module modules/mod_macro.so
+  #LoadModule dbd_module modules/mod_dbd.so
+  #LoadModule dumpio_module modules/mod_dumpio.so
+  #LoadModule echo_module modules/mod_echo.so
+  #LoadModule buffer_module modules/mod_buffer.so
+  #LoadModule data_module modules/mod_data.so
+  #LoadModule ratelimit_module modules/mod_ratelimit.so
+  LoadModule reqtimeout_module modules/mod_reqtimeout.so
+  #LoadModule ext_filter_module modules/mod_ext_filter.so
+  #LoadModule request_module modules/mod_request.so
+  #LoadModule include_module modules/mod_include.so
+  LoadModule filter_module modules/mod_filter.so
+  #LoadModule reflector_module modules/mod_reflector.so
+  #LoadModule substitute_module modules/mod_substitute.so
+  #LoadModule sed_module modules/mod_sed.so
+  #LoadModule charset_lite_module modules/mod_charset_lite.so
+  #LoadModule deflate_module modules/mod_deflate.so
+  #LoadModule brotli_module modules/mod_brotli.so
+  LoadModule mime_module modules/mod_mime.so
+  LoadModule log_config_module modules/mod_log_config.so
+  #LoadModule log_debug_module modules/mod_log_debug.so
+  #LoadModule log_forensic_module modules/mod_log_forensic.so
+  #LoadModule logio_module modules/mod_logio.so
+  LoadModule env_module modules/mod_env.so
+  #LoadModule mime_magic_module modules/mod_mime_magic.so
+  #LoadModule expires_module modules/mod_expires.so
+  LoadModule headers_module modules/mod_headers.so
+  #LoadModule usertrack_module modules/mod_usertrack.so
+  #LoadModule unique_id_module modules/mod_unique_id.so
+  LoadModule setenvif_module modules/mod_setenvif.so
+  LoadModule version_module modules/mod_version.so
+  #LoadModule remoteip_module modules/mod_remoteip.so
+  #LoadModule session_module modules/mod_session.so
+  #LoadModule session_cookie_module modules/mod_session_cookie.so
+  #LoadModule session_crypto_module modules/mod_session_crypto.so
+  #LoadModule session_dbd_module modules/mod_session_dbd.so
+  #LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
+  #LoadModule slotmem_plain_module modules/mod_slotmem_plain.so
+  #LoadModule dialup_module modules/mod_dialup.so
+  #LoadModule http2_module modules/mod_http2.so
+  LoadModule unixd_module modules/mod_unixd.so
+  #LoadModule heartbeat_module modules/mod_heartbeat.so
+  #LoadModule heartmonitor_module modules/mod_heartmonitor.so
+  LoadModule status_module modules/mod_status.so
+  LoadModule autoindex_module modules/mod_autoindex.so
+  #LoadModule asis_module modules/mod_asis.so
+  #LoadModule info_module modules/mod_info.so
+  #LoadModule suexec_module modules/mod_suexec.so
+  <IfModule !mpm_prefork_module>
+  	#LoadModule cgid_module modules/mod_cgid.so
+  </IfModule>
+  <IfModule mpm_prefork_module>
+  	#LoadModule cgi_module modules/mod_cgi.so
+  </IfModule>
+  #LoadModule vhost_alias_module modules/mod_vhost_alias.so
+  #LoadModule negotiation_module modules/mod_negotiation.so
+  LoadModule dir_module modules/mod_dir.so
+  #LoadModule actions_module modules/mod_actions.so
+  #LoadModule speling_module modules/mod_speling.so
+  #LoadModule userdir_module modules/mod_userdir.so
+  LoadModule alias_module modules/mod_alias.so
+  #LoadModule rewrite_module modules/mod_rewrite.so
+
+  LoadModule negotiation_module modules/mod_negotiation.so
+
+  <IfModule unixd_module>
+  #
+  # If you wish httpd to run as a different user or group, you must run
+  # httpd as root initially and it will switch.
+  #
+  # User/Group: The name (or #number) of the user/group to run httpd as.
+  # It is usually good practice to create a dedicated user and group for
+  # running httpd, as with most system services.
+  #
+  User apache
+  Group apache
+
+  </IfModule>
+
+  # 'Main' server configuration
+  #
+  # The directives in this section set up the values used by the 'main'
+  # server, which responds to any requests that aren't handled by a
+  # <VirtualHost> definition.  These values also provide defaults for
+  # any <VirtualHost> containers you may define later in the file.
+  #
+  # All of these directives may appear inside <VirtualHost> containers,
+  # in which case these default settings will be overridden for the
+  # virtual host being defined.
+  #
+
+  #
+  # ServerAdmin: Your address, where problems with the server should be
+  # e-mailed.  This address appears on some server-generated pages, such
+  # as error documents.  e.g. admin@your-domain.com
+  #
+  ServerAdmin you@example.com
+
+  #
+  # Optionally add a line containing the server version and virtual host
+  # name to server-generated pages (internal error documents, FTP directory
+  # listings, mod_status and mod_info output etc., but not CGI generated
+  # documents or custom error documents).
+  # Set to "EMail" to also include a mailto: link to the ServerAdmin.
+  # Set to one of:  On | Off | EMail
+  #
+  ServerSignature On
+
+  #
+  # ServerName gives the name and port that the server uses to identify itself.
+  # This can often be determined automatically, but we recommend you specify
+  # it explicitly to prevent problems during startup.
+  #
+  # If your host doesn't have a registered DNS name, enter its IP address here.
+  #
+  #ServerName www.example.com:80
+
+  #
+  # Deny access to the entirety of your server's filesystem. You must
+  # explicitly permit access to web content directories in other
+  # <Directory> blocks below.
+  #
+  <Directory />
+      AllowOverride none
+      Require all denied
+  </Directory>
+
+  #
+  # Note that from this point forward you must specifically allow
+  # particular features to be enabled - so if something's not working as
+  # you might expect, make sure that you have specifically enabled it
+  # below.
+  #
+
+  #
+  # DocumentRoot: The directory out of which you will serve your
+  # documents. By default, all requests are taken from this directory, but
+  # symbolic links and aliases may be used to point to other locations.
+  #
+  DocumentRoot "/speedtest"
+  <Directory "/speedtest">
+      #
+      # Possible values for the Options directive are "None", "All",
+      # or any combination of:
+      #   Indexes Includes FollowSymLinks SymLinksifOwnerMatch ExecCGI MultiViews
+      #
+      # Note that "MultiViews" must be named *explicitly* --- "Options All"
+      # doesn't give it to you.
+      #
+      # The Options directive is both complicated and important.  Please see
+      # http://httpd.apache.org/docs/2.4/mod/core.html#options
+      # for more information.
+      #
+      Options Indexes FollowSymLinks
+
+      #
+      # AllowOverride controls what directives may be placed in .htaccess files.
+      # It can be "All", "None", or any combination of the keywords:
+      #   AllowOverride FileInfo AuthConfig Limit
+      #
+      AllowOverride None
+
+      #
+      # Controls who can get stuff from this server.
+      #
+      Require all granted
+  </Directory>
+
+  #
+  # DirectoryIndex: sets the file that Apache will serve if a directory
+  # is requested.
+  #
+  <IfModule dir_module>
+      DirectoryIndex index.html
+  </IfModule>
+
+  #
+  # The following lines prevent .htaccess and .htpasswd files from being
+  # viewed by Web clients.
+  #
+  <Files ".ht*">
+      Require all denied
+  </Files>
+
+  #
+  # ErrorLog: The location of the error log file.
+  # If you do not specify an ErrorLog directive within a <VirtualHost>
+  # container, error messages relating to that virtual host will be
+  # logged here.  If you *do* define an error logfile for a <VirtualHost>
+  # container, that host's errors will be logged there and not here.
+  #
+  ErrorLog /dev/stderr
+
+  #
+  # LogLevel: Control the number of messages logged to the error_log.
+  # Possible values include: debug, info, notice, warn, error, crit,
+  # alert, emerg.
+  #
+  LogLevel warn
+
+  <IfModule log_config_module>
+      #
+      # The following directives define some format nicknames for use with
+      # a CustomLog directive (see below).
+      #
+      LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+      LogFormat "%h %l %u %t \"%r\" %>s %b" common
+
+      <IfModule logio_module>
+        # You need to enable mod_logio.c to use %I and %O
+        LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+      </IfModule>
+
+      #
+      # The location and format of the access logfile (Common Logfile Format).
+      # If you do not define any access logfiles within a <VirtualHost>
+      # container, they will be logged here.  Contrariwise, if you *do*
+      # define per-<VirtualHost> access logfiles, transactions will be
+      # logged therein and *not* in this file.
+      #
+      #CustomLog logs/access.log common
+
+      #
+      # If you prefer a logfile with access, agent, and referer information
+      # (Combined Logfile Format) you can use the following directive.
+      #
+      CustomLog /dev/stdout combined
+  </IfModule>
+
+  <IfModule alias_module>
+      #
+      # Redirect: Allows you to tell clients about documents that used to
+      # exist in your server's namespace, but do not anymore. The client
+      # will make a new request for the document at its new location.
+      # Example:
+      # Redirect permanent /foo http://www.example.com/bar
+
+      #
+      # Alias: Maps web paths into filesystem paths and is used to
+      # access content that does not live under the DocumentRoot.
+      # Example:
+      # Alias /webpath /full/filesystem/path
+      #
+      # If you include a trailing / on /webpath then the server will
+      # require it to be present in the URL.  You will also likely
+      # need to provide a <Directory> section to allow access to
+      # the filesystem path.
+
+      #
+      # ScriptAlias: This controls which directories contain server scripts.
+      # ScriptAliases are essentially the same as Aliases, except that
+      # documents in the target directory are treated as applications and
+      # run by the server when requested rather than as documents sent to the
+      # client.  The same rules about trailing "/" apply to ScriptAlias
+      # directives as to Alias.
+      #
+      ScriptAlias /cgi-bin/ "/var/www/localhost/cgi-bin/"
+
+  </IfModule>
+
+  <IfModule cgid_module>
+      #
+      # ScriptSock: On threaded servers, designate the path to the UNIX
+      # socket used to communicate with the CGI daemon of mod_cgid.
+      #
+      #Scriptsock cgisock
+  </IfModule>
+
+  #
+  # "/var/www/localhost/cgi-bin" should be changed to whatever your ScriptAliased
+  # CGI directory exists, if you have that configured.
+  #
+  <Directory "/var/www/localhost/cgi-bin">
+      AllowOverride None
+      Options None
+      Require all granted
+  </Directory>
+
+  <IfModule headers_module>
+      #
+      # Avoid passing HTTP_PROXY environment to CGI's on this or any proxied
+      # backend servers which have lingering "httpoxy" defects.
+      # 'Proxy' request header is undefined by the IETF, not listed by IANA
+      #
+      RequestHeader unset Proxy early
+  </IfModule>
+
+  <IfModule mime_module>
+      #
+      # TypesConfig points to the file containing the list of mappings from
+      # filename extension to MIME-type.
+      #
+      TypesConfig /etc/apache2/mime.types
+
+      #
+      # AddType allows you to add to or override the MIME configuration
+      # file specified in TypesConfig for specific file types.
+      #
+      #AddType application/x-gzip .tgz
+      #
+      # AddEncoding allows you to have certain browsers uncompress
+      # information on the fly. Note: Not all browsers support this.
+      #
+      #AddEncoding x-compress .Z
+      #AddEncoding x-gzip .gz .tgz
+      #
+      # If the AddEncoding directives above are commented-out, then you
+      # probably should define those extensions to indicate media types:
+      #
+      AddType application/x-compress .Z
+      AddType application/x-gzip .gz .tgz
+
+      #
+      # AddHandler allows you to map certain file extensions to "handlers":
+      # actions unrelated to filetype. These can be either built into the server
+      # or added with the Action directive (see below)
+      #
+      # To use CGI scripts outside of ScriptAliased directories:
+      # (You will also need to add "ExecCGI" to the "Options" directive.)
+      #
+      #AddHandler cgi-script .cgi
+
+      # For type maps (negotiated resources):
+      #AddHandler type-map var
+
+      #
+      # Filters allow you to process content before it is sent to the client.
+      #
+      # To parse .shtml files for server-side includes (SSI):
+      # (You will also need to add "Includes" to the "Options" directive.)
+      #
+      #AddType text/html .shtml
+      #AddOutputFilter INCLUDES .shtml
+  </IfModule>
+
+  #
+  # The mod_mime_magic module allows the server to use various hints from the
+  # contents of the file itself to determine its type.  The MIMEMagicFile
+  # directive tells the module where the hint definitions are located.
+  #
+  <IfModule mime_magic_module>
+      MIMEMagicFile /etc/apache2/magic
+  </IfModule>
+
+  #
+  # Customizable error responses come in three flavors:
+  # 1) plain text 2) local redirects 3) external redirects
+  #
+  # Some examples:
+  #ErrorDocument 500 "The server made a boo boo."
+  #ErrorDocument 404 /missing.html
+  #ErrorDocument 404 "/cgi-bin/missing_handler.pl"
+  #ErrorDocument 402 http://www.example.com/subscription_info.html
+  #
+
+  #
+  # MaxRanges: Maximum number of Ranges in a request before
+  # returning the entire resource, or one of the special
+  # values 'default', 'none' or 'unlimited'.
+  # Default setting is to accept 200 Ranges.
+  #MaxRanges unlimited
+
+  #
+  # EnableMMAP and EnableSendfile: On systems that support it,
+  # memory-mapping or the sendfile syscall may be used to deliver
+  # files.  This usually improves server performance, but must
+  # be turned off when serving from networked-mounted
+  # filesystems or if support for these functions is otherwise
+  # broken on your system.
+  # Defaults: EnableMMAP On, EnableSendfile Off
+  #
+  #EnableMMAP off
+  #EnableSendfile on
+
+  # Load config files from the config directory "/etc/apache2/conf.d".
+  #
+  IncludeOptional /etc/apache2/conf.d/*.conf
+
+# A faithful copy of /speedtest/results/telemetry_settings.php at the pinned
+# tag, with two edits. The stats password comes from the environment, a Podman
+# secret, so this file holds no secret; when it is missing or empty the page
+# disables itself, which the stats-locked check catches, rather than staying
+# locked with no way in. The database sits on the volume, named db.sqlite so
+# that just restore-drill finds it.
+librespeed_telemetry_settings: |
+  <?php
+
+  // Type of db: "mssql", "mysql", "sqlite" or "postgresql"
+  $db_type = 'sqlite';
+  // Password to login to stats.php. Change this!!!
+  $stats_password = getenv('LIBRESPEED_STATS_PASSWORD') ?: 'PASSWORD';
+  // If set to true, test IDs will be obfuscated to prevent users from guessing URLs of other tests
+  $enable_id_obfuscation = false;
+  // If set to true, IP addresses will be redacted from IP and ISP info fields, as well as the log
+  $redact_ip_addresses = false;
+
+  // Sqlite3 settings
+  $Sqlite_db_file = '/database/db.sqlite';
+
+  // mssql settings
+  $MsSql_server = 'DB_HOSTNAME';
+  $MsSql_databasename = 'DB_NAME';
+  $MsSql_WindowsAuthentication = true;   //true or false
+  $MsSql_username = 'USERNAME';          //not used if MsSql_WindowsAuthentication is true
+  $MsSql_password = 'PASSWORD';          //not used if MsSql_WindowsAuthentication is true
+  $MsSql_TrustServerCertificate = true;  //true, false or comment out for driver default
+  //Download driver from https://docs.microsoft.com/en-us/sql/connect/php/download-drivers-php-sql-server?view=sql-server-ver16
+
+  // Mysql settings
+  $MySql_username = 'USERNAME';
+  $MySql_password = 'PASSWORD';
+  $MySql_hostname = 'DB_HOSTNAME';
+  $MySql_databasename = 'DB_NAME';
+  $MySql_port = '3306';
+
+  // Postgresql settings
+  $PostgreSql_username = 'USERNAME';
+  $PostgreSql_password = 'PASSWORD';
+  $PostgreSql_hostname = 'DB_HOSTNAME';
+  $PostgreSql_databasename = 'DB_NAME';
+
+# A faithful copy of /speedtest/settings.json at the pinned tag, with
+# telemetry on, so every test is recorded.
+librespeed_settings_json: |
+  {
+    "telemetry_level": "basic",
+    "test_order": "ID_U_P",
+    "time_dl_max": 12,
+    "time_ul_max": 12,
+    "time_dlGraceTime": 0,
+    "time_ulGraceTime": 0,
+    "time_auto": false
+  }
+
+# deerlab's own: this server alone, the entry upstream's start script writes
+# for a standalone server. Upstream's /speedtest/server-list.json lists
+# public servers run by third parties, which the modern page and the stability
+# page would otherwise offer and test against.
+librespeed_server_list: |
+  [
+    {
+      "name": "local",
+      "server": "/backend",
+      "dlURL": "garbage.php",
+      "ulURL": "empty.php",
+      "pingURL": "empty.php",
+      "getIpURL": "getIP.php",
+      "sponsorName": "",
+      "sponsorURL": "",
+      "id": 1
+    }
+  ]
+
+# deerlab's own. The pages fetch settings.json and server-list.json from the
+# web root; these serve the mounted copies there, so the image's own stay where
+# the drift check reads them. ServerName spares Apache a lookup of its own
+# name at every start.
+librespeed_apache_conf: |
+  ServerName speedtest.localhost
+  Alias /settings.json /etc/deerlab/settings.json
+  Alias /server-list.json /etc/deerlab/server-list.json
+  <Directory "/etc/deerlab">
+      Require all denied
+      <Files "settings.json">
+          Require all granted
+      </Files>
+      <Files "server-list.json">
+          Require all granted
+      </Files>
+  </Directory>
+
+# deerlab's own. The PHP sources load their settings with a relative require,
+# which searches include_path first, so the mounted copy wins over the image's
+# beside the script, for the pages and for the command-line database check
+# alike; their file_exists() test still sees the image's. The rest is the
+# image's own include_path. Its paths name the PHP version (php85): a PHP bump
+# in the image leaves this file unread, the image's settings load, their
+# database is on the read-only root, and the database check fails.
+librespeed_php_ini: |
+  include_path = "/etc/deerlab/php:.:/usr/share/php85"
+
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2001
 
@@ -385,4 +984,165 @@ podman_services:
         stdout_regex: '"deviceName":\s*"caddy"'
     egress: any
     backup:
+      volumes: [data]
+
+  # The operator's speed test. On the edge, not svc1, because it measures the
+  # link to the edge: on svc1 every byte would also cross the tailnet hop.
+  librespeed:
+    uid: 2002
+    image: ghcr.io/librespeed/speedtest:6.3.1-alpine@sha256:2db012618515bfe8c8d825ce155e6a9122d78849e21535ecd1e74ef42884979a
+    # The image's own apache user. Apache starts directly as it (entrypoint:
+    # and exec: below), so no capability is needed: upstream's start script,
+    # which needs CHOWN, SETUID and SETGID and a writable root, never runs.
+    user: 100
+    group: 101
+    publish:
+      # Container side 8080: a non-root container uid cannot bind below 1024.
+      # Caddy reaches host port 8082 at 169.254.1.2, pasta's address for the
+      # host. The firewall opens no port for it to the internet, so past
+      # Caddy only the host and the tailnet reach it.
+      - "8082:8080"
+    volumes:
+      # :U gives the fresh volume to uid 100, which creates db.sqlite in it.
+      - { name: data, mount: /database, chown: true }
+    tmpfs:
+      # Apache's pid file. The image's /run/apache2 is root's.
+      - "/run/apache2:rw,nosuid,nodev,noexec,size=1m,mode=1777"
+      # PHP's sessions and upload spool: each 20 MiB upload chunk spools here,
+      # and a test sends three at once.
+      - "/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777"
+    config_files:
+      # 0644, not Caddy's 0640: this container runs as uid 100, which cannot
+      # read a group-restricted file (FreshRSS's record says more).
+      - path: config/httpd.conf
+        content: "{{ librespeed_httpd_conf }}"
+        mode: "0644"
+        banner: "#"
+        upstream:
+          path: /etc/apache2/httpd.conf
+          edits:
+            - { from: "Listen 80", to: "Listen 8080" }
+            - { from: "DocumentRoot \"/var/www/localhost/htdocs\"", to: "DocumentRoot \"/speedtest\"" }
+            - { from: "<Directory \"/var/www/localhost/htdocs\">", to: "<Directory \"/speedtest\">" }
+            - { from: "ErrorLog logs/error.log", to: "ErrorLog /dev/stderr" }
+            - { from: "    CustomLog logs/access.log combined", to: "    CustomLog /dev/stdout combined" }
+            # The thirteen comment lines below end in spaces upstream, and this
+            # repository refuses trailing whitespace, so the copy drops them.
+            - from: "# In particular, see "
+              to: "# In particular, see"
+            - from: "# consult the online docs. You have been warned.  "
+              to: "# consult the online docs. You have been warned."
+            - from: "# server as \"/usr/local/apache2/logs/access_log\", whereas \"/logs/access_log\" "
+              to: "# server as \"/usr/local/apache2/logs/access_log\", whereas \"/logs/access_log\""
+            - from: "# Change this to Listen on specific IP addresses as shown below to "
+              to: "# Change this to Listen on specific IP addresses as shown below to"
+            - from: "# httpd as root initially and it will switch.  "
+              to: "# httpd as root initially and it will switch."
+            - from: "# explicitly permit access to web content directories in other "
+              to: "# explicitly permit access to web content directories in other"
+            - from: "# The following lines prevent .htaccess and .htpasswd files from being "
+              to: "# The following lines prevent .htaccess and .htpasswd files from being"
+            - from: "# viewed by Web clients. "
+              to: "# viewed by Web clients."
+            - from: "    # Redirect: Allows you to tell clients about documents that used to "
+              to: "    # Redirect: Allows you to tell clients about documents that used to"
+            - from: "    # exist in your server's namespace, but do not anymore. The client "
+              to: "    # exist in your server's namespace, but do not anymore. The client"
+            - from: "    # ScriptAlias: This controls which directories contain server scripts. "
+              to: "    # ScriptAlias: This controls which directories contain server scripts."
+            - from: "# EnableMMAP and EnableSendfile: On systems that support it, "
+              to: "# EnableMMAP and EnableSendfile: On systems that support it,"
+            - from: "# be turned off when serving from networked-mounted "
+              to: "# be turned off when serving from networked-mounted"
+      # No banner: a line before <?php would be sent with every page.
+      - path: config/php/telemetry_settings.php
+        content: "{{ librespeed_telemetry_settings }}"
+        mode: "0644"
+        upstream:
+          path: /speedtest/results/telemetry_settings.php
+          edits:
+            - { from: "$stats_password = 'PASSWORD';", to: "$stats_password = getenv('LIBRESPEED_STATS_PASSWORD') ?: 'PASSWORD';" }
+            - { from: "$Sqlite_db_file = __DIR__ . '/../../speedtest_telemetry.db';", to: "$Sqlite_db_file = '/database/db.sqlite';" }
+      # No banner on JSON, which has no comment syntax.
+      - path: config/settings.json
+        content: "{{ librespeed_settings_json }}"
+        mode: "0644"
+        upstream:
+          path: /speedtest/settings.json
+          edits:
+            - { from: '  "telemetry_level": "off",', to: '  "telemetry_level": "basic",' }
+      - { path: config/server-list.json, content: "{{ librespeed_server_list }}", mode: "0644" }
+      - { path: config/deerlab-apache.conf, content: "{{ librespeed_apache_conf }}", mode: "0644", banner: "#" }
+      - { path: config/deerlab-php.ini, content: "{{ librespeed_php_ini }}", mode: "0644", banner: ";" }
+    # One file each, not the directory: config_files makes its directories
+    # 0750 for the service user, which is namespace root, so uid 100 could
+    # not enter a mounted directory. The image's conf.d directories load
+    # every *.conf and *.ini in them, in order; zz- sorts these last.
+    mounts:
+      - { src: /var/lib/librespeed/config/httpd.conf, dst: /etc/deerlab/httpd.conf, ro: true }
+      - { src: /var/lib/librespeed/config/php/telemetry_settings.php, dst: /etc/deerlab/php/telemetry_settings.php, ro: true }
+      - { src: /var/lib/librespeed/config/settings.json, dst: /etc/deerlab/settings.json, ro: true }
+      - { src: /var/lib/librespeed/config/server-list.json, dst: /etc/deerlab/server-list.json, ro: true }
+      - { src: /var/lib/librespeed/config/deerlab-apache.conf, dst: /etc/apache2/conf.d/zz-deerlab.conf, ro: true }
+      - { src: /var/lib/librespeed/config/deerlab-php.ini, dst: /etc/php85/conf.d/zz-deerlab.ini, ro: true }
+    entrypoint: httpd
+    exec: -DFOREGROUND -f /etc/deerlab/httpd.conf
+    secrets:
+      - { name: stats-password, value: "{{ librespeed_stats_password }}", type: env, target: LIBRESPEED_STATS_PASSWORD }
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # The image's SIGWINCH is Apache's graceful stop, which waits for every
+    # test in flight, outlasts StopTimeout and exits 137, which pages. SIGTERM
+    # ends them and exits 0.
+    stop_signal: SIGTERM
+    health:
+      cmd: wget -q -O /dev/null http://127.0.0.1:8080/backend/empty.php
+      interval: 30s
+      start_period: 30s
+    # What a pull proves once LibreSpeed has started. None of it logs in,
+    # sends a password or writes a result.
+    checks:
+      # PHP answers, and the ISP database bundled in the image loads. A public
+      # address, the regional registry's own, stands in for a client's: the
+      # server believes X-Real-IP on this direct path (Caddy overwrites it at
+      # the edge), and has nothing to look up for a private one.
+      - name: getip
+        path: /backend/getIP.php
+        query: { isp: "true" }
+        headers: { X-Real-IP: 193.0.6.139 }
+        body_regex: '"processedString":"193\.0\.6\.139 - [^"]+, [^"]+"'
+      # A lookup that must find nothing. It prints db-error when the database
+      # cannot be opened, and when the image's own settings load instead of
+      # the mounted ones, whose database is on the read-only root.
+      - name: database
+        type: exec
+        cmd:
+          - php
+          - -r
+          - >-
+            chdir("/speedtest/results"); require "telemetry_db.php"; $r = getSpeedtestUserById("zzzzzzz");
+            echo $r === null ? "missing-ok" : ($r === false ? "db-error" : "found"), "\n";
+        stdout_regex: ^missing-ok$
+      # The stats page shows its login form: neither open, nor disabled for
+      # want of a password.
+      - name: stats-locked
+        path: /results/stats.php
+        body_regex: name="password"
+      # Its lookups reach the resolver under its own name, as Caddy's do.
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [wget, -U, curl/8, -T, "8", -qO-, "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"librespeed"'
+    # The server never calls out without an ipinfo key, which it does not
+    # have; image pulls, restic and Pushover need 443 alone.
+    egress: platform
+    backup:
+      # One file with a rollback journal. count(*) > 0, not >= 0: PHP creates
+      # the table on every connection, so only a row shows the database is
+      # the one that holds the history.
+      sqlite:
+        - { volume: data, path: db.sqlite, presence_query: "SELECT count(*) > 0 FROM speedtest_users" }
       volumes: [data]
