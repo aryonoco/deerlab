@@ -1285,6 +1285,21 @@ podman_services:
       - name: log-file-absent
         type: exec
         cmd: [test, "!", -e, /app/data/mealie.log]
+      # The published default admin's email is gone (the operator replaced
+      # the admin before the public site). It cannot prove the password
+      # changed: only a login would, and no check logs in.
+      - name: admin-changed
+        where: host
+        path: /api/app/about/startup-info
+        body_regex: '"isFirstLogin":\s*false'
+      # Through Caddy and the tailnet, as a phone arrives.
+      - name: edge
+        where: host
+        via: edge
+        host: "{{ mealie_hostname }}"
+        path: /api/app/about
+        timeout: 35
+        body_regex: '"allowSignup":\s*false'
       # Mealie's own scraper on the CI fixture front's plain-http recipe
       # page: port 80 under web-mail, pasta, the guard's allow list and the
       # recipe parser. It touches no database.
