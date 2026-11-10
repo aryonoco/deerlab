@@ -4,7 +4,7 @@
 # Bumped by Renovate from tailscale/tailscale's GitHub releases, after the
 # same 7-day cooldown as every other release. The package is held, so
 # neither unattended-upgrades nor Tailscale's own updater moves it.
-base_tailscale_version: "1.104.4"
+base_tailscale_version: "1.104.5"
 # Tailscale's signing key for trixie, fetched once and checked against this
 # digest. Its fingerprint is 2596A99EAAB33821893C0A79458CA832957F5868.
 base_tailscale_keyring_url: https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg
