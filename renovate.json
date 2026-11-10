@@ -110,7 +110,7 @@
     },
     {
       "description": "Baikal has no downgrade path",
-      "matchPackageNames": ["ghcr.io/aryonoco/baikal"],
+      "matchPackageNames": ["ghcr.io/divbast/baikal"],
       "addLabels": ["stateful"],
       "prBodyNotes": [
         "**No downgrade path.** Once promoted, reverting this PR leaves an image older than `configured_version`, which refuses to start. Pin forward, never back."
