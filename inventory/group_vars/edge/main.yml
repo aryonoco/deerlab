@@ -47,10 +47,17 @@ caddy_caddyfile: |
           # there. The site's own log filter covers only its access log;
           # other sites never send the header. Error lines carry the request
           # URI too, and RSSHub's access key rides in its query string, so
-          # query strings go from every site's error lines.
+          # query strings go from every site's error lines. Mealie's iCal
+          # feed and share links carry theirs in the path, and a 502 while
+          # svc1 restarts would log one, so those paths go too, as in the
+          # Mealie site's own access log.
           format filter {
               request>headers>X-Actual-Token delete
+              request>uri regexp ^/api/households/mealplans/ical/[^/?]+ /api/households/mealplans/ical/REDACTED
+              request>uri regexp /shared/r/[^/?]+ /shared/r/REDACTED
+              request>uri regexp ^/api/recipes/shared/[^/?]+ /api/recipes/shared/REDACTED
               request>uri regexp [?].*$ ?REDACTED
+              request>headers>Referer regexp /shared/r/[^/?]+ /shared/r/REDACTED
               request>headers>Referer regexp [?].*$ ?REDACTED
               wrap json
           }
@@ -209,6 +216,56 @@ caddy_caddyfile: |
           health_interval 15s
           health_timeout 5s
           health_status 200
+          # Long enough to cover the services host restarting the backend.
+          lb_try_duration 30s
+      }
+  }
+
+  # The name is the operator's, from SOPS, and the first such value in a site
+  # address: one Caddy cannot load (empty, a path, a space, capitals) would
+  # fail its whole configuration at its next start, every site with it. So
+  # anything but a plain lower-case hostname fails the pull before Caddy's
+  # files are written, with Caddy still serving.
+  {{ mealie_hostname
+     if (mealie_hostname | string) is regex('[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+', match_type='fullmatch')
+     else undef(hint='mealie_hostname is not a plain lower-case hostname') }} {
+      log {
+          output stdout
+          # Mealie's secrets ride in URLs: the household's iCal feed and each
+          # shared recipe in the path, invites, password resets and downloads
+          # in the query. Each regexp redacts one form, in order; the Referer
+          # carries a share path or a query on to the next request, and a
+          # redirect's Location carries the token on: Mealie answers an invite
+          # link, /register?token=, with a 307 to /register/?token=. Unanchored
+          # there, because Caddy's own http-to-https redirect is absolute.
+          format filter {
+              request>uri regexp ^/api/households/mealplans/ical/[^/?]+ /api/households/mealplans/ical/REDACTED
+              request>uri regexp /shared/r/[^/?]+ /shared/r/REDACTED
+              request>uri regexp ^/api/recipes/shared/[^/?]+ /api/recipes/shared/REDACTED
+              request>uri regexp [?].*$ ?REDACTED
+              request>headers>Referer regexp /shared/r/[^/?]+ /shared/r/REDACTED
+              request>headers>Referer regexp [?].*$ ?REDACTED
+              resp_headers>Location regexp /api/households/mealplans/ical/[^/?]+ /api/households/mealplans/ical/REDACTED
+              resp_headers>Location regexp /shared/r/[^/?]+ /shared/r/REDACTED
+              resp_headers>Location regexp /api/recipes/shared/[^/?]+ /api/recipes/shared/REDACTED
+              resp_headers>Location regexp [?].*$ ?REDACTED
+              wrap json
+          }
+      }
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8087 {
+          transport http {
+              resolvers 100.100.100.100
+          }
+          # A lookup in household_preferences that must find nothing: Mealie
+          # answers 404 "Calendar not found" only when its database answers.
+          # It reads through the server's open handle, so a file deleted
+          # under a running server answers until a restart; the container
+          # probe opens the file afresh.
+          health_uri /api/households/mealplans/ical/deerlab-health
+          health_status 404
+          health_body "Calendar not found"
+          health_interval 15s
+          health_timeout 5s
           # Long enough to cover the services host restarting the backend.
           lb_try_duration 30s
       }
@@ -1003,6 +1060,13 @@ podman_services:
         host: "rsshub.{{ deerlab_domain }}"
         path: /robots.txt
         timeout: 10
+      - name: site-mealie
+        where: host
+        via: edge
+        host: "{{ mealie_hostname }}"
+        path: /api/households/mealplans/ical/deerlab-health
+        status: [404]
+        timeout: 10
       - name: refused-metrics
         via: edge
         host: "{{ actual_hostname }}"
@@ -1053,6 +1117,19 @@ podman_services:
           path: /metrics/deerlab-log-__MARKER__
           headers: { X-Actual-Token: __SENTINEL__ }
           status: [404]
+      # Mealie's tokens ride in URLs, which the site's log must redact; a log
+      # check carries its sentinel in the query, so the path redactions are
+      # proven only at build time. 200 or 404 is Mealie answering, 502 or
+      # 503 an upstream Caddy cannot reach, as in the CI lab.
+      - name: redact-mealie
+        type: log
+        timeout: 45
+        send:
+          via: edge
+          host: "{{ mealie_hostname }}"
+          path: /deerlab-log-__MARKER__
+          query: { token: __SENTINEL__ }
+          status: [200, 404, 502, 503]
       # Its lookups reach the operator's DNS resolver under its own name: the
       # resolver's test endpoint answers with the name of the device that
       # looked it up, and only to a curl User-Agent. The body also holds the
