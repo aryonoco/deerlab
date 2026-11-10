@@ -109,10 +109,11 @@
       ]
     },
     {
-      "description": "Baikal has no downgrade path",
+      "description": "Baikal: a newer release migrates at its first start, and there is no downgrade path",
       "matchPackageNames": ["ghcr.io/divbast/baikal"],
-      "addLabels": ["stateful"],
+      "addLabels": ["stateful", "backup-first"],
       "prBodyNotes": [
+        "**The host backs Baikal up before it switches image,** and the pull fails if that backup does. The CI lab upgrades the base commit's Baikal in place, so any migration ran on lab data before the merge. The image runs Baikal's own upgrade on the first start of a newer release; the only rollback is a restore. See docs/runbook.md, The backup before an image switch.",
         "**No downgrade path.** Once promoted, reverting this PR leaves an image older than `configured_version`, which refuses to start. Pin forward, never back."
       ]
     },
