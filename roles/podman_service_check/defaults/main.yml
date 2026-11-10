@@ -24,5 +24,7 @@ podman_service_check_check_keys:
 
 # Seconds. The sum of every check's worst case, over the checks a pull runs on
 # one host. The two browser checks need about a minute each, and each
-# service's dns-name check up to 10 s.
-podman_service_check_verify_budget: 420
+# service's dns-name check up to 10 s. 480 since Mealie's edge check, which
+# outlasts Caddy's 30 s retry window, took the services host to 435 s; it
+# is 8 of the pull's 20 minutes, reached only when every check fails.
+podman_service_check_verify_budget: 480
