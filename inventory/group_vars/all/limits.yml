@@ -30,8 +30,9 @@ deerlab_service_limits:
     slice: { memory: 1G, cpu: "200%", tasks: 512 }
     containers:
       caddy: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }
-  # The speed test, on the edge. In a lab, on arm64, about 1 Gbps took 6-10 %
-  # of one core and peaked at 126 MiB, its upload spool included.
+  # The speed test, on the edge. In a lab, on arm64, about 1 Gbps down took
+  # 6 % of one core and 0.5 Gbps up 7 %; six downloads and three uploads at
+  # once peaked at 172 MiB and 30 pids, with the record's GOMAXPROCS of 4.
   librespeed:
     slice: { memory: 256M, cpu: "100%", tasks: 128 }
     containers:
