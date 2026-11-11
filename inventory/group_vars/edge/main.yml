@@ -340,6 +340,10 @@ caddy_caddyfile: |
           header_up -Client-IP
           header_up -CF-Connecting-IPv6
           header_up X-Real-IP {remote_host}
+          # The browser resends the login on every request, and nothing behind
+          # Caddy reads it: the stats page has a password of its own. So the
+          # edge password stops here.
+          header_up -Authorization
           # Liveness only: nothing on this port proves the database without a
           # login or a write. The image's own probe does, on 8081, which stays
           # unpublished.
