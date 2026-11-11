@@ -340,8 +340,9 @@ caddy_caddyfile: |
           header_up -Client-IP
           header_up -CF-Connecting-IPv6
           header_up X-Real-IP {remote_host}
-          # Liveness only: no endpoint proves the database without a login or
-          # a write.
+          # Liveness only: nothing on this port proves the database without a
+          # login or a write. The image's own probe does, on 8081, which stays
+          # unpublished.
           health_uri /backend/empty.php
           health_interval 15s
           health_timeout 5s
@@ -668,10 +669,13 @@ podman_services:
     # need 443 alone.
     egress: platform
     backup:
-      # The whole volume, for now. The results database gets its online copy
-      # and presence query in a change of its own, once a recorded result
-      # can pass that query: the backup before this image switch runs the new
-      # unit against the old image's volume, where telemetry.db cannot exist
-      # yet, so naming it here would fail every pull (docs/runbook.md,
-      # LibreSpeed).
+      # One file with a rollback journal. count(*) > 0, not >= 0: the image
+      # creates the table, empty, whenever it starts without one, so only a
+      # row shows the database is the one that holds the history. The old
+      # db.sqlite, unchanged since the switch, and stats-login.db, the stats
+      # login's failure count, go in the volume copy alone: an entry for
+      # stats-login.db would fail its test -s until the stats login was
+      # first used, and the backup before every image switch with it.
+      sqlite:
+        - { volume: data, path: telemetry.db, presence_query: "SELECT count(*) > 0 FROM speedtest_users" }
       volumes: [data]
