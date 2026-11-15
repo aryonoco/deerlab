@@ -554,7 +554,7 @@ podman_services:
   # link to the edge: on svc1 every byte would also cross the tailnet hop.
   librespeed:
     uid: 2002
-    image: ghcr.io/divbast/librespeed:6.3.1@sha256:46864f3f8c4741ca6d8d64bb86e4121cbdd313c4bbe0ec3598d83032bf1170f2
+    image: ghcr.io/divbast/librespeed:6.3.1@sha256:a1bff27f7067290c304ecff830faffbc341f8226244424c22261c040efc773ee
     # The image's own nonroot user, pinned rather than inherited, as Baikal's.
     # The image has no shell and runs FrankenPHP directly, configured at each
     # start by the environment below; nothing is mounted into it.
