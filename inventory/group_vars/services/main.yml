@@ -490,7 +490,12 @@ podman_services:
     volumes:
       - { name: data, mount: /data, chown: true }
     tmpfs:
-      - "/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777"
+      # The image's own size. Its Caddy refuses a request body over 64 MB,
+      # and PHP spools a body to /tmp at about twice its size, so this holds
+      # four of the largest at once; at 64m one over about 30 MB failed with a
+      # write error instead of a 413. A tmpfs takes memory only as it fills,
+      # and counts against the container's limit in limits.yml.
+      - "/tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777"
     env:
       # An input to every password hash Baikal ever writes. Changing it after
       # the first run invalidates the admin password and every DAV user's
