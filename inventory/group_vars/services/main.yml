@@ -537,12 +537,29 @@ podman_services:
         headers: { Authorization: "Basic {{ 'deerlab-nonexistent:x' | b64encode }}" }
         status: [401]
         body_regex: Username or password was incorrect
-      # Its lookups reach the resolver under its own name (as wallabag's).
+      # Its lookups reach the resolver under its own name (as wallabag's). The
+      # image's PHP can open no URL (allow_url_fopen is off), so this fetches
+      # over a bare TLS socket, which verifies the certificate: the same code
+      # as the speed test's check on the edge. It follows the resolver's
+      # redirect: the test address answers a first request with a 302 to a
+      # fresh name, and the lookup of that name is what this proves.
       - name: dns-name
         type: exec
         where: host
         timeout: 10
-        cmd: [/usr/local/bin/frankenphp, php-cli, -r, 'ini_set("user_agent", "curl/8"); echo file_get_contents($argv[1]);', "{{ deerlab_dns_test_url }}"]
+        cmd:
+          - /usr/local/bin/frankenphp
+          - php-cli
+          - -r
+          - >-
+            $u = $argv[1]; for ($i = 0; $i < 3; $i++) { $p = parse_url($u);
+            $s = @stream_socket_client("tls://" . $p["host"] . ":443", $e, $m, 8); if (!$s) { fwrite(STDERR, "connect: $m\n"); exit(1); }
+            fwrite($s, "GET " . ($p["path"] ?? "/") . (isset($p["query"]) ? "?" . $p["query"] : "")
+            . " HTTP/1.0\r\nHost: " . $p["host"] . "\r\nUser-Agent: curl/8\r\n\r\n");
+            $r = stream_get_contents($s); $x = explode("\r\n\r\n", $r, 2);
+            if (preg_match("/^Location:\s*(https:\S+)/mi", $x[0], $l)) { $u = $l[1]; continue; }
+            echo $x[1] ?? ""; exit(0); } exit(1);
+          - "{{ deerlab_dns_test_url }}"
         stdout_regex: '"deviceName":\s*"baikal"'
     egress: platform
     backup:
