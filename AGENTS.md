@@ -99,6 +99,7 @@ for Claude 5 Fable.
 ## Code Quality
 
 - All linter rules are enforced as errors — fix them, don't suppress them
+- **Linters are there to be complied with, never bypassed.** Fix every finding at every severity, style and info included. Skipping or ignoring any rule or finding needs the operator's explicit, direct approval, case by case. That includes a disable directive or `# noqa`, a new skip, exclude or severity setting, and renaming, moving or archiving a file so a linter misses it. Code that no CI linter scans, such as a script embedded in YAML, is linted with the repository's own configuration before it lands
 - `just ci` runs: ansible-lint (production profile plus `role-argument-spec`), ShellCheck, Trivy config scan, gitleaks, and checks for trailing whitespace, end-of-file newlines, YAML and JSON syntax, and merge-conflict markers
 - CI also runs `Lab svc1` and `Lab edge1`: each host upgraded in place in a Debian 13 container with systemd, from the base commit to the change, then re-run and dry-run, with every service's checks. A new key in a `secrets.sops.yaml` needs a stand-in in `ci/stand-ins/`. See `docs/runbook.md`, The CI lab
 - A second playbook run must produce zero changes. Common causes of a failure: `command` tasks without `creates` or `changed_when`, and templates whose content depends on facts that change per run
