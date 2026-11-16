@@ -1,0 +1,175 @@
+# SPDX-License-Identifier: CPAL-1.0
+# Copyright (c) 2026 Aryan Ameri
+
+# A seed is a file written into a primary volume while it is absent, and
+# never touched once it exists: for an image whose first start on its own
+# defaults does something that cannot be undone, and which keeps its settings
+# in the volume afterwards. This runs before the container unit is written,
+# so on a first deploy a pull that cannot write a seed fails here and leaves
+# no unit that a later start or a reboot could run on those defaults. A file
+# that exists is never touched, so a restored volume keeps its own copy and a
+# change made inside the service stays.
+#
+# Root never walks the volume. Once the container has run, :U has given its
+# tree to the container's user, which can replace any directory in it with a
+# symlink. So the test and the write run as the service user inside its own
+# user namespace, where a symlink out to a host path meets permission denied
+# and fails the pull.
+#
+# The entry names its content variable rather than holding the content: the
+# role's first set_fact renders every value in the record, on every run, so a
+# template there would be rendered by every pull and dry run. The lookup below
+# renders it only when the file is written, never under check mode.
+- name: Check for the seeded volumes of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman volume exists {{ podman_service_name }}-{{ item.name }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_spec.volumes | default([]) | selectattr('seed', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: podman_service_seed_volumes
+  changed_when: false
+  failed_when: podman_service_seed_volumes.rc not in [0, 1]
+  check_mode: false
+
+# The name the volume unit's own `podman volume create --ignore` uses, so the
+# unit adopts this volume when it first runs.
+- name: Create the seeded volumes of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: "podman volume create {{ podman_service_name }}-{{ item.item.name }}"
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_seed_volumes.results | selectattr('rc', 'equalto', 1) | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  register: podman_service_seed_created
+  changed_when: true
+  failed_when: podman_service_seed_created.rc != 0
+
+# Under check mode a volume that does not exist yet was not created above, so
+# it has no mountpoint to read; its seeds are reported further down.
+- name: Read the seeded volumes of {{ podman_service_name }}
+  ansible.builtin.command:
+    cmd: >-
+      podman volume inspect --format '{{ "{{" }}.Mountpoint{{ "}}" }}'
+      {{ podman_service_name }}-{{ item.item.name }}
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_seed_volumes.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc == 0 or not ansible_check_mode
+  register: podman_service_seed_mounts
+  changed_when: false
+  failed_when: podman_service_seed_mounts.rc != 0 or podman_service_seed_mounts.stdout is not match('/')
+  check_mode: false
+
+- name: List the seed files of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_seed_files: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for m in podman_service_seed_mounts.results | selectattr('stdout', 'defined') -%}
+      {%- for s in m.item.item.seed -%}
+      {%- set ns.out = ns.out + [{'path': m.stdout ~ '/' ~ s.path, 'mode': s.mode, 'content_var': s.content_var,
+                                  'label': m.item.item.name ~ '/' ~ s.path}] -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.out }}
+    podman_service_seed_pending: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for m in podman_service_seed_mounts.results | rejectattr('stdout', 'defined') -%}
+      {%- for s in m.item.item.seed -%}
+      {%- set ns.out = ns.out + [m.item.item.name ~ '/' ~ s.path] -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.out }}
+
+# test -e follows the path as the namespace's root sees it: a path through a
+# symlink to somewhere it cannot read reads as absent, and the write below
+# then fails.
+- name: Find the seed files of {{ podman_service_name }}
+  ansible.builtin.command:
+    argv: [podman, unshare, test, -e, "{{ item.path }}"]
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_seed_files }}"
+  loop_control:
+    label: "{{ item.label }}"
+  register: podman_service_seed_found
+  changed_when: false
+  failed_when: podman_service_seed_found.rc not in [0, 1]
+  check_mode: false
+
+# Missing parent directories are made 0700 and the file is written whole
+# under a temporary name, then renamed into place, so a write cut short never
+# leaves a partial seed that a later pull would take for a real one. Both end
+# up owned by the service user, root inside the container, so that the
+# volume's chown (:U) hands them to the container's user at the first start.
+# The content reaches the command on stdin, never in an argument. The task
+# is no_log, which would hide why a write failed, so it records its result
+# and the task after it fails the pull with the reason.
+- name: Write the seed files of {{ podman_service_name }}
+  ansible.builtin.command:
+    argv:
+      - podman
+      - unshare
+      - sh
+      - -ec
+      - umask 077; mkdir -p -- "${1%/*}"; t=$(mktemp -- "${1%/*}/.seed.XXXXXX"); cat > "${t}"; chmod -- "${2}" "${t}"; mv -f -- "${t}" "${1}"
+      - sh
+      - "{{ item.item.path }}"
+      - "{{ item.item.mode }}"
+    stdin: "{{ lookup('ansible.builtin.vars', item.item.content_var) }}"
+    stdin_add_newline: false
+  become: true
+  become_user: "{{ podman_service_name }}"
+  environment: "{{ podman_service_env }}"
+  loop: "{{ podman_service_seed_found.results | selectattr('rc', 'equalto', 1) | list }}"
+  loop_control:
+    label: "{{ item.item.label }}"
+  when: not ansible_check_mode
+  register: podman_service_seed_written
+  changed_when: podman_service_seed_written.rc == 0
+  failed_when: false
+  no_log: true
+
+# Names each seed and the command's own error, which carries paths and errno
+# text, never the content.
+- name: Refuse the seeds that could not be written of {{ podman_service_name }}
+  ansible.builtin.fail:
+    msg: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for r in podman_service_seed_written.results | default([]) | selectattr('rc', 'defined') | rejectattr('rc', 'equalto', 0) -%}
+      {%- set ns.out = ns.out + ['could not write ' ~ r.item.item.label ~ ': ' ~ (r.stderr | default('') | trim | replace('\n', '; '))] -%}
+      {%- endfor -%}
+      {{ ns.out | join(' | ') }}
+  when: podman_service_seed_written.results | default([]) | selectattr('rc', 'defined') | rejectattr('rc', 'equalto', 0) | list | length > 0
+
+# Check mode writes nothing and renders nothing: it names each seed a real
+# run would write.
+- name: Report the seeds that would be written of {{ podman_service_name }}
+  ansible.builtin.debug:
+    msg: >-
+      Would seed {{ (podman_service_seed_pending
+                     + (podman_service_seed_found.results | selectattr('rc', 'equalto', 1)
+                        | map(attribute='item.label') | list)) | join(', ') }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - (podman_service_seed_pending
+       + (podman_service_seed_found.results | selectattr('rc', 'equalto', 1) | list)) | length > 0
+
+# One result for the restart decision, as for the config files.
+- name: Combine the seed results of {{ podman_service_name }}
+  ansible.builtin.set_fact:
+    podman_service_seeds:
+      changed: >-
+        {{ (podman_service_seed_written.changed | default(false))
+           or (ansible_check_mode
+               and (podman_service_seed_pending
+                    + (podman_service_seed_found.results | selectattr('rc', 'equalto', 1) | list)) | length > 0) }}

@@ -43,6 +43,9 @@
       # as the hash in Caddy's basic_auth file it fails the whole
       # configuration, every site with it.
       - (podman_service_check_definition_spec.config_files | default([])) | map(attribute='content') | select('search', 'CHANGE-ME') | list | length == 0
+      # roles/podman_service/tasks/seed.yml writes these into the volume as
+      # root. The variable is looked up by name, never rendered here.
+      - podman_service_check_definition_seed_errors | length == 0
       # fullmatch, not match: re.match's $ also matches before a trailing
       # newline, and a newline here would split the unit file.
       - >-
@@ -61,8 +64,10 @@
       service {{ podman_service_check_definition_name }} needs a fully qualified digest-pinned image, publish,
       health.cmd not ending in a double quote, a uid from 2000 to 2252 (the DNS forwarder's listeners are
       127.0.53.<uid - 1999>), user 0, no userns and no SETUID or SETGID if it sets network: host, an entry with a pids limit in deerlab_service_limits, no
-      CHANGE-ME secrets or config files, a stop_signal, if set, of the form SIGNAME, and a
-      success_exit_status, if set, that is a list of integers from 1 to 255
+      CHANGE-ME secrets or config files, a stop_signal, if set, of the form SIGNAME, a
+      success_exit_status, if set, that is a list of integers from 1 to 255, and volume seeds, if set,
+      each a list of {path, mode, content_var} on a volume with chown: true: a relative path of [A-Za-z0-9._-]
+      parts with no .., a quoted mode 0NNN and the name of a defined variable (invalid: {{ podman_service_check_definition_seed_errors | join(', ') }})
     quiet: true
   # A failed loop result contains its complete item, and the CHANGE-ME check
   # fails exactly while real secrets are being staged. Loop over the service
@@ -73,6 +78,32 @@
     label: "{{ podman_service_check_definition_name }}"
   vars:
     podman_service_check_definition_spec: "{{ podman_service_check_services[podman_service_check_definition_name] }}"
+    # Each entry is "<volume> seed <n>". varnames matches names only, so the
+    # content is never rendered. The volume must have chown: a seed is written
+    # as namespace root, 0600, which a non-root container user could not read
+    # until :U hands it over.
+    podman_service_check_definition_seed_errors: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for v in podman_service_check_definition_spec.volumes | default([]) if v is mapping and v.seed is defined -%}
+      {%- set vn = v.name | default('(unnamed)') | string -%}
+      {%- if v.seed is not sequence or v.seed is string or v.seed is mapping or v.seed | length == 0 -%}
+      {%- set ns.out = ns.out + [vn ~ ' seed'] -%}
+      {%- elif v.chown | default(false) is not sameas true -%}
+      {%- set ns.out = ns.out + [vn ~ ' seed (no chown)'] -%}
+      {%- else -%}
+      {%- for e in v.seed -%}
+      {%- if e is not mapping or e | list | sort != ['content_var', 'mode', 'path']
+             or e.path is not string or e.path is not regex('[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*', match_type='fullmatch')
+             or e.path is regex('(^|/)\\.\\.(/|$)')
+             or e.mode is not string or e.mode is not regex('0[0-7]{3}', match_type='fullmatch')
+             or e.content_var is not string or e.content_var is not regex('[A-Za-z_][A-Za-z0-9_]*', match_type='fullmatch')
+             or query('ansible.builtin.varnames', '^' ~ e.content_var ~ '$') | length != 1 -%}
+      {%- set ns.out = ns.out + [vn ~ ' seed ' ~ loop.index] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out }}
 
 # roles/podman_service/tasks/service.yml blocks a workload from INHERITING the
 # keys in podman_service_never_inherited - it does not stop a workload from
@@ -109,6 +140,7 @@
       - podman_service_check_workload_missing_runtime_max | length == 0
       - podman_service_check_workload_missing_start_timeout | length == 0
       - podman_service_check_workload_bad_stop_signals | length == 0
+      - podman_service_check_workload_seeds | length == 0
     fail_msg: >-
       service {{ podman_service_check_workload_service_name }}: workloads with a missing or invalid kind
       {{ podman_service_check_workload_bad_kinds }}; workloads declaring a parent-only
@@ -123,7 +155,9 @@
       start_timeout in deerlab_service_limits
       {{ podman_service_check_workload_missing_start_timeout }}; workloads with a
       stop_signal not of the form SIGNAME
-      {{ podman_service_check_workload_bad_stop_signals }}
+      {{ podman_service_check_workload_bad_stop_signals }}; workloads declaring a
+      seed on a volume, which only the primary's volumes take
+      {{ podman_service_check_workload_seeds }}
     quiet: true
   # A failed loop result contains its complete item. Loop over the service name
   # alone so a validation failure cannot print the service's secret values.
@@ -212,6 +246,18 @@
          | selectattr('value.stop_signal', 'defined')
          | rejectattr('value.stop_signal', 'regex', 'SIG[A-Z0-9]+', match_type='fullmatch')
          | map(attribute='key') | list }}
+    # roles/podman_service/tasks/seed.yml reads the primary's volumes alone,
+    # so a seed on a workload's own volume would never be written.
+    podman_service_check_workload_seeds: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for w in podman_service_check_workload_spec.workloads | default({}) | dict2items if w.value is mapping -%}
+      {%- set vols = w.value.volumes | default([]) -%}
+      {%- if vols is sequence and vols is not string and vols is not mapping
+             and vols | select('mapping') | selectattr('seed', 'defined') | list | length > 0 -%}
+      {%- set ns.out = ns.out + [w.key] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out }}
 
 # The fields each check type takes are documented in podman_service_verify's
 # argument spec, the role that runs the checks. Every rule below is a check
