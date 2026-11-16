@@ -142,6 +142,14 @@
       ]
     },
     {
+      "description": "Syncthing: its config and identity are backed up before a switch; its index and folders never are",
+      "matchPackageNames": ["docker.io/syncthing/syncthing"],
+      "addLabels": ["stateful", "backup-first"],
+      "prBodyNotes": [
+        "**The host backs up Syncthing's state volume before it switches image** (config.xml, the device's key and certificate; never the index or the folders), and the pull fails if that backup does. A rollback to an older image is not a restore, and it is not proven: an older release refuses a newer `config.xml`. See docs/runbook.md, What is not proven."
+      ]
+    },
+    {
       "description": "Actual has more tags than Docker Hub will list, so Renovate gets no push times for it and the cooldown would hold every release forever",
       "matchPackageNames": ["docker.io/actualbudget/actual-server"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"

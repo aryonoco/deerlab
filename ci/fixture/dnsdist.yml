@@ -150,6 +150,18 @@ query_rules:
       type: Spoof
       ips:
         - 192.0.2.10
+  - name: syncthing
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/syncthing
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.11
   - name: resolver-host
     selector:
       type: QName
