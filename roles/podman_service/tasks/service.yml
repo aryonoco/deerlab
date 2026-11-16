@@ -197,6 +197,12 @@
     label: "{{ item.name }}"
   register: podman_service_volume_units
 
+# Before the container unit, so that a seed that cannot be written fails the
+# pull while there is still no unit to start. In a file of its own, as the
+# config files are.
+- name: Include the seed files of {{ podman_service_name }}
+  ansible.builtin.include_tasks: seed.yml
+
 - name: Write the primary container unit of {{ podman_service_name }}
   ansible.builtin.include_tasks: container.yml
   vars:
@@ -256,6 +262,7 @@
       {{ (podman_service_units | selectattr('kind', 'equalto', 'primary') | selectattr('changed') | list | length > 0)
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
+         or (podman_service_seeds.changed | default(false))
          or (podman_service_secrets.changed | default(false))
          or (podman_service_running_stale | bool) }}
     podman_service_reload: >-
@@ -263,6 +270,7 @@
          or (podman_service_timers.changed | default(false))
          or (podman_service_volume_units.changed | default(false))
          or (podman_service_config_files.changed | default(false))
+         or (podman_service_seeds.changed | default(false))
          or (podman_service_secrets.changed | default(false))
          or (podman_service_running_stale | bool) }}
 

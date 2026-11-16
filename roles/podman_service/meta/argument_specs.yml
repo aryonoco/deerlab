@@ -50,7 +50,17 @@ argument_specs:
           normal stop exits with one of them; a workload inherits it and
           may not declare its own), volumes entries taking
           an optional chown boolean that makes Podman chown the volume to
-          the container user, health being optional, and
+          the container user and, on the primary's volumes with chown
+          only, an optional seed list of {path, mode, content_var}: each
+          file is written into the volume while it is absent, before the
+          container unit is written, by the service user inside its own
+          user namespace, never by root, so on a first deploy a seed that
+          cannot be written fails the run while no unit exists; path is
+          relative to the volume, mode a quoted 0NNN, and content_var the
+          name of the variable holding the content, which is rendered only
+          when the file is written and never under check mode; a file that
+          exists is never touched, and a seed written restarts the primary,
+          health being optional, and
           workloads (dict of name to a partial spec, each rendering an
           extra container unit under the same service user, volume and
           slice, ordered After= and PartOf= the primary unit), each
