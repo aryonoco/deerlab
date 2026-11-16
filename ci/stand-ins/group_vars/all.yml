@@ -21,6 +21,7 @@ deerlab_deadman_urls:
     actual: https://deadman.example.test/backup-actual
     librespeed: https://deadman.example.test/backup-librespeed
     mealie: https://deadman.example.test/backup-mealie
+    syncthing: https://deadman.example.test/backup-syncthing
 backup_s3_bucket: s3:https://s3.example.test/lab
 deerlab_pushover_token: lab-stand-in
 deerlab_pushover_user: lab-stand-in

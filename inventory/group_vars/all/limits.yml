@@ -111,3 +111,17 @@ deerlab_service_limits:
       # counts against the container. Photo imports and amd64 are not
       # measured.
       mealie: { memory: 1G, cpu: "200%", tasks: 256, pids: 128, start_timeout: 300 }
+
+  syncthing:
+    # The sum of its two containers, which podman_user requires of the
+    # memory and the tasks.
+    slice: { memory: 1088M, cpu: "250%", tasks: 544 }
+    containers:
+      # Measured on arm64: 24-41 MiB idle with 27 tasks; a 2 GiB, 6,550-file
+      # first scan peaked at 140 MiB, 48 MiB of it anonymous and the rest
+      # page cache, which counts against the limit and is reclaimable. About
+      # 20 GiB on svc1 is not measured.
+      syncthing: { memory: 1G, cpu: "200%", tasks: 512, pids: 256, start_timeout: 120 }
+      # runtime_max, as freshrss-refresh's: 120 + 60 (the default jitter) is
+      # far inside a day.
+      syncthing-alert: { memory: 64M, cpu: "50%", tasks: 32, pids: 32, runtime_max: 120 }

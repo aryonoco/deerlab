@@ -221,6 +221,84 @@ mealie_log_config: |
 # (ci/inventory/group_vars/services/overrides.yml).
 mealie_http_allow_list: ""
 
+# Syncthing's config.xml, written into its state volume by the record's seed
+# before the first start, and only while none is there. On its own defaults
+# Syncthing's first start turns on global discovery, relays and NAT
+# traversal and announces the host to public servers, so on a first deploy
+# this is written before Syncthing can start. After that Syncthing owns the
+# file: devices, folders and any change made in the GUI stay, and a restored
+# volume keeps its own copy.
+#
+# Rendered only when the seed is written (the seed names this variable), so
+# the hash and the key below are made then and live only in the volume and
+# its backups.
+# - The login: Syncthing compares this password with bcrypt and never hashes
+#   what it finds here itself, so Ansible hashes it, at cost 10, Syncthing's
+#   own. bcrypt uses at most 72 bytes of a password, so a longer one is
+#   refused rather than silently cut short. A placeholder, a username that is
+#   not plain or a password of the wrong length writes nothing and fails the
+#   pull, naming the rule.
+# - The API key: 32 random letters and digits, in no other place. Without
+#   one Syncthing makes a new key in memory at every start. The alert job
+#   reads it from this file.
+# - Every outbound feature is off: discovery, local announcements, relays
+#   and NAT traversal (natEnabled also turns off STUN), usage and crash
+#   reports, upgrades. One TCP listener, for devices that dial in.
+# - No free-space floors: Syncthing's defaults stay, for the home and for
+#   each folder.
+# - New folders default to the trash can for 30 days, cleaned hourly. A new
+#   device is neither an introducer nor auto-accepts folders, both
+#   Syncthing's defaults, stated here.
+syncthing_seed_config: |
+  <configuration version="52">
+      <gui enabled="true" tls="false">
+          <address>0.0.0.0:8384</address>
+          <user>{{ undef(hint='syncthing_gui_user is still the CHANGE-ME placeholder')
+                   if (syncthing_gui_user | string) == 'CHANGE-ME'
+                   else syncthing_gui_user
+                   if (syncthing_gui_user | string) is regex('[A-Za-z0-9._@-]{1,64}', match_type='fullmatch')
+                   else undef(hint='syncthing_gui_user is not 1 to 64 letters, digits, dots, @, hyphens or underscores') }}</user>
+          <password>{{ undef(hint='syncthing_gui_password is still the CHANGE-ME placeholder')
+                       if (syncthing_gui_password | string) == 'CHANGE-ME'
+                       else (syncthing_gui_password | string) | password_hash('bcrypt', rounds=10)
+                       if ((syncthing_gui_password | string).encode('utf-8') | length) in range(1, 73)
+                       else undef(hint='syncthing_gui_password is not 1 to 72 bytes') }}</password>
+          <apikey>{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}</apikey>
+      </gui>
+      <options>
+          <listenAddress>tcp://0.0.0.0:22000</listenAddress>
+          <globalAnnounceEnabled>false</globalAnnounceEnabled>
+          <localAnnounceEnabled>false</localAnnounceEnabled>
+          <relaysEnabled>false</relaysEnabled>
+          <natEnabled>false</natEnabled>
+          <urAccepted>-1</urAccepted>
+          <crashReportingEnabled>false</crashReportingEnabled>
+          <autoUpgradeIntervalH>0</autoUpgradeIntervalH>
+          <startBrowser>false</startBrowser>
+          <announceLANAddresses>false</announceLANAddresses>
+      </options>
+      <defaults>
+          <folder path="/var/syncthing/data/folders">
+              <versioning type="trashcan">
+                  <cleanupIntervalS>3600</cleanupIntervalS>
+                  <param key="cleanoutDays" val="30"></param>
+              </versioning>
+          </folder>
+          <device introducer="false">
+              <autoAcceptFolders>false</autoAcceptFolders>
+          </device>
+      </defaults>
+  </configuration>
+
+# Syncthing's daily alert, run by the record's alert job in Syncthing's own
+# network namespace: a folder in error or with failed items, or an error in
+# Syncthing's log since its start, exits 1, which pages (docs/runbook.md,
+# Syncthing). It is the repository's one runtime alert script. It lives in a
+# .sh file of its own, so that `just ci` lints it with ShellCheck as any
+# other script; read whole, its final newline kept. playbook_dir/.. is the
+# checkout's root for site.yml and the CI lab's playbooks alike.
+syncthing_alert_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../inventory/files/syncthing-alert.sh', rstrip=false) }}"
+
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2008
 
@@ -1349,3 +1427,156 @@ podman_services:
           presence_query: >-
             SELECT (SELECT count(*) FROM users) > 1 AND (SELECT count(*) FROM recipes) > 0
       volumes: [data]
+
+  # The always-on hub for the operator's own devices: every device syncs with
+  # it, and through it with the others, so no two need to be online at once.
+  # Tailnet devices dial it directly; the edge forwards the others.
+  syncthing:
+    uid: 2010
+    # The official image. Its releases are unsigned, so this digest is the
+    # only integrity anchor.
+    image: docker.io/syncthing/syncthing:2.1.7@sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546
+    # Any uid works once the volumes are its own (:U below). With a non-root
+    # user the image's entry script runs Syncthing directly; its root-only
+    # steps (setcap, su-exec) never run.
+    user: 65532
+    group: 65532
+    publish:
+      # The GUI and API first: http checks go to the first published port.
+      # Deliberately outside 8080-8099, the range the tailnet policy opens to
+      # the edge, so only the operator's devices reach it.
+      - "8384:8384"
+      # The sync port, inside that range, for the edge's forwarder.
+      - "8088:22000"
+    volumes:
+      # Two volumes, so that a restore can never bring back an index without
+      # its files. state holds config.xml, cert.pem and key.pem (the device's
+      # identity) and is backed up; data holds the index and every folder and
+      # is never backed up. An index restored over missing files tells every
+      # device to delete them. state is mounted at /var/syncthing, the
+      # image's own VOLUME, so Podman adds no anonymous volume (measured: the
+      # two named volumes and nothing else). chown renders :U: a fresh volume
+      # is root's, and 65532 cannot create its config directory. :U re-chowns
+      # at every start; with 50,000 files in data the unit was healthy in the
+      # same 1 s as with none (measured).
+      - name: state
+        mount: /var/syncthing
+        chown: true
+        # Written while absent, before the first start, and never touched
+        # once it exists: on a first deploy Syncthing never starts on its
+        # defaults (syncthing_seed_config, above).
+        seed:
+          - { path: config/config.xml, mode: "0600", content_var: syncthing_seed_config }
+      - { name: data, mount: /var/syncthing/data, chown: true }
+    config_files:
+      # 0644: the alert job's 65532 cannot read a group-restricted file. No
+      # banner, so what is deployed is inventory/files/syncthing-alert.sh
+      # byte for byte. A change restarts Syncthing, as any config file
+      # change does.
+      - path: config/alert.sh
+        content: "{{ syncthing_alert_script }}"
+        mode: "0644"
+    env:
+      # Emptied: the image sets STHOMEDIR, and with it set Syncthing refuses
+      # STCONFDIR and STDATADIR. Measured: config, keys and certificate in
+      # /var/syncthing/config, the database in /var/syncthing/data/index,
+      # and nothing else in /var/syncthing but the two directories.
+      STHOMEDIR: ""
+      STCONFDIR: /var/syncthing/config
+      STDATADIR: /var/syncthing/data/index
+      # The image's own value, stated: the env wins over config.xml at every
+      # start and is never saved into it.
+      STGUIADDRESS: 0.0.0.0:8384
+      STNOUPGRADE: "1"
+      # Deliberately ABSENT, and must stay absent: STNORESTART and STPAUSED.
+      # STGUIAPIKEY would add a second key that is never saved; the seed
+      # carries the one key.
+    # Nothing was added back: it ran confined with no capability.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # No stop_signal and no success_exit_status: on Podman's default SIGTERM
+    # it exits 0 within a second, and an idle stop ends inactive with
+    # Result=success (measured).
+    health:
+      # Liveness only: the API answers. Never folder state, which
+      # HealthOnFailure=kill would turn into a restart loop for a folder
+      # that needs a person; the alert job reports folders. A JSON array
+      # with no leading "CMD" (see baikal's record).
+      cmd: '["curl","-fsS","-m","5","-o","/dev/null","http://127.0.0.1:8384/rest/noauth/health"]'
+      interval: 30s
+      start_period: 60s
+    # With the seed in place Syncthing opens no outbound connection: devices
+    # dial in. 443 for the dns-name check and the image.
+    egress: platform
+    # What a pull proves once Syncthing has started. None logs in.
+    checks:
+      - name: health
+        path: /rest/noauth/health
+        body_regex: '"status":\s*"OK"'
+      # The GUI refuses a login it does not know: the seeded login is in
+      # force, not an open GUI.
+      - name: login-required
+        method: POST
+        path: /rest/noauth/auth/password
+        body_format: json
+        body: { username: deerlab-nonexistent, password: x, stayLoggedIn: false }
+        status: [403]
+      # The sync port presents Syncthing's own certificate. It refuses curl's
+      # default ALPN offer, hence --no-alpn. Syncthing then closes the
+      # connection for want of a client certificate, and curl exits 52 after
+      # printing the server's, hence the true. Each run leaves two warnings
+      # in Syncthing's log.
+      - name: sync-tls
+        type: exec
+        cmd: [sh, -c, 'curl -sk --no-alpn -m 4 -o /dev/null -w "%{certs}" https://127.0.0.1:22000/; true']
+        stdout_regex: 'CN = syncthing'
+      # Its lookups reach the resolver under its own name (as wallabag's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"syncthing"'
+      # Runs the job itself, so the verdict is decided at each start rather
+      # than at the next 07:00 UTC; the job only reads, so an extra run harms
+      # nothing. 15 s for a run that took under a second in the CI lab, within
+      # svc1's budget.
+      - name: alert
+        type: unit
+        workload: alert
+        start: true
+        where: host
+        timeout: 15
+      # The lab has no folders: the job must still succeed.
+      - name: ci-alert
+        type: unit
+        workload: alert
+        start: true
+        where: ci
+        timeout: 120
+    # Config and identity only. Nothing here is SQLite, and the index and the
+    # folders are never backed up (volumes, above).
+    backup:
+      volumes: [state]
+    workloads:
+      alert:
+        kind: job
+        # Daily, at a fixed hour. persistent: a run missed while svc1 was down
+        # runs at the next boot, so a broken folder cannot go unreported for
+        # long.
+        schedule: "*-*-* 07:00:00 UTC"
+        persistent: true
+        # Syncthing's own network namespace: the API listens on its loopback,
+        # and platform drops 127/8, so a job in a namespace of its own could
+        # not reach it. The raw form, not syncthing.container: that would add
+        # Requires=, and the timer would then start Syncthing itself.
+        network: container:syncthing
+        # The script, not the image's entry script and Syncthing.
+        entrypoint: /bin/sh
+        exec: /etc/deerlab/syncthing-alert.sh
+        # The file, not its directory: config_files makes the directory 0750
+        # for the service user, which is namespace root, so 65532 could not
+        # enter it.
+        mounts:
+          - { src: /var/lib/syncthing/config/alert.sh, dst: /etc/deerlab/syncthing-alert.sh, ro: true }
