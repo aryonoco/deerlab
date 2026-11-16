@@ -125,3 +125,10 @@ deerlab_service_limits:
       # runtime_max, as freshrss-refresh's: 120 + 60 (the default jitter) is
       # far inside a day.
       syncthing-alert: { memory: 64M, cpu: "50%", tasks: 32, pids: 32, runtime_max: 120 }
+
+  syncthing-edge-haproxy:
+    # The operator's figures. Not measured on edge1: the deploy records its
+    # own.
+    slice: { memory: 128M, cpu: "100%", tasks: 64 }
+    containers:
+      syncthing-edge-haproxy: { memory: 128M, cpu: "100%", tasks: 64, pids: 32, start_timeout: 120 }
