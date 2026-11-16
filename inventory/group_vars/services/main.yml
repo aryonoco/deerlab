@@ -308,7 +308,7 @@ podman_services:
     uid: 2001
     # The image runs as root inside and rewrites its application tree on
     # every start, so it cannot be read-only.
-    image: docker.io/wallabag/wallabag:2.6.15@sha256:d54d48f58503505192c8c283f575d7b90e116ae43ec90e54afadf7d279bfe106
+    image: docker.io/wallabag/wallabag:2.6.17@sha256:9055d92d6e7973abea2d902ecb5459f6063fce05595eaef37f6750e49ff8cdee
     publish:
       - "8080:80"
     volumes:
