@@ -3,8 +3,9 @@
 
 # A job passes when it has run since the primary's current activation and
 # succeeded. One that has not run yet, or is running, under an active timer
-# is pending: no failure and no marker, so a later pull decides. start, CI
-# only, runs the job first: systemd blocks until a oneshot ends.
+# is pending: no failure and no marker, so a later pull decides. start runs
+# the job first, off schedule: systemd blocks until a oneshot ends. In CI, or
+# on a host for a job harmless to run again, such as Syncthing's alert.
 - name: Start the job of {{ podman_service_verify_name ~ '/' ~ podman_service_verify_check.name }}
   ansible.builtin.systemd_service:
     name: "{{ podman_service_verify_name }}-{{ podman_service_verify_check.workload }}.service"
