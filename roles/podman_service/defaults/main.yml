@@ -26,3 +26,4 @@ podman_service_never_inherited:
   - schedule
   - persistent
   - checks
+  - egress_tailnet_port

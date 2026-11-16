@@ -46,6 +46,15 @@
       # roles/podman_service/tasks/seed.yml writes these into the volume as
       # root. The variable is looked up by name, never rendered here.
       - podman_service_check_definition_seed_errors | length == 0
+      # base_firewall's rule, here too, so a dry run of a new record catches it.
+      - >-
+        (podman_service_check_definition_spec.egress | default('') == 'platform-tailnet')
+        == (podman_service_check_definition_spec.egress_tailnet_port is defined)
+      - >-
+        podman_service_check_definition_spec.egress_tailnet_port is not defined or
+        (podman_service_check_definition_spec.egress_tailnet_port is integer
+         and podman_service_check_definition_spec.egress_tailnet_port >= 1
+         and podman_service_check_definition_spec.egress_tailnet_port <= 65535)
       # fullmatch, not match: re.match's $ also matches before a trailing
       # newline, and a newline here would split the unit file.
       - >-
@@ -65,7 +74,8 @@
       health.cmd not ending in a double quote, a uid from 2000 to 2252 (the DNS forwarder's listeners are
       127.0.53.<uid - 1999>), user 0, no userns and no SETUID or SETGID if it sets network: host, an entry with a pids limit in deerlab_service_limits, no
       CHANGE-ME secrets or config files, a stop_signal, if set, of the form SIGNAME, a
-      success_exit_status, if set, that is a list of integers from 1 to 255, and volume seeds, if set,
+      success_exit_status, if set, that is a list of integers from 1 to 255, egress_tailnet_port, an integer
+      from 1 to 65535, exactly when egress is platform-tailnet, and volume seeds, if set,
       each a list of {path, mode, content_var} on a volume with chown: true: a relative path of [A-Za-z0-9._-]
       parts with no .., a quoted mode 0NNN and the name of a defined variable (invalid: {{ podman_service_check_definition_seed_errors | join(', ') }})
     quiet: true
@@ -178,6 +188,7 @@
       - image
       - success_exit_status
       - checks
+      - egress_tailnet_port
     podman_service_check_workload_bad_kinds: >-
       {{ podman_service_check_workload_spec.workloads | default({}) | dict2items
          | rejectattr('value.kind', 'defined')

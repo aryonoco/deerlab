@@ -33,7 +33,7 @@ table inet deerlab {
 {% endif %}
 {% if svc.egress == 'any' %}
     accept
-{% elif svc.egress in ('web', 'platform', 'mail', 'public', 'web-mail') %}
+{% elif svc.egress in ('web', 'platform', 'mail', 'public', 'web-mail', 'platform-tailnet') %}
 {# The resolver accepts come first on purpose. drop is terminal, so if a #}
 {# resolver ever sits inside a private range - a stub on 127.0.0.53, a LAN #}
 {# resolver, a link-local metadata address - a drop placed above would make #}
@@ -43,6 +43,13 @@ table inet deerlab {
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} udp dport 53 accept
     {{ 'ip6' if ':' in resolver else 'ip' }} daddr {{ resolver }} tcp dport 53 accept
 {% endfor %}
+{% endif %}
+{% if svc.egress == 'platform-tailnet' %}
+{# platform plus one TCP port on the tailnet, for a forwarder whose backend #}
+{# lives there: before the private drops, which 100.64.0.0/10 is among, so #}
+{# the one port on tailscale0 is the only private destination it reaches. #}
+{# The tailnet policy then narrows that to the one host that serves it.    #}
+    oifname "{{ base_firewall_tailscale_interface }}" ip daddr {{ base_firewall_tailnet_v4 }} tcp dport {{ svc.egress_tailnet_port }} accept
 {% endif %}
     ip daddr { {{ base_firewall_private_v4 | join(', ') }} } counter drop
     ip6 daddr { {{ base_firewall_private_v6 | join(', ') }} } counter drop
@@ -69,7 +76,7 @@ table inet deerlab {
 {# for an application that sends its own mail through a relay. web-mail is #}
 {# web plus 465, for one that both fetches from the web and sends mail. Like #}
 {# the others they are port-based: 465 is open to any public address. #}
-    tcp dport { {{ {'web': '80, 443', 'platform': '443', 'mail': '443, 465', 'web-mail': '80, 443, 465'}[svc.egress] }} } accept
+    tcp dport { {{ {'web': '80, 443', 'platform': '443', 'mail': '443, 465', 'web-mail': '80, 443, 465', 'platform-tailnet': '443'}[svc.egress] }} } accept
 {% endif %}
     limit rate 10/minute log prefix "nft-out-{{ name }} " level info
     counter drop
