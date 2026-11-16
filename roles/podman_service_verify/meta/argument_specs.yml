@@ -45,8 +45,9 @@ argument_specs:
           default the primary), cmd
           (argv list; never a secret), stdin (where a secret goes) and
           stdout_regex, run with podman exec as the service user. unit
-          takes workload (a job) and start (true runs it first; where ci
-          only). Without start it passes when the job has run since the
+          takes workload (a job) and start (true runs it first, off
+          schedule, and its verdict is decided at once; where ci or host,
+          for a job harmless to run again). Without start it passes when the job has run since the
           primary's activation and succeeded, is pending while it has not
           run and its timer is active, and must be where host. log takes
           send, an http request whose path holds __MARKER__ and one of

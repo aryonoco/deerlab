@@ -403,7 +403,11 @@
       {%- endif -%}
       {%- if c.start is defined and c.start is not boolean -%}
       {%- set rules.out = rules.out + ['start'] -%}
-      {%- elif where != ('ci' if c.start | default(false) else 'host') -%}
+      {#- A job that is not started is judged by whether it has run since the
+          primary's start, which only a host's timer makes happen. One that is
+          started runs off schedule, so a check opts into it, in CI or on the
+          host, and never both. -#}
+      {%- elif where not in (['ci', 'host'] if c.start | default(false) else ['host']) -%}
       {%- set rules.out = rules.out + ['where'] -%}
       {%- endif -%}
       {%- elif t == 'log' and has_send -%}
