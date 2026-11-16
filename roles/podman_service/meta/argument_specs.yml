@@ -38,7 +38,9 @@ argument_specs:
           capabilities (list),
           read_only (bool), no_new_privileges (bool), userns
           (str), network (str), health ({cmd, interval, start_period}),
-          egress (any|web|platform|mail|public|web-mail), backup ({sqlite, volumes}, sqlite
+          egress (any|web|platform|mail|public|web-mail|platform-tailnet),
+          egress_tailnet_port (int, 1 to 65535, the one tailnet port a
+          platform-tailnet service may reach, and required by it), backup ({sqlite, volumes}, sqlite
           being a list of {volume, path} mappings whose path, relative to
           the volume's _data, may be a glob),
           user (str or int, container-side UID), group (str or int),
@@ -74,7 +76,8 @@ argument_specs:
           their fields, and podman_service_check validates them. Only the
           primary's record may hold it. A workload inherits
           every key of its parent except publish, secrets, health,
-          workloads, backup, uid, egress, kind, schedule, persistent and checks,
+          workloads, backup, uid, egress, kind, schedule, persistent, checks
+          and egress_tailnet_port,
           and overrides any of them; env is merged with the workload
           winning, and a volume's chown is never inherited. The exclusion
           list is the contract - an enumeration of what IS inherited goes
@@ -94,6 +97,7 @@ argument_specs:
           - schedule
           - persistent
           - checks
+          - egress_tailnet_port
         description: >
           Keys a workload never inherits from its parent service. This is
           the workload inheritance contract. Workloads must declare their

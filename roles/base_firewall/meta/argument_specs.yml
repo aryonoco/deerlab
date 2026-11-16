@@ -21,7 +21,9 @@ argument_specs:
         required: true
         description: >
           The podman_services dictionary for this host. Every entry needs an
-          egress key holding one of base_firewall_egress_classes.
+          egress key holding one of base_firewall_egress_classes, and an
+          entry of class platform-tailnet an egress_tailnet_port (int, 1 to
+          65535), which no other entry may carry.
       base_firewall_ssh_port:
         type: int
         default: 22
@@ -110,6 +112,9 @@ argument_specs:
           a service whose routes reach sites on arbitrary ports. web-mail is
           web plus 465, also outside the host's own addresses, for an
           application that fetches any address a user gives it and sends its
-          own mail. A value outside this list is refused rather than
+          own mail. platform-tailnet is platform plus one TCP port, the
+          record's egress_tailnet_port, to tailnet addresses on the tailnet
+          interface, for a forwarder whose backend lives on the tailnet. A
+          value outside this list is refused rather than
           rendered, because the template's fallback drops everything
           including the backup and the alert about it.
