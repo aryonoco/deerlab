@@ -377,13 +377,75 @@ caddy_librespeed_auth: |
          else undef(hint='librespeed_auth_hash is not a bcrypt hash at cost 10') }}
   }
 
+# HAProxy's configuration for syncthing-edge-haproxy, the forwarder that
+# carries off-tailnet Syncthing devices from public TCP 22000 to Syncthing's
+# sync port on svc1 over the tailnet. TCP only. Measured in labs on this
+# image with this text, except the resolver and the backend, which were the
+# labs' own:
+# - on a Docker network: its own resolver at quad-100 for svc1's MagicDNS
+#   name, with init-addr none, starts and stays healthy while the name does
+#   not resolve, and resolves it at run time with no server check; per
+#   source, the 25th concurrent and the 61st new connection in a minute are
+#   refused at once; an IPv6 client reaches svc1, keyed by its /64;
+# - under rootless Podman 5.4.2 with pasta, as edge1 runs it: a healthy idle
+#   device stays connected, and HAProxy sees each device's own address.
+#   pasta ends the device's TCP connection in front of HAProxy, so no TCP
+#   setting here can tell that a device vanished without closing: the hub
+#   lets go of it only at Syncthing's own timeout, after 300 s and 431 s in two runs, and
+#   refuses the device's new connection as already connected until then.
+# The frontend takes at most 256 connections and the process 512, and the
+# health frontend listens on loopback and does not log.
+syncthing_edge_haproxy_config: |
+  global
+      log stdout format raw local0 info
+      nbthread 2
+      maxconn 512
+  defaults
+      mode tcp
+      log global
+      timeout connect 5s
+      timeout client 10m
+      timeout server 10m
+      timeout client-fin 30s
+      timeout server-fin 30s
+  resolvers tailnet
+      nameserver quad100 100.100.100.100:53
+      accepted_payload_size 1232
+      hold valid 30s
+      timeout resolve 30s
+  frontend sync
+      bind :::22000 v4v6
+      maxconn 256
+      option tcplog
+      stick-table type ipv6 size 10k expire 10m store conn_rate(1m),conn_cur
+      tcp-request connection track-sc0 src,ipmask(32,64)
+      tcp-request connection reject if { sc0_conn_rate gt 60 }
+      tcp-request connection reject if { sc0_conn_cur gt 24 }
+      default_backend syncthing
+  backend syncthing
+      server svc1 {{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8088 resolvers tailnet resolve-prefer ipv4 init-addr none
+  frontend health
+      bind 127.0.0.1:8405
+      mode http
+      no log
+      monitor-uri /healthz
+
+# The firewall's redirects on the edge, restated whole because inventory
+# replaces the role's default rather than merging it: Caddy's 80 and 443,
+# and public TCP 22000 to the Syncthing forwarder's 8083.
+base_firewall_edge_tcp_redirects:
+  80: 8080
+  443: 8443
+  22000: 8083
+
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2001
 
-# Caddy asks tailscaled for svc1's MagicDNS name itself (its upstreams'
-# resolvers in the Caddyfile above), so that name never reaches the operator's DNS
-# resolver; every other lookup of Caddy's goes through its listener.
-base_firewall_dns_tailnet_services: [caddy]
+# Caddy and the Syncthing forwarder ask tailscaled for svc1's MagicDNS name
+# themselves (Caddy's upstreams' resolvers in the Caddyfile above, the
+# forwarder's resolvers section), so that name never reaches the operator's
+# DNS resolver; every other lookup of theirs goes through its listener.
+base_firewall_dns_tailnet_services: [caddy, syncthing-edge-haproxy]
 
 podman_services:
   dnsdist: "{{ deerlab_dnsdist_service }}"
@@ -683,3 +745,61 @@ podman_services:
       sqlite:
         - { volume: data, path: telemetry.db, presence_query: "SELECT count(*) > 0 FROM speedtest_users" }
       volumes: [data]
+
+  # The forwarder for Syncthing devices off the tailnet: public TCP 22000,
+  # redirected here by the firewall, to Syncthing's sync port on svc1 over the
+  # tailnet. Not reached through Caddy: Syncthing's own TLS runs end to end,
+  # and HAProxy only passes the bytes.
+  syncthing-edge-haproxy:
+    uid: 2003
+    # Docker Hub's official image, digest-pinned.
+    image: docker.io/library/haproxy:3.4.7-alpine@sha256:b9fe316f718d5015c5cfebd8ca019591f3e44656f61d93cb8b59a1028961e530
+    # The image's own haproxy user, pinned numerically (measured: 99:99), so
+    # an image that changed it cannot run as another uid unnoticed.
+    user: 99
+    group: 99
+    publish:
+      - "8083:22000"
+    config_files:
+      # 0644: uid 99 cannot read a group-restricted file.
+      - { path: config/haproxy.cfg, content: "{{ syncthing_edge_haproxy_config }}", mode: "0644", banner: "#" }
+    # The file, not its directory: config_files makes the directory 0750 for
+    # the service user, which is namespace root, so uid 99 could not enter it.
+    mounts:
+      - { src: /var/lib/syncthing-edge-haproxy/config/haproxy.cfg, dst: /usr/local/etc/haproxy/haproxy.cfg, ro: true }
+    # Nothing added back: it ran confined with no capability and binds no
+    # port below 1024.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # The image stops with SIGUSR1, which waits for every connection to close;
+    # Syncthing's never do, so the stop is killed at 30 s with exit 137, which
+    # pages. On SIGTERM it stopped in 0.16 s with a device connected, exit 0.
+    stop_signal: SIGTERM
+    health:
+      # The loopback-only monitor frontend in the config.
+      cmd: wget -q -O /dev/null http://127.0.0.1:8405/healthz
+      interval: 30s
+      start_period: 60s
+    # 443 to public addresses for the image, and one tailnet port, svc1's
+    # Syncthing sync port, which the tailnet policy lets the edge reach.
+    egress: platform-tailnet
+    egress_tailnet_port: 8088
+    checks:
+      # The path from inside the forwarder: its own listener, HAProxy,
+      # quad-100, the egress class, the tailnet, svc1's published port and
+      # Syncthing's TLS. The image's own socat prints
+      # Syncthing's certificate subject. Host only: the CI lab has no svc1.
+      - name: passthrough
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [sh, -c, 'socat -d -d -d -u OPENSSL:127.0.0.1:22000,verify=0 /dev/null 2>&1']
+        stdout_regex: 'SSL peer cert subject: "O = Syncthing.*CN = syncthing'
+      # Its lookups reach the resolver under its own name (as Caddy's).
+      - name: dns-name
+        type: exec
+        where: host
+        timeout: 10
+        cmd: [wget, -U, curl/8, -T, "8", -qO-, "{{ deerlab_dns_test_url }}"]
+        stdout_regex: '"deviceName":\s*"syncthing-edge-haproxy"'

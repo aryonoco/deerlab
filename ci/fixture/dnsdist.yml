@@ -162,6 +162,18 @@ query_rules:
       type: Spoof
       ips:
         - 192.0.2.11
+  - name: syncthing-edge-haproxy
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/syncthing-edge-haproxy
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.4
   - name: resolver-host
     selector:
       type: QName
