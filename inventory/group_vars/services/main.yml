@@ -1538,6 +1538,17 @@ podman_services:
         timeout: 10
         cmd: [curl, --fail, --silent, --location, --max-time, "8", "{{ deerlab_dns_test_url }}"]
         stdout_regex: '"deviceName":\s*"syncthing"'
+      # svc1 still runs its own identity. A rebuild that lost key.pem would
+      # otherwise run a new device ID unseen, with every device's pairing
+      # broken. It is kept in SOPS with the other identifiers, but once the
+      # edge forwards port 22000 any client that completes TLS can compute it
+      # from svc1's certificate: SOPS gives it one definition, not secrecy. A
+      # check's regex never reaches a log or a page.
+      - name: device-id
+        type: exec
+        where: host
+        cmd: [syncthing, device-id]
+        stdout_regex: '^{{ syncthing_device_id }}$'
       # Runs the job itself, so the verdict is decided at each start rather
       # than at the next 07:00 UTC; the job only reads, so an extra run harms
       # nothing. 15 s for a run that took under a second in the CI lab, within
