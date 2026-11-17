@@ -110,8 +110,9 @@ table inet deerlab {
     tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate4 { ip saddr limit rate over 10/minute burst 10 packets } drop
     tcp dport {{ base_firewall_ssh_port }} ct state new update @ssh_rate6 { ip6 saddr limit rate over 10/minute burst 10 packets } drop
     tcp dport {{ base_firewall_ssh_port }} ct state new accept
-{# Caddy's own ports only as the redirect's target: the internet sees 80 and #}
-{# 443. Loopback and the tailnet reach them directly through the accepts above. #}
+{# The redirects' targets only as their targets: the internet sees only the #}
+{# redirects' public ports. Loopback and the tailnet reach the targets #}
+{# directly through the accepts above. #}
     tcp dport { {{ base_firewall_edge_tcp_redirects.values() | join(', ') }} } ct status dnat accept
     udp dport { {{ base_firewall_edge_udp_redirects.values() | join(', ') }} } ct status dnat accept
     udp dport {{ base_firewall_tailscale_port }} accept

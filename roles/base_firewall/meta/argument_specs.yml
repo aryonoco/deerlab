@@ -59,7 +59,7 @@ argument_specs:
           flush deletes the rules tailscaled installed.
       base_firewall_edge_tcp_redirects:
         type: dict
-        description: Public port to Caddy's published port, TCP.
+        description: Public port to the port it is redirected to, TCP. On the edge, Caddy's 80 and 443, and the Syncthing forwarder's 22000.
       base_firewall_edge_udp_redirects:
         type: dict
         description: Public port to Caddy's published port, UDP.
