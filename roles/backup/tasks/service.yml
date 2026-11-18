@@ -69,6 +69,28 @@
   loop_control:
     label: "{{ item.path }}"
 
+# require names files that must exist and be non-empty before a backup runs.
+# Each path is written into the unit unquoted, after its volume's _data root,
+# so it is held to plain names: nothing absolute, no .. segment to climb out
+# of the volume, nothing systemd expands (% and $) and no space to split the
+# argument. The volume must be one the backup archives, or the file would
+# guard data the snapshot never holds. One item per entry, named by path.
+- name: Refuse unsafe presence files for {{ backup_name }}
+  ansible.builtin.assert:
+    that:
+      - item.volume in backup_spec.volumes | default([])
+      - item.path is string
+      - item.path is regex('[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*', match_type='fullmatch')
+      - "'..' not in item.path.split('/')"
+    fail_msg: >-
+      presence files of {{ backup_name }}: {{ item.path }} must sit in one of
+      backup.volumes and be a relative path of letters, digits, '.', '_' and
+      '-' with no '..' segment
+    quiet: true
+  loop: "{{ backup_spec.require | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Write the restic environment of {{ backup_name }}
   ansible.builtin.copy:
     content: |

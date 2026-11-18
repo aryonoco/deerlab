@@ -11,6 +11,11 @@ deerlab_pushover_url: https://pushover.invalid/1/messages.json
 # role's default.
 backup_presence_query_enabled: false
 
+# The lab's volumes are created empty, so a require file cannot exist there
+# and the gate backup before an image switch would fail. See the backup
+# role's default.
+backup_require_enabled: false
+
 # The lab runs each pull by hand; a timer would race it.
 base_pull_enabled: false
 

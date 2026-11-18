@@ -44,6 +44,19 @@ ExecStartPre=/usr/bin/podman unshare /bin/sh -c 'set -e; cd {{ root }}; n=0; for
 ExecStartPre=/usr/bin/podman unshare /usr/bin/test -s {{ root }}/{{ db.path }}
 {% endif %}
 {% endfor %}
+{% endif %}
+{% if backup_require_enabled | bool and backup_spec.require | default([]) | length > 0 %}
+# Each file below must exist and be non-empty before anything is staged or
+# archived. A volume that was emptied or re-created otherwise backs up green:
+# restic archives the empty directory as the newest snapshot and the dead-man
+# pings. A file written by seed: cannot stand in, because a seed is rewritten
+# whenever it is absent, so the operator places these files once and keeps
+# them.
+{% for file in backup_spec.require %}
+ExecStartPre=/usr/bin/podman unshare /usr/bin/test -s {{ backup_volume_root }}/{{ backup_name }}-{{ file.volume }}/_data/{{ file.path }}
+{% endfor %}
+{% endif %}
+{% if backup_spec.sqlite | default([]) | length > 0 %}
 # Staging is cleared once every source has passed validation. With a glob, a
 # deleted user's database would otherwise sit in staging forever and be
 # archived into every later snapshot, where a careless restore could pick it
