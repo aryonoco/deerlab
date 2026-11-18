@@ -26,7 +26,11 @@ argument_specs:
           SELECT [A-Za-z0-9_ ().,*<>=!]+ in full, which must print exactly 1
           against the staged copy or the unit fails before restic runs. The
           two are never combined, and allow_empty needs a glob. An optional
-          volumes list names the volumes to archive.
+          volumes list names the volumes to archive. An optional require
+          list of {volume, path} names files that must exist and be
+          non-empty before anything is staged, or the unit fails: volume is
+          one of volumes, and path, relative to its _data root, matches
+          [A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)* with no .. segment.
       backup_s3_bucket:
         type: str
         required: true
@@ -57,3 +61,9 @@ argument_specs:
         description: >
           Whether the backup unit runs each database's presence_query. Only
           the CI lab turns it off, because its fresh data cannot satisfy one.
+      backup_require_enabled:
+        type: bool
+        default: true
+        description: >
+          Whether the backup unit tests each require file. Only the CI lab
+          turns it off, because its volumes are created empty.

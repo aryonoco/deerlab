@@ -40,9 +40,10 @@ argument_specs:
           (str), network (str), health ({cmd, interval, start_period}),
           egress (any|web|platform|mail|public|web-mail|platform-tailnet),
           egress_tailnet_port (int, 1 to 65535, the one tailnet port a
-          platform-tailnet service may reach, and required by it), backup ({sqlite, volumes}, sqlite
+          platform-tailnet service may reach, and required by it), backup ({sqlite, volumes, require}, sqlite
           being a list of {volume, path} mappings whose path, relative to
-          the volume's _data, may be a glob),
+          the volume's _data, may be a glob, and require a list of {volume,
+          path} files that must exist and be non-empty before a backup runs),
           user (str or int, container-side UID), group (str or int),
           entrypoint (str, renders Entrypoint=), exec (str, overrides the
           image command), stop_signal (str matching SIG[A-Z0-9]+, renders
