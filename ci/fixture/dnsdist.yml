@@ -162,6 +162,18 @@ query_rules:
       type: Spoof
       ips:
         - 192.0.2.11
+  - name: dufs
+    selector:
+      type: And
+      selectors:
+        - type: HTTPPath
+          path: /lab/dufs
+        - type: QName
+          qname: probe.example.test.
+    action:
+      type: Spoof
+      ips:
+        - 192.0.2.12
   - name: syncthing-edge-haproxy
     selector:
       type: And

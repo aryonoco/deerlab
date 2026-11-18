@@ -299,6 +299,56 @@ syncthing_seed_config: |
 # checkout's root for site.yml and the CI lab's playbooks alike.
 syncthing_alert_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../inventory/files/syncthing-alert.sh', rstrip=false) }}"
 
+# dufs's accounts, delivered as its DUFS_AUTH secret (the dufs record). Two
+# rules and no anonymous one: the operator's account reads and writes
+# everywhere, reader reads everywhere, and dufs itself answers 401 to any
+# request without valid credentials, apart from its health URL, OPTIONS and
+# its own UI files, which it serves before the account check and which hold
+# nothing from the volume. So a mistake in the edge's Caddy still leaves an
+# anonymous client nothing. The accounts never go in a dufs config file: one
+# with rules but no auth key leaves dufs writable by anyone.
+# - The operator's password is hashed here, sha-512 crypt at 5,000 rounds, so
+#   dufs's environment holds no plaintext copy of it. Ansible derives the
+#   salt from the password itself: the first 16 characters of its SHA-256 hex
+#   digest, of which the hosts' crypt library encodes the first 12 as the
+#   hash's salt. So the hash, and DUFS_AUTH with it, is the same on every run
+#   and a pull restarts nothing. That salt is a fast fingerprint of the
+#   password, carried in the hash; it is harmless only because the password
+#   is at least 32 random letters and digits, which no search reaches.
+# - reader is the account the edge's Caddy sends for every visitor to the
+#   public name. Plaintext, so dufs computes no hash for each visitor's
+#   request; read-only, which the reader-write-refused check proves at every
+#   start.
+# - A placeholder, a username that is not plain or is reader, or a password
+#   that is not at least 32 letters and digits fails the pull before any
+#   service's secret, unit or volume is written, naming the rule and never
+#   the value; the base play's firewall lines for dufs come first. The rules
+#   also keep out '@/' in a password and ':' in the username, which would
+#   break dufs's rule syntax. Only the length and the alphabet are checked:
+#   generate both passwords at random.
+dufs_auth: >-
+  {{ (undef(hint='dufs_upload_user is still the CHANGE-ME placeholder')
+      if (dufs_upload_user | string) == 'CHANGE-ME'
+      else undef(hint='dufs_upload_user may not be reader, the read-only account')
+      if (dufs_upload_user | string) == 'reader'
+      else dufs_upload_user
+      if (dufs_upload_user | string) is regex('[A-Za-z0-9._-]{1,64}', match_type='fullmatch')
+      else undef(hint='dufs_upload_user is not 1 to 64 letters, digits, dots, hyphens or underscores'))
+     ~ ':' ~
+     (undef(hint='dufs_upload_password is still the CHANGE-ME placeholder')
+      if (dufs_upload_password | string) == 'CHANGE-ME'
+      else (dufs_upload_password | string)
+           | password_hash('sha512', salt=((dufs_upload_password | string) | hash('sha256'))[:16], rounds=5000)
+      if (dufs_upload_password | string) is regex('[A-Za-z0-9]{32,}', match_type='fullmatch')
+      else undef(hint='dufs_upload_password is not at least 32 letters and digits'))
+     ~ '@/:rw|reader:' ~
+     (undef(hint='dufs_reader_password is still the CHANGE-ME placeholder')
+      if (dufs_reader_password | string) == 'CHANGE-ME'
+      else dufs_reader_password
+      if (dufs_reader_password | string) is regex('[A-Za-z0-9]{32,}', match_type='fullmatch')
+      else undef(hint='dufs_reader_password is not at least 32 letters and digits'))
+     ~ '@/' }}
+
 # The DNS forwarder's uid on this host (podman_hosts/main.yml).
 deerlab_dnsdist_uid: 2008
 
@@ -1591,3 +1641,106 @@ podman_services:
         # enter it.
         mounts:
           - { src: /var/lib/syncthing/config/alert.sh, dst: /etc/deerlab/syncthing-alert.sh, ro: true }
+
+  dufs:
+    uid: 2011
+    # The official image: one static binary on scratch, with no shell, no
+    # /etc/passwd and no USER. Docker Hub records push times, so Renovate's
+    # three-day wait applies.
+    image: docker.io/sigoden/dufs:v0.47.0@sha256:e5152c04e41d5a9d785546278b632bf035c8a08c52d7e8d35f4b59681f5ff35a
+    # The image has no USER, so without both the container runs as uid 0 with
+    # gid 0. 65532 owns the volume through :U, below.
+    user: 65532
+    group: 65532
+    publish:
+      # Inside 8080-8099, the range the tailnet policy opens to the edge, for
+      # Caddy's two sites.
+      - "8089:5000"
+    volumes:
+      # The files, served at the root. chown renders :U: a fresh volume is
+      # root's, and uploads then fail with 500 "Permission denied". No tmpfs:
+      # dufs writes nothing outside this volume.
+      - { name: data, mount: /data, chown: true }
+    # Serves /data on the wildcard address and port 5000, dufs's defaults,
+    # and lets the operator upload, delete, search and fetch a folder as an
+    # uncompressed zip. Off, and staying off: --allow-hash, --allow-symlink,
+    # --enable-cors, -A, --hidden and the render modes.
+    exec: /data --allow-upload --allow-delete --allow-search --allow-archive --compress none
+    env:
+      # dufs's default access log plus the client address Caddy forwards,
+      # since every request reaches dufs from the edge. Never
+      # $http_authorization or $remote_user, which would log credentials. In
+      # the environment rather than exec, so the $ signs and the quotes stay
+      # off the Exec= line.
+      DUFS_LOG_FORMAT: '$time_iso8601 $log_level - $remote_addr "$request" $status $http_x_forwarded_for'
+    secrets:
+      # The two accounts, and no anonymous rule (dufs_auth, above).
+      - { name: auth, value: "{{ dufs_auth }}", type: env, target: DUFS_AUTH }
+    # Nothing was added back: it runs confined with no capability.
+    capabilities: []
+    read_only: true
+    no_new_privileges: true
+    # dufs stops on SIGINT and, as PID 1, ignores SIGTERM: Podman's default
+    # would end in a kill at the timeout, which pages. On SIGINT it exits 0 in
+    # about 0.2 s, even mid-upload.
+    stop_signal: SIGINT
+    health:
+      # A stand-in. The image has no shell and no client, so this proves only
+      # that the binary runs, and Podman does not restart a dufs that hangs.
+      # The checks below prove it serves, at every start. A JSON array with
+      # no leading "CMD" (see baikal's record).
+      cmd: '["/bin/dufs","--version"]'
+      interval: 30s
+      start_period: 30s
+    # dufs opens no outbound connection; platform still lets the service user
+    # pull its image and run restic.
+    egress: platform
+    # What a pull proves once dufs has started. None uses the operator's
+    # account; reader's is the one Caddy sends for every visitor. No dns-name
+    # check: the image has no client to make one (as Vikunja's).
+    checks:
+      - name: health
+        path: /__dufs__/health
+        body_regex: '"status":"OK"'
+      # No anonymous rule: without credentials dufs refuses.
+      - name: anonymous-refused
+        path: /
+        status: [401]
+      # The reader account reads the volume; the page names the version.
+      - name: reader-listing
+        path: /
+        headers: { Authorization: "Basic {{ ('reader:' ~ dufs_reader_password) | b64encode }}" }
+        body_version: true
+      # reader is read-only: the guard for the credential Caddy sends for
+      # every visitor.
+      - name: reader-write-refused
+        method: PUT
+        path: /deerlab-check-put
+        headers: { Authorization: "Basic {{ ('reader:' ~ dufs_reader_password) | b64encode }}" }
+        status: [403]
+      # Anonymous clients cannot write: the guard against dufs's fail-open.
+      - name: put-refused
+        method: PUT
+        path: /deerlab-check-put
+        status: [401]
+      # A user that does not exist gets 401: unknown credentials are refused,
+      # which the edge's login relies on. No hash is computed and no real
+      # credential is used.
+      - name: login-configured
+        path: /
+        headers: { Authorization: "Basic {{ 'deerlab-nonexistent:x' | b64encode }}" }
+        status: [401]
+      # Anonymous clients cannot delete.
+      - name: delete-refused
+        method: DELETE
+        path: /deerlab-nonexistent
+        status: [401]
+    # The files as they are on the volume. A snapshot taken during an upload
+    # holds the partial file; the next night's corrects it.
+    backup:
+      volumes: [data]
+      # The operator places .deerlab-presence once and keeps it for good
+      # (docs/runbook.md, dufs). An emptied or re-created volume then fails
+      # the backup instead of backing up green.
+      require:
+        - { volume: data, path: .deerlab-presence }

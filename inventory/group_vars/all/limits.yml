@@ -126,6 +126,14 @@ deerlab_service_limits:
       # far inside a day.
       syncthing-alert: { memory: 64M, cpu: "50%", tasks: 32, pids: 32, runtime_max: 120 }
 
+  dufs:
+    slice: { memory: 512M, cpu: "100%", tasks: 256 }
+    containers:
+      # Measured in a lab: dufs peaked at 6 MiB, a 1 GiB upload included. The
+      # slice leaves room for the nightly restic run beside it, whose first
+      # backup of 5 GiB peaked at 202 MiB in a lab. svc1 is not measured.
+      dufs: { memory: 128M, cpu: "100%", tasks: 128, pids: 64 }
+
   syncthing-edge-haproxy:
     # The operator's figures. Not measured on edge1: the deploy records its
     # own.
