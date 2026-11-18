@@ -64,6 +64,12 @@ caddy_caddyfile: |
       }
   }
 
+  # The files directory's reader account, as two snippets the files and
+  # upload sites use, from a file of Caddy's record written with no log and
+  # no diff (caddy_dufs_reader, below), so the credential is in neither this
+  # file nor its diff. A snippet is defined before the sites import it.
+  import /etc/caddy/dufs-reader.caddy
+
   # Internal health listener, never published.
   :8081 {
       respond /healthz 200
@@ -304,16 +310,16 @@ caddy_caddyfile: |
   # The speed test's backend is on the edge itself, at pasta's address for
   # the host: the test measures the link to this machine.
   speedtest.{{ deerlab_domain }} {
-      # HTTP/1.1 for this site alone. Over HTTP/2 Caddy gives each connection
-      # one fixed 1 MiB upload window, which held uploads to a fraction of
-      # the link, and HTTP/3 cost several times the CPU and was the slowest
-      # at every round-trip time. ALPN covers TLS; a browser learns of QUIC
-      # from the Alt-Svc header Caddy puts on every response before any
-      # handler runs. It is set to clear here, at once: a deletion is
-      # deferred to the responses the handlers write, and misses the 401
-      # Caddy itself sends before the login, a browser's first answer. clear
-      # also drops an h3 a browser learned earlier. A DNS HTTPS record
-      # advertising h3 would undo it: the name's record is a plain A/AAAA.
+      # HTTP/1.1, as for the files directory's upload site. Over HTTP/2 Caddy
+      # gives each connection one fixed 1 MiB upload window, which held uploads
+      # to a fraction of the link, and HTTP/3 cost several times the CPU and was
+      # the slowest at every round-trip time. ALPN covers TLS; a browser learns
+      # of QUIC from the Alt-Svc header Caddy puts on every response before any
+      # handler runs. It is set to clear here, at once: a deletion is deferred
+      # to the responses the handlers write, and misses the 401 Caddy itself
+      # sends before the login, a browser's first answer. clear also drops an h3
+      # a browser learned earlier. A DNS HTTPS record advertising h3 would undo
+      # it: the name's record is a plain A/AAAA.
       tls {
           alpn http/1.1
       }
@@ -355,6 +361,179 @@ caddy_caddyfile: |
       }
   }
 
+  # The files directory, for visitors: a file by its exact URL and nothing
+  # else, served by dufs on svc1. dufs lists a folder at its URL with or
+  # without the slash and never redirects, so URL rules alone cannot refuse
+  # every listing; the reply check in reverse_proxy does.
+  files.{{ deerlab_domain }} {
+      log {
+          output stdout
+          format json
+      }
+      # nosniff deferred, so dufs's own pages, which send it, carry it once.
+      header {
+          X-Robots-Tag noindex
+          >X-Content-Type-Options nosniff
+      }
+      # Caddy's own answers, with dufs down too: every method but GET and HEAD
+      # (PROPFIND lists names, sizes and dates); any query string, since
+      # dufs's search, zip, JSON and render modes all ride on one, so a file
+      # URL with a query 404s as well; every path ending in a slash, the root
+      # included; and a dotfile or dot-folder anywhere in the path, matched on
+      # Caddy's decoded, cleaned path, so the %2e forms are caught.
+      @notread not method GET HEAD
+      respond @notread 404
+      @query expression {http.request.uri.query} != ""
+      respond @query 404
+      @folder path */
+      respond @folder 404
+      @dot path_regexp (^|/)\.
+      respond @dot 404
+      # Uploaded active content runs sandboxed, never with this origin.
+      # Matched on the response's type, one type per line.
+      header {
+          match {
+              header Content-Type text/html*
+              header Content-Type application/xhtml+xml*
+              header Content-Type image/svg+xml*
+              header Content-Type text/xml*
+              header Content-Type application/xml*
+              header Content-Type *+xml*
+              header Content-Type text/mathml*
+          }
+          Content-Security-Policy sandbox
+      }
+      reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8089 {
+          transport http {
+              resolvers 100.100.100.100
+          }
+          # Every visitor is served as dufs's read-only reader, whatever
+          # Authorization they send.
+          import dufs_reader_up
+          # The reply check. dufs puts Content-Disposition: inline on every
+          # file it serves and attachment on a zip; a listing, a search, JSON,
+          # PROPFIND, OPTIONS, its UI and its errors carry none. Each of those
+          # becomes Caddy's own empty 404, so a folder and a missing path look
+          # alike. A 304, which dufs answers before it sets the header, is left
+          # alone. This rests on a dufs convention, not a setting: dufs's
+          # edge-folder-hidden check, at every dufs start, fails if a
+          # release starts sending the header on a listing.
+          @listing {
+              status 2xx 4xx 5xx
+              header !Content-Disposition
+          }
+          handle_response @listing {
+              respond 404
+          }
+          @archive header Content-Disposition attachment*
+          handle_response @archive {
+              respond 404
+          }
+          # Active checks go straight to dufs, past the reader and the reply
+          # check; dufs answers its health URL without an account.
+          health_uri /__dufs__/health
+          health_interval 15s
+          health_timeout 5s
+          health_status 200
+          lb_try_duration 30s
+      }
+  }
+
+  # The operator's login to the files directory: uploads, deletes, search
+  # and WebDAV.
+  upload.{{ deerlab_domain }} {
+      # HTTP/1.1 only, as for the speed test (see its comment): HTTP/2 holds
+      # uploads to one fixed window per connection, and 0-RTT could replay a
+      # write. ALPN alone does not stop QUIC, hence the 421 below.
+      tls {
+          alpn http/1.1
+      }
+      header Alt-Svc clear
+      header {
+          X-Robots-Tag noindex
+          >X-Content-Type-Options nosniff
+      }
+      log {
+          output stdout
+          # dufs's download buttons put a 3-day share token in the query
+          # string (?token=), which opens that path to whoever holds it, and
+          # Caddy logs query strings. A regexp, as for RSSHub: the whole
+          # query goes.
+          format filter {
+              request>uri regexp [?].*$ ?REDACTED
+              request>headers>Referer regexp [?].*$ ?REDACTED
+              wrap json
+          }
+      }
+      # The per-upload cap. An upload over it whose size is announced gets 413
+      # at once; one sent without a size is cut at 1 GiB, and dufs keeps the
+      # partial file.
+      request_body {
+          max_size 1GiB
+      }
+      # The operator's uploaded active content downloads instead of running
+      # with the login. dufs's own pages still render at a folder URL with
+      # its slash and in its editor and viewer; a folder URL without the
+      # slash, as dufs builds its breadcrumb links, downloads instead.
+      @uploaded {
+          not path */
+          not query edit=*
+          not query view=*
+      }
+      header @uploaded {
+          match {
+              header Content-Type text/html*
+              header Content-Type application/xhtml+xml*
+              header Content-Type image/svg+xml*
+              header Content-Type text/xml*
+              header Content-Type application/xml*
+              header Content-Type *+xml*
+              header Content-Type text/mathml*
+          }
+          Content-Disposition attachment
+      }
+      # In this order.
+      route {
+          @h3 protocol http/3
+          respond @h3 421
+          # An authenticated DELETE or MOVE of the root would wipe or move the
+          # whole share. Caddy cleans the path first, so //, /%2e and /sub/..
+          # are caught; a folder below the root can still be deleted.
+          @root {
+              method DELETE MOVE
+              path /
+          }
+          respond @root 403
+          # The reader's exact credential, which the files site sends for
+          # visitors, never logs in here; nor does any Digest header: dufs
+          # offers only Basic, but would accept Digest for the plaintext
+          # reader.
+          import dufs_reader_refuse
+          @digest header Authorization "Digest *"
+          header @reader WWW-Authenticate "Basic realm=\"DUFS\""
+          respond @reader 401
+          header @digest WWW-Authenticate "Basic realm=\"DUFS\""
+          respond @digest 401
+          # The gate: a request without credentials never reaches dufs; one
+          # with credentials passes to dufs, which checks them, except that
+          # for a GET it takes a valid share token (?token=) first and then
+          # ignores the credentials. The realm is dufs's own.
+          @anonymous not header Authorization *
+          header @anonymous WWW-Authenticate "Basic realm=\"DUFS\""
+          respond @anonymous 401
+          reverse_proxy tcp4/{{ hostvars['svc1']['deerlab_tailnet_fqdn'] }}:8089 {
+              transport http {
+                  resolvers 100.100.100.100
+              }
+              health_uri /__dufs__/health
+              health_interval 15s
+              health_timeout 5s
+              health_status 200
+              lb_try_duration 30s
+          }
+      }
+  }
+
 # The speed test's login, imported by its site block from a file of Caddy's
 # record that is written with no log and no diff. bcrypt at cost 10, not
 # Caddy's default 14: a wrong password always costs a full hash, and at 14
@@ -375,6 +554,32 @@ caddy_librespeed_auth: |
          librespeed_auth_hash
          if (librespeed_auth_hash | string) is regex('[$]2[aby][$]10[$][./A-Za-z0-9]{53}', match_type='fullmatch')
          else undef(hint='librespeed_auth_hash is not a bcrypt hash at cost 10') }}
+  }
+
+# The files directory's reader account, for the two dufs sites above. The
+# files site sends it for every visitor, since dufs has no anonymous rule,
+# and the upload site refuses it, so it never logs in there. It is dufs's
+# dufs_reader_password, read from svc1's secrets, in a file of Caddy's
+# record written with no log and no diff. It is held to svc1's rule, so
+# the edge never sends a placeholder or a weak password on visitors'
+# behalf: a placeholder or a password that is not at least 32 letters and
+# digits fails the pull before any service's secret, unit or volume is
+# written, naming the rule. Base64 keeps any value inside the Caddyfile's
+# syntax.
+caddy_dufs_reader_basic: >-
+  {{ ('reader:' ~ (undef(hint='dufs_reader_password is still the CHANGE-ME placeholder')
+      if (hostvars['svc1']['dufs_reader_password'] | string) == 'CHANGE-ME'
+      else hostvars['svc1']['dufs_reader_password']
+      if (hostvars['svc1']['dufs_reader_password'] | string) is regex('[A-Za-z0-9]{32,}', match_type='fullmatch')
+      else undef(hint='dufs_reader_password is not at least 32 letters and digits')))
+     | b64encode }}
+caddy_dufs_reader: |
+  (dufs_reader_up) {
+      header_up Authorization "Basic {{ caddy_dufs_reader_basic }}"
+  }
+
+  (dufs_reader_refuse) {
+      @reader header Authorization "Basic {{ caddy_dufs_reader_basic }}"
   }
 
 # HAProxy's configuration for syncthing-edge-haproxy, the forwarder that
@@ -469,6 +674,7 @@ podman_services:
     config_files:
       - { path: config/Caddyfile, content: "{{ caddy_caddyfile }}", mode: "0640", banner: "#" }
       - { path: config/librespeed-auth.caddy, content: "{{ caddy_librespeed_auth }}", mode: "0640", banner: "#", sensitive: true }
+      - { path: config/dufs-reader.caddy, content: "{{ caddy_dufs_reader }}", mode: "0640", banner: "#", sensitive: true }
     # The official binary carries a file capability and will not exec with
     # everything dropped. NET_BIND_SERVICE is confined to Caddy's namespace.
     capabilities:
@@ -558,6 +764,45 @@ podman_services:
         host: "speedtest.{{ deerlab_domain }}"
         path: /
         status: [401]
+      # The files directory. The root, a dotfile, the upload site's gate and
+      # its root guard are Caddy's own answers, so they run in the lab too. A
+      # folder without its slash and the kept file need dufs and run when
+      # Caddy starts: the first fails if dufs sends Content-Disposition on a
+      # listing, the second proves the whole path to svc1. At a dufs start,
+      # dufs's own edge-folder-hidden asks for the folder. None sends a
+      # credential.
+      - name: files-root-hidden
+        via: edge
+        host: "files.{{ deerlab_domain }}"
+        path: /
+        status: [404]
+      - name: files-dotfile-hidden
+        via: edge
+        host: "files.{{ deerlab_domain }}"
+        path: /.deerlab-check
+        status: [404]
+      - name: files-folder-hidden
+        where: host
+        via: edge
+        host: "files.{{ deerlab_domain }}"
+        path: /deerlab-check
+        status: [404]
+      - name: files-file-served
+        where: host
+        via: edge
+        host: "files.{{ deerlab_domain }}"
+        path: /deerlab-check/ok.txt
+      - name: upload-login
+        via: edge
+        host: "upload.{{ deerlab_domain }}"
+        path: /
+        status: [401]
+      - name: upload-root-guard
+        via: edge
+        host: "upload.{{ deerlab_domain }}"
+        method: DELETE
+        path: /
+        status: [403]
       - name: http-redirect
         path: /
         headers: { Host: "wallabag.{{ deerlab_domain }}" }
