@@ -1735,6 +1735,19 @@ podman_services:
         method: DELETE
         path: /deerlab-nonexistent
         status: [401]
+      # Through Caddy and the tailnet, as a visitor arrives: a folder without
+      # its slash must stay hidden on the public site. That rests on dufs
+      # sending Content-Disposition on files only, so it runs here, at every
+      # dufs start, image bumps included, and not only when Caddy restarts
+      # (Caddy's files-folder-hidden). 35 s, because Caddy waits up to 30 s
+      # for an upstream that is restarting.
+      - name: edge-folder-hidden
+        where: host
+        via: edge
+        host: "files.{{ deerlab_domain }}"
+        path: /deerlab-check
+        status: [404]
+        timeout: 35
     # The files as they are on the volume. A snapshot taken during an upload
     # holds the partial file; the next night's corrects it.
     backup:
