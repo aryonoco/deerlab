@@ -14,9 +14,9 @@ sops = "3.13.3"
 age = "1.3.2"
 restic = "0.19.1"
 # bcrypt is pinned below 5 for password_hash('bcrypt'). macOS has no bcrypt
-# crypt(), so Ansible falls back to passlib here, and passlib 1.7.4 fails
-# against bcrypt 5 ("password cannot be longer than 72 bytes") on every
-# password. The hosts hash through Debian's libxcrypt and need none of this;
+# crypt() of its own, so unless another crypt library is installed Ansible
+# falls back to passlib here, and passlib 1.7.4 fails against bcrypt 5
+# ("password cannot be longer than 72 bytes") on every password. The hosts hash through Debian's libxcrypt and need none of this;
 # this machine hashes when a run from it writes a seed, as `just bootstrap
 # svc1` does for Syncthing's login.
 "pipx:ansible" = { version = "14.6.0", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib --with bcrypt==4.3.0" }
