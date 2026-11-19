@@ -605,7 +605,7 @@ podman_services:
 
   baikal:
     uid: 2003
-    image: ghcr.io/divbast/baikal:0.13.0@sha256:9ca530a62514a0a191b790852248e0d3b00995dff5b58df01be9ce2a3aa7dd03
+    image: ghcr.io/divbast/baikal:0.13.0@sha256:eb9bc147ea5f43fc936737b05ad3e850295b83a3732ea6abbf21c7c817e2b535
     # Pinned rather than inherited from the image's own USER, so an image that
     # changed it fails to start instead of silently re-chowning the volume.
     user: 65532
