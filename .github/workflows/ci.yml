@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup tools via mise
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           install: true
           cache: true
@@ -89,7 +89,7 @@ jobs:
 
       # sops encrypts the stand-ins on the runner, to the lab's public key.
       - name: Setup sops via mise
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           install: true
           install_args: "sops"
