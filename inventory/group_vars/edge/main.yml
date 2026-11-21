@@ -656,7 +656,7 @@ podman_services:
   dnsdist: "{{ deerlab_dnsdist_service }}"
   caddy:
     uid: 2000
-    image: docker.io/library/caddy:2.11.9@sha256:0c2243efcf437ab7f7a978f1027fcf0d4f9be8a75df27b1b3fbc5dbe0ffa8cf0
+    image: docker.io/library/caddy:2.11.9@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b
     # Host ports 80 and 443 are redirected to these by the firewall.
     publish:
       - "8080:80"
