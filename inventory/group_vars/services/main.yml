@@ -701,7 +701,7 @@ podman_services:
 
   freshrss:
     uid: 2004
-    image: docker.io/freshrss/freshrss:1.30.4-alpine@sha256:840765ea01fbaa1ea5b59f298878d224f62a4e83f8bba74d1a192ccd1d13669a
+    image: docker.io/freshrss/freshrss:1.31.0-alpine@sha256:2cf8cb46b968cd39f0690938c66c3bf6604404b5125904a35d439c68c006991e
     # The image sets no USER, so Podman would run it as the service user, which
     # maps to namespace uid 0. Pinned to the image's own apache:www-data
     # instead, so cli/access-permissions.sh chowns the volume to the uid that
