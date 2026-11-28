@@ -19,6 +19,6 @@ restic = "0.20.0"
 # ("password cannot be longer than 72 bytes") on every password. The hosts hash through Debian's libxcrypt and need none of this;
 # this machine hashes when a run from it writes a seed, as `just bootstrap
 # svc1` does for Syncthing's login.
-"pipx:ansible" = { version = "14.6.0", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib --with bcrypt==4.3.0" }
+"pipx:ansible" = { version = "15.0.0", uvx_args = "--with-executables-from ansible-core --with paramiko --with passlib --with bcrypt==4.3.0" }
 "pipx:ansible-lint" = { version = "26.11.0", uvx_args = "--with passlib" }
 "pipx:yamllint" = "1.38.0"
